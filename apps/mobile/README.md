@@ -20,15 +20,36 @@ npm install
 
 ```bash
 cd apps/mobile
+npm install
+```
+
+### 电脑浏览器调试（推荐）
+
+```bash
+npm run web
+```
+
+浏览器打开 Expo 给出的本地地址（一般是 `http://localhost:8081`）。  
+启动后直接进书库，内置默认连 `http://111.229.32.85`；需要改地址/Token 时在书库右上角「设置」。
+
+### 手机 Expo Go
+
+```bash
 npx expo start
 ```
 
-用 Expo Go 扫码，或 `npx expo run:android` 打调试包。
+用 Expo Go 扫码联调。
 
-登录页填写：
+### APK（尚未打包）
 
-- **API Base URL**：例如 `https://your.domain`（经 Nginx），或局域网 `http://192.168.x.x:8787`
-- **API Token**：与服务端 `WORLDSEED_API_TOKEN` 一致
+仓库里**没有**现成 `.apk`。要安装包可用：
+
+```bash
+# 需 Expo 账号；云端出 APK
+npx eas-cli build -p android --profile preview
+```
+
+或本机 Android SDK：`npx expo prebuild` 后再 `npx expo run:android`。
 
 ## 第一版能力
 

@@ -83,6 +83,7 @@ export type ProjectListItem = Readonly<{
   projectId: string
   displayName: string
   workspaceRootRef: string
+  lastOpenedAtMs?: number
 }>
 
 export type ChapterListItem = Readonly<{

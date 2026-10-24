@@ -14,8 +14,16 @@
     "ios": {
       "bundleIdentifier": "com.worldseed.mobile"
     },
+    "web": {
+      "bundler": "metro"
+    },
     "extra": {
-      "apiBaseUrl": "https://example.invalid"
-    }
+      "apiBaseUrl": "http://111.229.32.85",
+      "apiTokenConfiguredInApp": true
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font"
+    ]
   }
 }

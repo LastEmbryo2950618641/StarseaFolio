@@ -1,6 +1,7 @@
 packages:
   - apps/backend
   - apps/desktop
+  - apps/web
   # apps/mobile is a standalone Expo app (own install); see apps/mobile/README.md
   - packages/*
 # electron-builder → @electron/rebuild@3.x pulls git-hosted @electron/node-gyp.

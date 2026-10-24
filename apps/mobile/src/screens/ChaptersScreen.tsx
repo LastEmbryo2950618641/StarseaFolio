@@ -10,12 +10,13 @@ import {
 } from "react-native"
 
 import { invokeRpc, type MobileSession, type ProjectListItem } from "../api/client"
+import { theme } from "../theme"
 
 type ChapterRow = Readonly<{
-  chapterId?: string
-  chapterSequence?: number
-  title?: string
-  publishPath?: string
+  chapterId: string
+  heading: string
+  publishPath: string
+  sequence?: number
 }>
 
 type Props = Readonly<{
@@ -35,7 +36,10 @@ export function ChaptersScreen(props: Props) {
     setBusy(true)
     setError(undefined)
     try {
-      const data = await invokeRpc<{ chapters?: ChapterRow[] } | ChapterRow[]>(
+      await invokeRpc(props.session, "project.open", {
+        workspaceRootRef: props.project.workspaceRootRef,
+      })
+      const data = await invokeRpc<ChapterRow[] | { chapters?: ChapterRow[] }>(
         props.session,
         "chapter.list",
         {
@@ -57,14 +61,10 @@ export function ChaptersScreen(props: Props) {
   }, [refresh])
 
   const openChapter = async (row: ChapterRow) => {
-    if (row.chapterId === undefined || row.chapterId.length === 0) {
-      setError("该条目缺少 chapterId，无法读取")
-      return
-    }
     setBusy(true)
     setError(undefined)
     try {
-      const data = await invokeRpc<{ markdown?: string; body?: string; title?: string }>(
+      const data = await invokeRpc<{ content?: string; body?: string; heading?: string }>(
         props.session,
         "chapter.read",
         {
@@ -73,8 +73,8 @@ export function ChaptersScreen(props: Props) {
           chapterId: row.chapterId,
         },
       )
-      setReadingTitle(data.title ?? row.title ?? `第${String(row.chapterSequence ?? "?")}章`)
-      setBody(data.markdown ?? data.body ?? "（空）")
+      setReadingTitle(data.heading ?? row.heading)
+      setBody(data.body ?? data.content ?? "（空）")
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -86,11 +86,13 @@ export function ChaptersScreen(props: Props) {
     return (
       <View style={styles.root}>
         <View style={styles.header}>
-          <Pressable onPress={() => setBody(undefined)}><Text style={styles.link}>列表</Text></Pressable>
+          <Pressable onPress={() => setBody(undefined)} hitSlop={8}>
+            <Text style={styles.link}>← 列表</Text>
+          </Pressable>
           <Text style={styles.title} numberOfLines={1}>{readingTitle}</Text>
-          <View style={{ width: 40 }} />
+          <View style={{ width: 48 }} />
         </View>
-        <ScrollView contentContainerStyle={{ padding: 16 }}>
+        <ScrollView style={styles.reader} contentContainerStyle={{ padding: 18 }}>
           <Text style={styles.body}>{body}</Text>
         </ScrollView>
       </View>
@@ -100,25 +102,36 @@ export function ChaptersScreen(props: Props) {
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Pressable onPress={props.onBack}><Text style={styles.link}>讨论</Text></Pressable>
+        <Pressable onPress={props.onBack} hitSlop={8}>
+          <Text style={styles.link}>← 讨论</Text>
+        </Pressable>
         <Text style={styles.title}>章节</Text>
-        <Pressable onPress={() => void refresh()}><Text style={styles.link}>刷新</Text></Pressable>
+        <Pressable onPress={() => void refresh()} hitSlop={8}>
+          <Text style={styles.link}>刷新</Text>
+        </Pressable>
       </View>
-      {busy ? <ActivityIndicator color="#3d7ea6" style={{ marginTop: 24 }} /> : null}
+      {busy ? <ActivityIndicator color={theme.accent} style={{ marginTop: 24 }} /> : null}
       {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
       <FlatList
         data={chapters}
-        keyExtractor={(item, index) => item.chapterId ?? `ch-${String(index)}`}
+        keyExtractor={(item) => item.chapterId}
         contentContainerStyle={{ padding: 16, gap: 8 }}
-        ListEmptyComponent={!busy ? <Text style={styles.empty}>暂无章节</Text> : null}
+        ListEmptyComponent={
+          !busy ? <Text style={styles.empty}>暂无章节（先在讨论里推进再回来看）</Text> : null
+        }
         renderItem={({ item }) => (
-          <Pressable style={styles.card} onPress={() => void openChapter(item)}>
-            <Text style={styles.cardTitle}>
-              {item.title ?? `第 ${String(item.chapterSequence ?? "?")} 章`}
-            </Text>
-            {item.publishPath !== undefined ? (
+          <Pressable
+            style={({ pressed }) => [styles.card, pressed ? styles.cardPressed : null]}
+            onPress={() => void openChapter(item)}
+          >
+            <View style={styles.stageDot} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>
+                {item.sequence !== undefined ? `第 ${String(item.sequence)} 章 · ` : ""}
+                {item.heading}
+              </Text>
               <Text style={styles.cardMeta} numberOfLines={1}>{item.publishPath}</Text>
-            ) : null}
+            </View>
           </Pressable>
         )}
       />
@@ -127,26 +140,40 @@ export function ChaptersScreen(props: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0f1419" },
+  root: { flex: 1, backgroundColor: theme.bgPrimary },
   header: {
-    paddingHorizontal: 16,
+    backgroundColor: theme.bgSidebar,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  title: { color: "#f2f5f8", fontWeight: "600", fontSize: 18 },
-  link: { color: "#6eb6d9" },
-  error: { color: "#e57373", paddingHorizontal: 16 },
-  empty: { color: "#8b98a5", textAlign: "center", marginTop: 40 },
+  title: { color: theme.text, fontWeight: "700", fontSize: 16 },
+  link: { color: theme.accent, fontSize: 14 },
+  error: { color: theme.dangerText, paddingHorizontal: 16, paddingTop: 8 },
+  empty: { color: theme.textMuted, textAlign: "center", marginTop: 40, fontSize: 13 },
   card: {
-    backgroundColor: "#171e26",
-    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: theme.bgSidebar,
+    borderRadius: theme.radiusCard,
     padding: 14,
     borderWidth: 1,
-    borderColor: "#2a3540",
+    borderColor: theme.border,
   },
-  cardTitle: { color: "#f2f5f8", fontSize: 16 },
-  cardMeta: { color: "#8b98a5", marginTop: 4, fontSize: 12 },
-  body: { color: "#e8eef4", lineHeight: 24, fontSize: 16 },
+  cardPressed: { backgroundColor: theme.bgHover, borderColor: theme.accentSoftBorder },
+  stageDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.success,
+  },
+  cardTitle: { color: theme.text, fontSize: 15, fontWeight: "600" },
+  cardMeta: { color: theme.textFaint, marginTop: 4, fontSize: 11 },
+  reader: { flex: 1, backgroundColor: theme.bgApp },
+  body: { color: theme.text, lineHeight: 26, fontSize: 16 },
 })

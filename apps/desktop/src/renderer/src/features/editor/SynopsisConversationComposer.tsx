@@ -643,7 +643,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
 
   useEffect(() => {
     if (props.draftRestore === undefined) return
-    setDraft(props.draftRestore.text)
+    setDraft(typeof props.draftRestore.text === "string" ? props.draftRestore.text : "")
   }, [props.draftRestore])
 
   const activeProfile = props.modelProfiles.find((profile) => profile.id === props.activeModelProfileId)
@@ -657,14 +657,14 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
       setCatalogStatus("idle")
       return
     }
-    const currentModel = activeProfile.model.trim()
-    if (!isOfficialDeepSeekEndpoint(activeProfile.baseUrl)) {
+    const currentModel = (activeProfile.model ?? "").trim()
+    if (!isOfficialDeepSeekEndpoint(activeProfile.baseUrl ?? "")) {
       loadedCatalogSigRef.current = ""
       setCatalogModels(currentModel.length === 0 ? [] : [currentModel])
       setCatalogStatus("ready")
       return
     }
-    if ((!activeProfile.hasApiKey && activeProfile.apiKey.trim().length === 0) || !hasValidBaseUrl(activeProfile.baseUrl)) {
+    if ((!activeProfile.hasApiKey && (activeProfile.apiKey ?? "").trim().length === 0) || !hasValidBaseUrl(activeProfile.baseUrl ?? "")) {
       loadedCatalogSigRef.current = ""
       setCatalogModels(currentModel.length === 0 ? [] : [currentModel])
       setCatalogStatus("idle")
@@ -691,9 +691,9 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
     setCatalogStatus("loading")
     const timeout = window.setTimeout(() => {
       void listModelCatalog({
-        baseUrl: activeProfile.baseUrl.trim(),
+        baseUrl: (activeProfile.baseUrl ?? "").trim(),
         credentialRef: activeProfile.credentialRef,
-        apiKey: activeProfile.apiKey.trim(),
+        apiKey: (activeProfile.apiKey ?? "").trim(),
       }).then((result) => {
         if (cancelled) return
         const ids = result.models.map((model) => model.id)
@@ -714,7 +714,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
   }, [activeProfile, props.compact])
 
   const submit = async (): Promise<void> => {
-    const message = draft.trim()
+    const message = (draft ?? "").trim()
     if (message.length === 0 || props.busy) return
     setDraft("")
     await props.onSend(message)
@@ -896,7 +896,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
             type="button"
             className="creation-desk-send"
             data-testid="creation-desk-send"
-            disabled={props.running || draft.trim().length === 0}
+            disabled={props.running || (draft ?? "").trim().length === 0}
             onClick={() => { void submit(); }}
           >
             <Send size={15} aria-hidden="true" />发送
