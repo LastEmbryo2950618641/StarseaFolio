@@ -23,10 +23,10 @@ export type BatchDeductionStatus = Readonly<{
 /** Volume batch: one discuss reply writes multi-chapter synopsis+outline via volumeChapterPlans. */
 export const BATCH_VOLUME_PLAN_USER_MESSAGE = [
   "【批量推演·卷规划】卷大纲已就绪。请在同一次回复中完成本卷规划并落盘：",
-  "1) 给出目标字数、章节数（可用 volumePlanMeta）；",
-  "2) 用 volumeChapterPlans 为本卷每一章写出完整 synopsisBody + outlineBody（勿只写当前焦点章）；",
-  "3) 不要调用 chapter_workflow / publish_draft；不要输出 set_focus / focusChange；",
-  "4) 规划落盘齐后等待系统进入正文阶段。",
+  "1) 必须用 volumePlanMeta 给出本卷目标章节数 targetChapterCount 与目标总字数 targetWordCount；目标章数是停止门槛，不是建议值。",
+  "2) 用 volumeChapterPlans 覆盖目标范围内每一章的完整 synopsisBody + outlineBody，章节序号必须连续且与目标章数一致；",
+  "3) 后续若判断章数需要调整，必须再次提交新的 volumePlanMeta.targetChapterCount，并为新增章节补齐规划；系统会按新目标继续，缩减时以新目标为准；",
+  "4) 不要调用 chapter_workflow / publish_draft；不要输出 set_focus / focusChange；只有目标范围内每章完成正文图修订后，整卷才算完成。",
 ].join("")
 
 /** Volume batch body (default): discuss Agent writes multi-chapter drafts. */

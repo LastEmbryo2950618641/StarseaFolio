@@ -45,6 +45,7 @@ import {
   type WorkspaceValidationIssue,
 } from "../../core/index.js"
 import { BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT } from "../../core/workspace/batch-volume-deduction-plan-default.js"
+import { VOLUME_FIRST_WRITE_GATE_DEFAULT } from "../../core/workspace/volume-first-write-gate-default.js"
 import type {
   WorkspaceDefaultDocuments,
   WorkspacePort,
@@ -111,7 +112,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     )
     await writeFile(
       resolveInside(root, "世界推演规则/基础规则/batch-volume-deduction-plan.md"),
-      BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT,
+      `${BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT}${VOLUME_FIRST_WRITE_GATE_DEFAULT}`,
       { encoding: "utf8", flag: "wx" },
     )
     await writeFile(resolveInside(root, "世界推演规则/Agent记忆/MEMORY.md"), defaults.agentMemoryIndex, {
@@ -203,7 +204,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     )
     await writeFileIfMissing(
       resolveInside(root, "世界推演规则/基础规则/batch-volume-deduction-plan.md"),
-      BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT,
+      `${BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT}${VOLUME_FIRST_WRITE_GATE_DEFAULT}`,
     )
     await mkdir(resolveInside(root, "世界推演规则/Agent记忆"), { recursive: true })
     await writeFileIfMissing(

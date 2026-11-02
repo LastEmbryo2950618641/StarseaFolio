@@ -35,8 +35,14 @@ import {
   type PromptResourcePort,
 } from "../application/index.js"
 import type { InternalProjectStore, WorkspacePort, InternalStorePort } from "../application/workspace/index.js"
-import { PROJECT_MANIFEST_VERSION, digest, WORK_STYLE_RULE_PATH } from "../core/index.js"
+import { PROJECT_MANIFEST_VERSION, DEFAULT_VOLUME_FOLDER_NAME, digest, parseChapterSequenceFromLabel, WORK_STYLE_RULE_PATH } from "../core/index.js"
 import { canProceedPastWorkStyleGate } from "../core/workspace/work-style-gate-state.js"
+import {
+  incrementVolumePlanningWriteCount,
+  parseVolumePlanningState,
+  serializeVolumePlanningState,
+  volumePlanningGateReady,
+} from "../application/chapters/volume-planning-gate.js"
 import { NodeWorkspaceAdapter, NodeWorkspaceCatalogAdapter, NodeWorkspaceSnapshotAdapter } from "../infrastructure/filesystem/index.js"
 import { IsomorphicGitHistoryAdapter } from "../infrastructure/history-git/index.js"
 import {
@@ -105,6 +111,31 @@ export class ProjectRuntime {
     }
     if (!canProceedPastWorkStyleGate(state)) {
       throw new Error("作品风格门禁尚未通过：请先选择笔风规则，并完成风格文档审核后再生成梗概、大纲或正文")
+    }
+  }
+
+  public async assertVolumePlanningGateReady(chapterSequence: number, requestedVolumeFolderName?: string): Promise<void> {
+    const inventory = await this.workspace.validate(this.workspaceRootRef)
+    const prefix = "章节正文/"
+    const synopsis = inventory.inventory.find((entry) => {
+      if (entry.kind !== "file" || !entry.path.startsWith(prefix) || !entry.path.endsWith("[剧情梗概].md")) return false
+      const label = entry.path.slice(entry.path.lastIndexOf("/") + 1).replace(/ \[剧情梗概\]\.md$/u, "")
+      return parseChapterSequenceFromLabel(label) === chapterSequence
+    })
+    const volumeFolderName = requestedVolumeFolderName
+      ?? synopsis?.path.split("/")[1]
+      ?? DEFAULT_VOLUME_FOLDER_NAME
+    let state
+    try {
+      state = parseVolumePlanningState(await this.workspace.readMarkdown(
+        this.workspaceRootRef,
+        `大纲/${volumeFolderName}.批量计划.md`,
+      ))
+    } catch {
+      state = undefined
+    }
+    if (!volumePlanningGateReady(state)) {
+      throw new Error(`卷级首次写入门禁未通过（${volumeFolderName}）：需要先规划目标章节数与预计总字数，并首次写入卷梗概和卷大纲`)
     }
   }
 
@@ -355,6 +386,7 @@ export class ProjectRuntime {
       workspace: this.workspace,
       appendDraft: async ({ projectId, workspaceRootRef, idempotencyKey, result }) => {
         await this.assertWorkStyleGateReady()
+        await this.assertVolumePlanningGateReady(result.chapterSequence)
         const existing = await this.database.selectFrom("revision_draft_versions")
           .select(["revision_task_id", "version_id"])
           .where("project_id", "=", projectId)
@@ -693,7 +725,21 @@ export class ProjectRuntime {
   }
 
   public async saveMarkdown(relativePath: string, content: string): Promise<void> {
+    const chapterWrite = resolveChapterWriteContext(relativePath)
+    if (chapterWrite !== undefined) {
+      await this.assertVolumePlanningGateReady(chapterWrite.chapterSequence, chapterWrite.volumeFolderName)
+    }
+    const planningArtifact = resolveVolumePlanningArtifact(relativePath)
+    const previous = planningArtifact === undefined ? undefined : await this.readMarkdown(relativePath).catch(() => "")
     await this.workspace.saveUserMarkdown(this.workspaceRootRef, relativePath, content)
+    if (planningArtifact !== undefined && previous !== content) {
+      const statePath = `大纲/${planningArtifact.volumeFolderName}.批量计划.md`
+      const state = parseVolumePlanningState(await this.readMarkdown(statePath).catch(() => ""))
+      if (state !== undefined) {
+        const next = incrementVolumePlanningWriteCount(state, planningArtifact.kind)
+        await this.workspace.saveUserMarkdown(this.workspaceRootRef, statePath, serializeVolumePlanningState(next))
+      }
+    }
     await this.createChapterSynopsisService().recordPlanningArtifactManualEdit({
       projectId: this.projectId,
       relativePath,
@@ -883,6 +929,7 @@ export class ProjectRuntime {
     return new SynopsisConversationService({
       executeWorkflowTool: async (input) => {
         await this.assertWorkStyleGateReady()
+        await this.assertVolumePlanningGateReady(input.chapterSequence)
         const chapters = this.createChapterResolveService()
         if (await chapters.isGraphSyncBlocking(input.projectId)) {
           throw new Error("图修订尚未完成，请完成或取消后再调用正文推演工具")
@@ -890,6 +937,7 @@ export class ProjectRuntime {
         const sequences = input.chapterSequences !== undefined && input.chapterSequences.length > 0
           ? [...new Set(input.chapterSequences)].sort((left, right) => left - right)
           : [input.chapterSequence]
+        for (const sequence of sequences) await this.assertVolumePlanningGateReady(sequence)
         // Single-chapter keep publish-order gate; multi-chapter batch drafts may precede serial publish.
         if (sequences.length === 1) {
           const only = sequences[0]!
@@ -1300,6 +1348,40 @@ export class ProjectRuntime {
         indexedCount: sourceUnits.length,
       })
     }
+  }
+}
+
+function resolveVolumePlanningArtifact(
+  relativePath: string,
+): Readonly<{ volumeFolderName: string; kind: "synopsis" | "outline" }> | undefined {
+  const normalized = relativePath.replaceAll("\\", "/")
+  if (!normalized.startsWith("大纲/") || normalized.slice("大纲/".length).includes("/")) return undefined
+  const filename = normalized.slice("大纲/".length)
+  if (filename.endsWith(".梗概.md")) {
+    return { volumeFolderName: filename.slice(0, -".梗概.md".length), kind: "synopsis" }
+  }
+  if (filename.endsWith(".md") && !filename.endsWith(".批量计划.md")) {
+    return { volumeFolderName: filename.slice(0, -".md".length), kind: "outline" }
+  }
+  return undefined
+}
+
+function resolveChapterWriteContext(
+  relativePath: string,
+): Readonly<{ chapterSequence: number; volumeFolderName: string }> | undefined {
+  const normalized = relativePath.replaceAll("\\", "/").replace(/^\.\//u, "")
+  if (!normalized.startsWith("章节正文/")) return undefined
+  const parts = normalized.split("/")
+  const filename = parts.at(-1)
+  if (filename === undefined || !filename.endsWith(".md")) return undefined
+  const chapterLabel = filename
+    .replace(/\s*\[(?:剧情梗概|剧情细纲|已回退)\]\.md$/u, "")
+    .replace(/\.md$/u, "")
+  const chapterSequence = parseChapterSequenceFromLabel(chapterLabel)
+  if (chapterSequence === undefined) return undefined
+  return {
+    chapterSequence,
+    volumeFolderName: parts.length > 2 ? parts[1]! : DEFAULT_VOLUME_FOLDER_NAME,
   }
 }
 

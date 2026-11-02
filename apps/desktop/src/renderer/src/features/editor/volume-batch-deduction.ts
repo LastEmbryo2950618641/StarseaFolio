@@ -12,6 +12,84 @@ export function volumeOutlinePath(volumeFolderName: string): string {
   return `${VOLUME_OUTLINE_ROOT}/${volumeFolderName}.md`
 }
 
+export function volumeBatchPlanPath(volumeFolderName: string): string {
+  return `${VOLUME_OUTLINE_ROOT}/${volumeFolderName}.批量计划.md`
+}
+
+export type VolumeBatchPlan = Readonly<{
+  volumeFolderName: string
+  startSequence?: number
+  targetChapterCount: number
+  targetWordCount?: number
+  synopsisWriteCount: number
+  outlineWriteCount: number
+}>
+
+export function parseVolumeBatchPlan(markdown: string | undefined): VolumeBatchPlan | undefined {
+  if (markdown === undefined) return undefined
+  const match = markdown.match(/```json\s*([\s\S]*?)\s*```/u)
+  if (match?.[1] === undefined) return undefined
+  try {
+    const value: unknown = JSON.parse(match[1])
+    if (typeof value !== "object" || value === null) return undefined
+    const record = value as Record<string, unknown>
+    if (typeof record.volumeFolderName !== "string"
+      || !Number.isInteger(record.targetChapterCount)
+      || (record.targetChapterCount as number) < 1
+      || (record.targetChapterCount as number) > 50) return undefined
+    return {
+      volumeFolderName: record.volumeFolderName,
+      ...(Number.isInteger(record.startSequence) && (record.startSequence as number) > 0
+        ? { startSequence: record.startSequence as number }
+        : {}),
+      targetChapterCount: record.targetChapterCount as number,
+      synopsisWriteCount: Number.isInteger(record.synopsisWriteCount) && (record.synopsisWriteCount as number) >= 0
+        ? record.synopsisWriteCount as number : 0,
+      outlineWriteCount: Number.isInteger(record.outlineWriteCount) && (record.outlineWriteCount as number) >= 0
+        ? record.outlineWriteCount as number : 0,
+      ...(Number.isInteger(record.targetWordCount) && (record.targetWordCount as number) > 0
+        ? { targetWordCount: record.targetWordCount as number }
+        : {}),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+export function volumeArtifactWriteStatus(count: number | undefined): string {
+  if (count === undefined || count <= 0) return "待写入"
+  return count === 1 ? "首次写入" : `写入${String(count)}次`
+}
+
+export function buildTargetVolumeChapters(
+  chapters: readonly DiscussFocusChapterOption[],
+  volumeFolderName: string,
+  targetChapterCount: number,
+  startSequence?: number,
+): readonly DiscussFocusChapterOption[] {
+  const existing = chaptersInVolume(chapters, volumeFolderName)
+  const firstSequence = startSequence ?? existing[0]?.sequence ?? 1
+  const bySequence = new Map(existing.map((chapter) => [chapter.sequence, chapter]))
+  return Array.from({ length: targetChapterCount }, (_, index) => {
+    const sequence = firstSequence + index
+    return bySequence.get(sequence) ?? {
+      sequence,
+      label: `第${String(sequence)}章`,
+      volumeFolderName,
+    }
+  })
+}
+
+export function isVolumeBatchComplete(
+  chapters: readonly DiscussFocusChapterOption[],
+  volumeFolderName: string,
+  targetChapterCount: number,
+  startSequence?: number,
+): boolean {
+  const rows = buildTargetVolumeChapters(chapters, volumeFolderName, targetChapterCount, startSequence)
+  return rows.length === targetChapterCount && rows.every((chapter) => chapter.bodyPath !== undefined)
+}
+
 /** Heuristic: volume outline is complete enough to unlock batch deduction. */
 export function isVolumeOutlineReady(markdown: string | undefined): boolean {
   const text = markdown?.trim() ?? ""

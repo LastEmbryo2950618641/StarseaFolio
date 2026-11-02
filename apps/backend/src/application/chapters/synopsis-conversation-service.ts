@@ -78,7 +78,7 @@ import {
   canProceedPastWorkStyleGate,
 } from "../../core/workspace/work-style-gate-state.js"
 import type { GoalProposalPayload } from "@worldseed/contracts"
-import type { AIModelPort, PromptResourcePort, TurnReadEvidence, TurnRetrievalGap } from "../turns/ports/ai-model-port.js"
+import type { AIModelPort, PromptResourcePort, TurnPhaseInput, TurnReadEvidence, TurnRetrievalGap } from "../turns/ports/ai-model-port.js"
 import type { WorkspacePort, InternalStorePort } from "../workspace/index.js"
 import type { WorkspaceCatalogPort } from "../retrieval/ports/workspace-catalog.js"
 import type { WebResearchPort } from "../retrieval/ports/web-research-port.js"
@@ -177,6 +177,13 @@ import { chapterNarrativeIntentPhaseAppendix, chapterPresentationPhaseAppendix }
 import {
   formatTurnHandoffSystemMessage,
 } from "./turn-handoff.js"
+import {
+  incrementVolumePlanningWriteCount,
+  parseVolumePlanningState,
+  serializeVolumePlanningState,
+  volumePlanningGateReady,
+  type VolumePlanningState,
+} from "./volume-planning-gate.js"
 
 export class SynopsisInvalidStateError extends Error {}
 
@@ -197,6 +204,8 @@ type VolumeChapterPlan = Readonly<{
   synopsisBody: string
   outlineBody: string
 }>
+
+type VolumePlanningContext = NonNullable<NonNullable<TurnPhaseInput["synopsisDiscuss"]>["volumePlanning"]>
 
 export type SynopsisConversationServiceDependencies = SynopsisWorkflowToolCallbacks & Readonly<{
   chapters: ChapterResolveService
@@ -652,6 +661,9 @@ export class SynopsisConversationService {
       const currentWorkDisplayName = this.dependencies.readDisplayName === undefined
         ? undefined
         : await this.dependencies.readDisplayName()
+      const initialVolume = extractVolumeFolderNameFromPath(session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
+      const initialVolumePlanningState = await this.readVolumePlanningState(input.workspaceRootRef, initialVolume)
+      const volumePlanningGateWasReady = volumePlanningGateReady(initialVolumePlanningState)
       const discussResult = await this.runSynopsisDiscuss({
         projectId: input.projectId,
         workspaceRootRef: input.workspaceRootRef,
@@ -677,6 +689,10 @@ export class SynopsisConversationService {
         hookScheduleAudit,
         model: input.model,
         allowWorkflowTools: workStyleGateReadyAtStart,
+        allowChapterWorkflowTools: workStyleGateReadyAtStart && volumePlanningGateWasReady,
+        ...(workStyleGateReadyAtStart
+          ? { volumePlanning: buildVolumePlanningStatus(initialVolume, initialVolumePlanningState) }
+          : {}),
         ...(!workStyleGateReadyAtStart
           ? {
               workStyleGate: {
@@ -735,6 +751,37 @@ export class SynopsisConversationService {
         synopsisPath = volumeChange.synopsisPath
         nextVolume = volumeChange.volumeFolderName
         volumeCleanupFolder = volumeChange.cleanupEmptyFolderName
+      }
+      let volumePlanningState = nextVolume === initialVolume
+        ? initialVolumePlanningState
+        : await this.readVolumePlanningState(input.workspaceRootRef, nextVolume)
+      const volumePlanningWasReady = volumePlanningGateReady(volumePlanningState)
+      const volumePlanningNeedsFirstWrite = !volumePlanningWasReady
+      if (volumePlanningNeedsFirstWrite) {
+        const attemptedChapterWrite = assist.synopsisBody !== undefined
+          || assist.outlineBody !== undefined
+          || assist.bodyEdits !== undefined
+          || assist.chapterDraftProposal !== undefined
+          || (assist.chapterDraftProposals?.length ?? 0) > 0
+          || (assist.volumeChapterPlans?.length ?? 0) > 0
+          || assist.appendedDraft !== undefined
+          || assist.focusChange !== undefined
+          || assist.continueTurn === true
+        if (attemptedChapterWrite) {
+          writeNotices.push("卷级首次写入门禁未完成：本轮已拦截章节梗概、大纲、草稿、正文和自动推进。请先完成卷信息、卷梗概和卷大纲的首次写入。")
+          delete assist.synopsisBody
+          delete assist.outlineBody
+          delete assist.bodyEdits
+          delete assist.chapterDraftProposal
+          delete assist.chapterDraftProposals
+          delete assist.volumeChapterPlans
+          delete assist.appendedDraft
+          delete assist.focusChange
+          assist.continueTurn = false
+          assist.choices = assist.choices?.filter((choice) => ![
+            "confirm_synopsis", "confirm_arc_plan", "set_focus", "start_turn", "promote_draft_to_body",
+          ].includes(choice.action))
+        }
       }
       if (assist.synopsisBody !== undefined && !userEditedSinceAgent) {
         wroteSynopsisBody = true
@@ -921,6 +968,47 @@ export class SynopsisConversationService {
             deferredSequences,
           })
         }
+      }
+
+      if (assist.volumePlanMeta?.targetChapterCount !== undefined
+        && assist.volumePlanMeta.targetWordCount !== undefined) {
+        const planVolume = nextVolume
+          ?? extractVolumeFolderNameFromPath(synopsisPath)
+          ?? DEFAULT_VOLUME_FOLDER_NAME
+        const planPath = `大纲/${planVolume}.批量计划.md`
+        let previousStartSequence: number | undefined
+        try {
+          const previousPlan = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, planPath)
+          const previousJson = previousPlan.match(/```json\s*([\s\S]*?)\s*```/u)?.[1]
+          if (previousJson !== undefined) {
+            const parsed: unknown = JSON.parse(previousJson)
+            if (typeof parsed === "object" && parsed !== null) {
+              const startSequence = (parsed as Record<string, unknown>).startSequence
+              if (typeof startSequence === "number" && Number.isInteger(startSequence) && startSequence > 0) {
+                previousStartSequence = startSequence
+              }
+            }
+          }
+        } catch {
+          previousStartSequence = undefined
+        }
+        const plan: VolumePlanningState = {
+          volumeFolderName: planVolume,
+          startSequence: assist.volumeChapterPlans?.length
+            ? Math.min(...assist.volumeChapterPlans.map((chapter) => chapter.chapterSequence))
+            : previousStartSequence ?? session.chapterSequence,
+          targetChapterCount: assist.volumePlanMeta.targetChapterCount,
+          targetWordCount: assist.volumePlanMeta.targetWordCount,
+          synopsisWriteCount: volumePlanningState?.synopsisWriteCount ?? 0,
+          outlineWriteCount: volumePlanningState?.outlineWriteCount ?? 0,
+          ...(assist.volumePlanMeta.notes === undefined ? {} : { notes: assist.volumePlanMeta.notes }),
+        }
+        volumePlanningState = plan
+        await this.dependencies.workspace.saveUserMarkdown(
+          input.workspaceRootRef,
+          planPath,
+          serializeVolumePlanningState(plan),
+        )
       }
 
       if (assist.volumeChapterPlans !== undefined && assist.volumeChapterPlans.length > 0) {
@@ -1319,7 +1407,14 @@ export class SynopsisConversationService {
           ...(appliedFocusSequence === undefined ? {} : { appliedFocusSequence }),
         },
       )
-      const persistedChoices = !synopsisReadyForOutline && workflowChoices === undefined
+      const planningChoices = volumePlanningNeedsFirstWrite
+        ? workflowChoices?.filter((choice) => ![
+            "confirm_synopsis", "confirm_arc_plan", "set_focus", "start_turn", "promote_draft_to_body",
+          ].includes(choice.action))
+        : workflowChoices
+      const persistedChoices = volumePlanningNeedsFirstWrite
+        ? planningChoices
+        : !synopsisReadyForOutline && workflowChoices === undefined
         ? [{ label: "先完成剧情梗概", action: "continue_discuss" as const }]
         : workflowChoices
       // 批量推进开启时：Todo 未清 / continueTurn / 自决 choices 都自动续跑。
@@ -1329,8 +1424,10 @@ export class SynopsisConversationService {
       )
       const offeredChoices = persistedChoices ?? []
       const waitingOnUser = (coldStartStyleNeedsChoice || !autonomous) && offeredChoices.length > 0
-      const autoDecideChoices = autonomous && !coldStartStyleNeedsChoice && offeredChoices.length > 0
+      const autoDecideChoices = autonomous && !coldStartStyleNeedsChoice
+        && !volumePlanningNeedsFirstWrite && offeredChoices.length > 0
       const autoContinue = agentMode !== "plan" && !batchAutomation && !coldStartStyleNeedsChoice
+        && !volumePlanningNeedsFirstWrite
         && (
           gateDeferred
           || (autonomous && (
@@ -1350,9 +1447,11 @@ export class SynopsisConversationService {
           }
         : undefined
 
-      const assistantContent = writeNotices.length === 0
-        ? assist.content
-        : `${assist.content}\n\n——\n${writeNotices.join("\n")}`
+      let assistantContent = volumePlanningNeedsFirstWrite && workStyleGateReadyAtStart
+        ? buildVolumeFirstWriteGateReply(volumePlanningState, nextVolume)
+        : writeNotices.length === 0
+          ? assist.content
+          : `${assist.content}\n\n——\n${writeNotices.join("\n")}`
       if (isSynopsisSendCancelled(input.projectId)) {
         throw new SynopsisSendCancelledError()
       }
@@ -1401,12 +1500,37 @@ export class SynopsisConversationService {
           volumeOutlinePath,
           assist.arcPlanMarkdown,
         )
+        if (volumePlanningState !== undefined) {
+          volumePlanningState = incrementVolumePlanningWriteCount(volumePlanningState, "outline")
+          await this.saveVolumePlanningState(input.workspaceRootRef, volumePlanningState)
+        }
         this.emitDiscussEdit(input.projectId, {
           path: volumeOutlinePath,
           kind: "arc_plan",
           status: "completed",
           summary: "已写入卷大纲",
         })
+      }
+      if (assist.volumeSynopsisMarkdown !== undefined) {
+        const volumeSynopsisPath = `大纲/${nextVolume}.梗概.md`
+        await this.dependencies.workspace.saveUserMarkdown(
+          input.workspaceRootRef,
+          volumeSynopsisPath,
+          assist.volumeSynopsisMarkdown,
+        )
+        if (volumePlanningState !== undefined) {
+          volumePlanningState = incrementVolumePlanningWriteCount(volumePlanningState, "synopsis")
+          await this.saveVolumePlanningState(input.workspaceRootRef, volumePlanningState)
+        }
+        this.emitDiscussEdit(input.projectId, {
+          path: volumeSynopsisPath,
+          kind: "arc_plan",
+          status: "completed",
+          summary: "已写入卷梗概",
+        })
+      }
+      if (volumePlanningNeedsFirstWrite && workStyleGateReadyAtStart) {
+        assistantContent = buildVolumeFirstWriteGateReply(volumePlanningState, nextVolume)
       }
       if (assist.presentationWrites !== undefined && assist.presentationWrites.length > 0) {
         for (const write of assist.presentationWrites) {
@@ -1578,6 +1702,7 @@ export class SynopsisConversationService {
       return {
         session: updatedSession,
         messages: [...messages],
+        ...(volumePlanningNeedsFirstWrite && workStyleGateReadyAtStart ? { volumePlanningStage: true } : {}),
         ...(pendingProposals.length === 0 ? {} : { pendingProposals: [...pendingProposals] }),
         ...(pendingStagingPromotes.length === 0
           ? {}
@@ -2055,6 +2180,8 @@ export class SynopsisConversationService {
     }>
     discussTrigger?: "user" | "turn_handoff"
     allowWorkflowTools?: boolean
+    allowChapterWorkflowTools?: boolean
+    volumePlanning?: VolumePlanningContext
     agentMode?: import("@worldseed/contracts").DiscussAgentMode
     signal?: AbortSignal
     maxModelCalls?: number
@@ -2076,6 +2203,7 @@ export class SynopsisConversationService {
     chapterDraftProposal?: ChapterDraftProposal
     chapterDraftProposals?: readonly ChapterDraftProposalEntry[]
     volumeChapterPlans?: readonly VolumeChapterPlan[]
+    volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
     appendedDraft?: NonNullable<SynopsisConversationSendResult["appendedDraft"]>
     focusChange?: Readonly<{
       chapterSequence: number
@@ -2107,6 +2235,7 @@ export class SynopsisConversationService {
       mode: "create" | "update"
     }>[]
     arcPlanMarkdown?: string
+    volumeSynopsisMarkdown?: string
     availableProseStylePaths?: readonly string[]
     budgetAdvisory?: SynopsisConversationBudgetAdvisory
     }>> {
@@ -2118,7 +2247,8 @@ export class SynopsisConversationService {
     const modeAppendix = discussAgentModePromptAppendix(input.agentMode ?? "auto", {
       batchProceed: input.batchProceed === true || input.batchAutomation === true,
     })
-    const appendix = [intentAppendix, presentationAppendix, modeAppendix, workStyleGateAppendix]
+    const volumePlanningAppendix = buildVolumePlanningPromptAppendix(input.volumePlanning)
+    const appendix = [intentAppendix, presentationAppendix, modeAppendix, workStyleGateAppendix, volumePlanningAppendix]
       .filter((part): part is string => part !== undefined)
     const phasePrompt = appendix.length === 0
       ? basePhasePrompt
@@ -2291,6 +2421,7 @@ export class SynopsisConversationService {
     let missingSynopsisArtifactRetries = 0
     let missingOutlineArtifactRetries = 0
     let missingDraftProposalRetries = 0
+    let missingVolumePlanRetries = 0
     let goalScheduleRepairs = 0
     const repairHints: string[] = []
     if (input.batchAutomation === true) {
@@ -2329,19 +2460,21 @@ export class SynopsisConversationService {
       ? undefined
       : await this.dependencies.readProjectSettings()
     const chapterWorkflowEnabled = projectSettingsForTools?.creationDesk.chapterWorkflowEnabled === true
+    const allowChapterWorkflowTools = input.allowChapterWorkflowTools
+      ?? input.allowWorkflowTools === true
     const toolCallbacks: SynopsisWorkflowToolCallbacks = input.allowWorkflowTools !== true
       ? {}
       : {
-          ...(chapterWorkflowEnabled && this.dependencies.executeWorkflowTool !== undefined
+          ...(allowChapterWorkflowTools && chapterWorkflowEnabled && this.dependencies.executeWorkflowTool !== undefined
             ? { executeWorkflowTool: this.dependencies.executeWorkflowTool }
             : {}),
-          ...(this.dependencies.publishDraft === undefined
+          ...(!allowChapterWorkflowTools || this.dependencies.publishDraft === undefined
             ? {}
             : { publishDraft: this.dependencies.publishDraft }),
-          ...(this.dependencies.restageChapter === undefined
+          ...(!allowChapterWorkflowTools || this.dependencies.restageChapter === undefined
             ? {}
             : { restageChapter: this.dependencies.restageChapter }),
-          ...(this.dependencies.runBash === undefined
+          ...(!allowChapterWorkflowTools || this.dependencies.runBash === undefined
             ? {}
             : { runBash: this.dependencies.runBash }),
           ...(this.dependencies.writeTodos === undefined
@@ -2446,6 +2579,7 @@ export class SynopsisConversationService {
             userEditedOutlineSinceAgent: input.userEditedOutlineSinceAgent,
             synopsisConfirmed: input.synopsisConfirmed === true,
             ...(input.workStyleGate === undefined ? {} : { workStyleGate: input.workStyleGate }),
+            ...(input.volumePlanning === undefined ? {} : { volumePlanning: input.volumePlanning }),
             ...(input.batchAutomation === true ? { batchAutomation: true } : {}),
             ...(input.currentWorkDisplayName === undefined
               ? {}
@@ -2881,6 +3015,25 @@ export class SynopsisConversationService {
             "模型未返回完整讨论结果（缺少 artifact）。请重试发送。",
           )
         }
+        if (input.volumePlanning?.ready === false) {
+          const volumePlanMeta = artifact.data.volumePlanMeta
+          const volumeSynopsis = artifact.data.volumeSynopsis
+          const arcPlan = artifact.data.arcPlan
+          const completeVolumePlan = volumePlanMeta?.targetChapterCount !== undefined
+            && volumePlanMeta.targetWordCount !== undefined
+            && volumeSynopsis !== undefined
+            && volumeSynopsis.markdown.trim().length > 0
+            && arcPlan !== undefined
+            && arcPlan.markdown.trim().length > 0
+          if (!completeVolumePlan && missingVolumePlanRetries < 1 && remainingCalls > 0) {
+            repairHints.push(
+              "【卷规划首写必交】当前仍处于卷级规划阶段，不能只解释门禁或继续讨论第一章。本轮请根据用户构思主动提出一份可修改的第一卷方案，并一次提交 volumePlanMeta（targetChapterCount、targetWordCount）、volumeSynopsis.markdown、arcPlan.markdown 三项完整结构化内容；缺少用户细节时合理估算并标明可调整，不要反问后停住。禁止输出任何章节级梗概、细纲、草稿或正文。",
+            )
+            missingVolumePlanRetries += 1
+            attempt += 1
+            continue
+          }
+        }
         if (input.workStyleGate !== undefined) {
           const validStylePaths = availableProseStylePaths.map((path) => path.replaceAll("\\", "/"))
           const recommendations = (artifact.data.choices ?? []).filter((choice) => (
@@ -3143,6 +3296,7 @@ export class SynopsisConversationService {
           ),
           ...mapArtifactChapterDraftProposals(allowedDraftProposals),
           ...mapArtifactVolumeChapterPlans(artifact.data.volumeChapterPlans),
+          ...(artifact.data.volumePlanMeta === undefined ? {} : { volumePlanMeta: artifact.data.volumePlanMeta }),
           ...(latestToolDraft === undefined ? {} : { appendedDraft: {
             revisionTaskId: latestToolDraft.revisionTaskId,
             chapterId: latestToolDraft.chapterId,
@@ -3164,6 +3318,9 @@ export class SynopsisConversationService {
           ...(artifact.data.arcPlan === undefined
             ? {}
             : { arcPlanMarkdown: artifact.data.arcPlan.markdown }),
+          ...(artifact.data.volumeSynopsis === undefined
+            ? {}
+            : { volumeSynopsisMarkdown: artifact.data.volumeSynopsis.markdown }),
           ...(artifact.data.goalProposals === undefined
             ? {}
             : {
@@ -3283,6 +3440,7 @@ export class SynopsisConversationService {
             ...mapArtifactChapterDraftProposal(focusDraftAllowed ? artifact.data.chapterDraftProposal : undefined),
             ...mapArtifactChapterDraftProposals(allowedDraftProposals),
             ...mapArtifactVolumeChapterPlans(artifact.data.volumeChapterPlans),
+            ...(artifact.data.volumePlanMeta === undefined ? {} : { volumePlanMeta: artifact.data.volumePlanMeta }),
             ...(latestToolDraft === undefined ? {} : { appendedDraft: {
               revisionTaskId: latestToolDraft.revisionTaskId,
               chapterId: latestToolDraft.chapterId,
@@ -3304,6 +3462,9 @@ export class SynopsisConversationService {
             ...(artifact.data.arcPlan === undefined
               ? {}
               : { arcPlanMarkdown: artifact.data.arcPlan.markdown }),
+            ...(artifact.data.volumeSynopsis === undefined
+              ? {}
+              : { volumeSynopsisMarkdown: artifact.data.volumeSynopsis.markdown }),
             ...(artifact.data.goalProposals === undefined
               ? {}
               : {
@@ -4017,6 +4178,31 @@ export class SynopsisConversationService {
     }
   }
 
+  private async readVolumePlanningState(
+    workspaceRootRef: string,
+    volumeFolderName: string,
+  ): Promise<VolumePlanningState | undefined> {
+    try {
+      return parseVolumePlanningState(await this.dependencies.workspace.readMarkdown(
+        workspaceRootRef,
+        `大纲/${volumeFolderName}.批量计划.md`,
+      ))
+    } catch {
+      return undefined
+    }
+  }
+
+  private async saveVolumePlanningState(
+    workspaceRootRef: string,
+    state: VolumePlanningState,
+  ): Promise<void> {
+    await this.dependencies.workspace.saveUserMarkdown(
+      workspaceRootRef,
+      `大纲/${state.volumeFolderName}.批量计划.md`,
+      serializeVolumePlanningState(state),
+    )
+  }
+
   private async readFocusedCommittedBody(
     projectId: ProjectId,
     workspaceRootRef: string,
@@ -4612,6 +4798,61 @@ function buildWorkStyleGatePromptAppendix(input: Readonly<{
   ].join("\n")
 }
 
+function buildVolumeFirstWriteGateReply(
+  state: VolumePlanningState | undefined,
+  volumeFolderName: string,
+): string {
+  const synopsisStatus = formatVolumePlanningWriteCount(state?.synopsisWriteCount)
+  const outlineStatus = formatVolumePlanningWriteCount(state?.outlineWriteCount)
+  if (state !== undefined && volumePlanningGateReady(state)) {
+    return `「${volumeFolderName}」卷规划首次写入已完成：目标 ${String(state.targetChapterCount)} 章、预计 ${String(state.targetWordCount)} 字，卷梗概与卷大纲均已写入。本轮不会同时进入第一章；下一步从第一章剧情梗概开始。`
+  }
+  const chapterCount = state?.targetChapterCount === undefined ? "待规划" : `${String(state.targetChapterCount)} 章`
+  const wordCount = state?.targetWordCount === undefined ? "待规划" : `${String(state.targetWordCount)} 字`
+  return `当前卷规划仍未完成，系统已拦截第一章梗概、细纲、草稿、正文和自动推进。「${volumeFolderName}」状态：章节数 ${chapterCount}；预计总字数 ${wordCount}；卷梗概 ${synopsisStatus}；卷大纲 ${outlineStatus}。请先完成缺少的卷级规划并成功写入；门禁通过前不会开始第一章。`
+}
+
+function buildVolumePlanningStatus(
+  volumeFolderName: string,
+  state: VolumePlanningState | undefined,
+): VolumePlanningContext {
+  const missing: string[] = []
+  if (state?.targetChapterCount === undefined) missing.push("章节总数")
+  if (state?.targetWordCount === undefined) missing.push("预计总字数")
+  if ((state?.synopsisWriteCount ?? 0) <= 0) missing.push("卷梗概")
+  if ((state?.outlineWriteCount ?? 0) <= 0) missing.push("卷大纲")
+  return {
+    volumeFolderName,
+    ready: volumePlanningGateReady(state),
+    ...(state === undefined ? {} : {
+      targetChapterCount: state.targetChapterCount,
+      targetWordCount: state.targetWordCount,
+    }),
+    synopsisWriteCount: state?.synopsisWriteCount ?? 0,
+    outlineWriteCount: state?.outlineWriteCount ?? 0,
+    missing,
+  }
+}
+
+function buildVolumePlanningPromptAppendix(
+  planning: VolumePlanningContext | undefined,
+): string | undefined {
+  if (planning === undefined || planning.ready) return undefined
+  return [
+    "## 当前阶段：第一卷卷级规划（高优先级，覆盖其他章节推进指令）",
+    `当前卷：${planning.volumeFolderName}`,
+    `缺少首次写入：${planning.missing.length === 0 ? "无" : planning.missing.join("、")}`,
+    `已记录目标：章节数=${planning.targetChapterCount ?? "待规划"}，预计总字数=${planning.targetWordCount ?? "待规划"}；卷梗概写入次数=${planning.synopsisWriteCount}，卷大纲写入次数=${planning.outlineWriteCount}。`,
+    "你必须主动完成卷规划，而不是只重复门禁提示、要求用户重新输入构思，或继续写第一章。依据已有构思给出可调整的合理估算；本轮直接通过 volumePlanMeta.targetChapterCount/targetWordCount 写入目标、volumeSynopsis.markdown 写入卷梗概、arcPlan.markdown 写入卷大纲。卷规划中的章节数和字数是本卷总目标，卷梗概和卷大纲描述本卷，不是第一章内容。",
+    "卷规划完成前不得输出 synopsisBody、outlineBody、bodyEdits、chapterDraftProposal(s)、volumeChapterPlans、appendedDraft、focusChange、continueTurn 或章节工作流工具。规划三项可以在一次回复中全部提交；系统会在下一轮开始第一章剧情梗概。不得要求用户点击不存在的常驻规划按钮。",
+  ].join("\n")
+}
+
+function formatVolumePlanningWriteCount(count: number | undefined): string {
+  if (count === undefined || count <= 0) return "待写入"
+  return count === 1 ? "首次写入" : `写入${String(count)}次`
+}
+
 function synopsisSearchLabel(read: import("@worldseed/contracts").ReadRequest): string {
   return isTemporalReadRequest(read) ? formatTemporalSearchLabel(read) : formatSynopsisSearchLabel(read)
 }
@@ -4724,6 +4965,8 @@ function finalizeDiscussReturn(
     chapterDraftProposal?: ChapterDraftProposal
     chapterDraftProposals?: readonly ChapterDraftProposalEntry[]
     volumeChapterPlans?: readonly VolumeChapterPlan[]
+    volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
+    volumeSynopsisMarkdown?: string
     focusChange?: Readonly<{
       chapterSequence: number
       focusKind?: DiscussFocusKind
@@ -4773,6 +5016,7 @@ function finalizeDiscussReturn(
   chapterDraftProposal?: ChapterDraftProposal
   chapterDraftProposals?: readonly ChapterDraftProposalEntry[]
   volumeChapterPlans?: readonly VolumeChapterPlan[]
+  volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
   focusChange?: Readonly<{
     chapterSequence: number
     focusKind?: DiscussFocusKind
@@ -4803,6 +5047,7 @@ function finalizeDiscussReturn(
     mode: "create" | "update"
   }>[]
   arcPlanMarkdown?: string
+  volumeSynopsisMarkdown?: string
   availableProseStylePaths?: readonly string[]
   budgetAdvisory?: SynopsisConversationBudgetAdvisory
 }> {

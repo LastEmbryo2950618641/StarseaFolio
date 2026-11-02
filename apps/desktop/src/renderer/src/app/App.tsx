@@ -84,9 +84,13 @@ import {
   BATCH_VOLUME_PLAN_DOC_PATH,
   PUBLISHING_REVISION_STATUSES,
   buildVolumeBatchProgress,
+  buildTargetVolumeChapters,
   chaptersInVolume,
   findFirstIncompleteVolume,
+  isVolumeBatchComplete,
   isVolumeOutlineReady,
+  parseVolumeBatchPlan,
+  volumeBatchPlanPath,
   volumeOutlinePath,
 } from "../features/editor/volume-batch-deduction.js"
 import { readPlanningFile } from "../features/editor/read-planning-file.js"
@@ -118,6 +122,7 @@ export function App(): React.JSX.Element {
   const [browseChapterSequence, setBrowseChapterSequence] = useState<number>()
   const [browseVolumeFolderName, setBrowseVolumeFolderName] = useState<string>()
   const [batchStatus, setBatchStatus] = useState<BatchDeductionStatus>(() => createIdleBatchStatus())
+  const [volumeBatchPlan, setVolumeBatchPlan] = useState<ReturnType<typeof parseVolumeBatchPlan>>()
   const [openedDocumentPath, setOpenedDocumentPath] = useState<string>()
   const [content, setContent] = useState("")
   const [chapterBody, setChapterBody] = useState("")
@@ -545,7 +550,10 @@ export function App(): React.JSX.Element {
       ?? (agentChapterActive ? sessionVolume : undefined)
       ?? findFirstIncompleteVolume(discussFocusChapters)?.volumeFolderName
     if (volumeName === undefined) return []
-    const volumeChapters = chaptersInVolume(discussFocusChapters, volumeName)
+    const currentPlan = volumeBatchPlan?.volumeFolderName === volumeName ? volumeBatchPlan : undefined
+    const volumeChapters = currentPlan === undefined
+      ? chaptersInVolume(discussFocusChapters, volumeName)
+      : buildTargetVolumeChapters(discussFocusChapters, volumeName, currentPlan.targetChapterCount, currentPlan.startSequence)
     const draftSequences = new Set(
       unpublishedDrafts
         .filter((draft) => draft.proposedBody.trim().length > 0 && draft.status !== "completed")
@@ -560,6 +568,7 @@ export function App(): React.JSX.Element {
     publishingSequences,
     synopsisConversation.session?.chapterSequence,
     unpublishedDrafts,
+    volumeBatchPlan,
   ])
 
   // Keep chapter stages (draft → 图修订中 → 正文) live while the Agent works across chapters.
@@ -1499,6 +1508,14 @@ export function App(): React.JSX.Element {
       })
       pollStopped = true
       setSynopsisConversation(sent)
+      if (sent.volumePlanningStage === true) {
+        const volumeFolderName = sent.session.synopsisPath.replaceAll("\\", "/").split("/")[1]
+        if (volumeFolderName !== undefined && volumeFolderName.length > 0) {
+          setBrowseChapters(true)
+          setBrowseChapterSequence(undefined)
+          setBrowseVolumeFolderName(volumeFolderName)
+        }
+      }
       setPendingStagingPromotes(sent.pendingStagingPromotes ?? [])
       if (sent.workDisplayName !== undefined) {
         setProject((current) => current === undefined
@@ -2046,6 +2063,23 @@ export function App(): React.JSX.Element {
           volumeFolderName = incomplete.volumeFolderName
           volumeChapters = incomplete.chapters
         }
+        if (volumeFolderName !== undefined) {
+          let persistedPlan
+          try {
+            const read = await invokeBackend<{ content: string }>("workspace.read", {
+              projectId: project.projectId,
+              workspaceRootRef: project.workspaceRootRef,
+              relativePath: volumeBatchPlanPath(volumeFolderName),
+            })
+            persistedPlan = parseVolumeBatchPlan(read.content)
+          } catch {
+            persistedPlan = undefined
+          }
+          if (persistedPlan !== undefined) setVolumeBatchPlan(persistedPlan)
+          volumeChapters = persistedPlan === undefined
+            ? chaptersInVolume(allChapters, volumeFolderName)
+            : buildTargetVolumeChapters(allChapters, volumeFolderName, persistedPlan.targetChapterCount, persistedPlan.startSequence)
+        }
         if (options?.skipOutlineGate !== true) {
           if (volumeFolderName === undefined) {
             setError("未找到可推演的卷")
@@ -2113,11 +2147,29 @@ export function App(): React.JSX.Element {
             return
           }
           let nextPaths = await refreshWorkspace()
-          let volumeChapterRows = chaptersInVolume(
-            listDiscussFocusChapters(nextPaths),
-            volumeFolderName ?? "",
-          )
-          if (!volumeChaptersHavePlans(volumeChapterRows)) {
+          let activeVolumePlan: ReturnType<typeof parseVolumeBatchPlan>
+          if (volumeFolderName !== undefined) {
+            try {
+              const read = await invokeBackend<{ content: string }>("workspace.read", {
+                projectId: project.projectId,
+                workspaceRootRef: project.workspaceRootRef,
+                relativePath: volumeBatchPlanPath(volumeFolderName),
+              })
+              activeVolumePlan = parseVolumeBatchPlan(read.content)
+            } catch {
+              activeVolumePlan = undefined
+            }
+          }
+          let currentVolumeChapters = listDiscussFocusChapters(nextPaths)
+          let volumeChapterRows = activeVolumePlan === undefined
+            ? chaptersInVolume(currentVolumeChapters, volumeFolderName ?? "")
+            : buildTargetVolumeChapters(
+                currentVolumeChapters,
+                activeVolumePlan.volumeFolderName,
+                activeVolumePlan.targetChapterCount,
+                activeVolumePlan.startSequence,
+              )
+          if (activeVolumePlan === undefined || !volumeChaptersHavePlans(volumeChapterRows)) {
             updateBatchStatus("volume_plan", sequence)
             const planned = await sendSynopsisMessage(BATCH_VOLUME_PLAN_USER_MESSAGE, {
               automation: "batch_chapter",
@@ -2131,15 +2183,45 @@ export function App(): React.JSX.Element {
               return
             }
             nextPaths = await refreshWorkspace()
-            volumeChapterRows = chaptersInVolume(
-              listDiscussFocusChapters(nextPaths),
-              volumeFolderName ?? "",
-            )
+            currentVolumeChapters = listDiscussFocusChapters(nextPaths)
+            if (volumeFolderName !== undefined) {
+              try {
+                const read = await invokeBackend<{ content: string }>("workspace.read", {
+                  projectId: project.projectId,
+                  workspaceRootRef: project.workspaceRootRef,
+                  relativePath: volumeBatchPlanPath(volumeFolderName),
+                })
+                activeVolumePlan = parseVolumeBatchPlan(read.content)
+                if (activeVolumePlan !== undefined) {
+                  setVolumeBatchPlan(activeVolumePlan)
+                  volumeChapterRows = buildTargetVolumeChapters(
+                    currentVolumeChapters,
+                    volumeFolderName,
+                    activeVolumePlan.targetChapterCount,
+                    activeVolumePlan.startSequence,
+                  )
+                }
+              } catch {
+                // The validation below pauses the batch if the model omitted the required target.
+              }
+            }
             if (!volumeChaptersHavePlans(volumeChapterRows)) {
               pauseBatch(sequence, "卷规划未写齐各章梗概与细纲（需 volumeChapterPlans）")
               return
             }
           }
+
+          if (activeVolumePlan === undefined) {
+            pauseBatch(sequence, "卷规划未设置强制目标章节数，请重新生成卷规划")
+            return
+          }
+          setVolumeBatchPlan(activeVolumePlan)
+          volumeChapterRows = buildTargetVolumeChapters(
+            listDiscussFocusChapters(nextPaths),
+            activeVolumePlan.volumeFolderName,
+            activeVolumePlan.targetChapterCount,
+            activeVolumePlan.startSequence,
+          )
 
           const publishSequences = volumeChapterRows
             .filter((item) => item.bodyPath === undefined)
@@ -2219,11 +2301,26 @@ export function App(): React.JSX.Element {
                   pauseBatch(chapterSequence, retry === "blocked" ? "草稿推演需要人工决策" : "未找到可发布的草稿")
                   return
                 }
-                drafts = await invokeBackend<readonly ChapterRevisionReadResult[]>("chapter.draft.list", {
-                  projectId: project.projectId,
-                  workspaceRootRef: project.workspaceRootRef,
-                })
+              } else {
+                try {
+                  await setDiscussFocus(chapterSequence, "plot_synopsis")
+                } catch (cause) {
+                  pauseBatch(chapterSequence, cause instanceof Error ? cause.message : String(cause))
+                  return
+                }
+                const drafted = await sendSynopsisMessage(
+                  "【批量推演·逐章补草稿】请基于本章已落盘的梗概与细纲，用 chapterDraftProposal 写出本章完整正文草稿；不要 publish_draft，不要推进其他章节。",
+                  { automation: "batch_chapter" },
+                )
+                if (!drafted) {
+                  pauseBatch(chapterSequence, "本章草稿推演失败或被中断")
+                  return
+                }
               }
+              drafts = await invokeBackend<readonly ChapterRevisionReadResult[]>("chapter.draft.list", {
+                projectId: project.projectId,
+                workspaceRootRef: project.workspaceRootRef,
+              })
             }
             const publishDraft = (await invokeBackend<readonly ChapterRevisionReadResult[]>("chapter.draft.list", {
               projectId: project.projectId,
@@ -2279,6 +2376,23 @@ export function App(): React.JSX.Element {
               pauseBatch(chapterSequence, "正文尚未落盘，无法继续下一章")
               return
             }
+          }
+          const finalPaths = await refreshWorkspace()
+          const finalRows = buildTargetVolumeChapters(
+            listDiscussFocusChapters(finalPaths),
+            volumeFolderName ?? "",
+            activeVolumePlan.targetChapterCount,
+            activeVolumePlan.startSequence,
+          )
+          if (!isVolumeBatchComplete(
+            listDiscussFocusChapters(finalPaths),
+            volumeFolderName ?? "",
+            activeVolumePlan.targetChapterCount,
+            activeVolumePlan.startSequence,
+          )) {
+            const incomplete = finalRows.find((item) => item.bodyPath === undefined)
+            pauseBatch(incomplete?.sequence ?? lastSequence, "卷目标章节尚未全部完成图修订")
+            return
           }
           updateBatchStatus("stopped", lastSequence)
           return

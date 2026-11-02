@@ -144,7 +144,7 @@ export function CreationDeskBatchControls(props: CreationDeskBatchControlsProps)
             <div className="creation-desk-batch-progress-bar" aria-hidden="true">
               <span style={{ width: `${String(Math.round((doneCount / total) * 100))}%` }} />
             </div>
-            <span>{`正文 ${String(doneCount)}/${String(total)}`}</span>
+            <span>{`章节 ${String(doneCount)}/${String(total)}`}</span>
           </div>
           {collapsed
             ? null

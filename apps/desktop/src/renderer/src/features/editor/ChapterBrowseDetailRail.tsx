@@ -10,6 +10,7 @@ import {
   scaleLabel,
 } from "./creation-desk-goals.js"
 import { resolveDiscussFocusOpenPath, type DiscussFocusChapterOption } from "./synopsis-path.js"
+import { countChapterCharacters } from "./chapter-draft-versions-prototype.js"
 import { useDeductionGoals } from "./use-deduction-goals.js"
 import {
   buildVolumeHookDensityReport,
@@ -17,6 +18,7 @@ import {
   isHookScheduleIncomplete,
   type VolumeChapterHookSummary,
 } from "./volume-hook-density.js"
+import { parseVolumeBatchPlan, volumeArtifactWriteStatus, volumeBatchPlanPath, volumeOutlinePath } from "./volume-batch-deduction.js"
 
 export { isHookScheduleIncomplete } from "./volume-hook-density.js"
 
@@ -39,6 +41,13 @@ export type ChapterBrowseDetailRailProps = Readonly<{
 }>
 
 type ChapterDetailTab = "info" | "synopsis" | "outline" | "draft" | "body"
+type VolumeDetailTab = "info" | "synopsis" | "outline"
+
+const VOLUME_DETAIL_TABS: ReadonlyArray<Readonly<{ id: VolumeDetailTab; label: string; icon: typeof Info }>> = [
+  { id: "info", label: "卷信息", icon: Info },
+  { id: "synopsis", label: "梗概", icon: BookOpenText },
+  { id: "outline", label: "大纲", icon: ScrollText },
+]
 
 const CHAPTER_DETAIL_TABS: ReadonlyArray<Readonly<{ id: ChapterDetailTab; label: string; testId: string }>> = [
   { id: "info", label: "章节信息", testId: "chapter-detail-tab-info" },
@@ -52,6 +61,10 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
   const [workflowGate, setWorkflowGate] = useState<ChapterWorkflowGate>()
   const [activeTab, setActiveTab] = useState<ChapterDetailTab>("info")
   const [volumeSynopsis, setVolumeSynopsis] = useState<string>()
+  const [volumeOutline, setVolumeOutline] = useState<string>()
+  const [volumePlanMarkdown, setVolumePlanMarkdown] = useState<string>()
+  const [volumeWordCount, setVolumeWordCount] = useState(0)
+  const [volumeTab, setVolumeTab] = useState<VolumeDetailTab>("info")
   const [synopsisLoading, setSynopsisLoading] = useState(false)
   const [draftVersions, setDraftVersions] = useState<readonly RevisionDraftVersion[]>([])
   const [draftLoading, setDraftLoading] = useState(false)
@@ -90,6 +103,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
   useEffect(() => {
     setActiveTab("info")
   }, [props.chapter?.sequence])
+  useEffect(() => { setVolumeTab("info") }, [volumeFolderKey])
   useEffect(() => {
     setLocalDraftCandidateVersionId(undefined)
   }, [draftRevision?.revisionTaskId, props.chapter?.sequence, props.projectId])
@@ -137,14 +151,28 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       setVolumeSynopsis(undefined)
       return
     }
-    const chapters = props.volume.chapters
+    const volume = props.volume
     setSynopsisLoading(true)
     void (async () => {
       try {
-        const assembled = await assembleVolumeSynopsis(props.projectId, props.workspaceRootRef, chapters)
-        if (!cancelled) setVolumeSynopsis(assembled)
+        const [synopsis, outline, plan, wordCount] = await Promise.all([
+          readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, `大纲/${volume.folderName}.梗概.md`),
+          readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, volumeOutlinePath(volume.folderName)),
+          readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, volumeBatchPlanPath(volume.folderName)),
+          countVolumePublishedWords(props.projectId, props.workspaceRootRef, volume.chapters),
+        ])
+        if (!cancelled) {
+          setVolumeSynopsis(synopsis)
+          setVolumeOutline(outline)
+          setVolumePlanMarkdown(plan)
+          setVolumeWordCount(wordCount)
+        }
       } catch {
-        if (!cancelled) setVolumeSynopsis(undefined)
+        if (!cancelled) {
+          setVolumeSynopsis(undefined)
+          setVolumeOutline(undefined)
+          setVolumePlanMarkdown(undefined)
+        }
       } finally {
         if (!cancelled) setSynopsisLoading(false)
       }
@@ -202,6 +230,8 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
 
   if (volumeMode && props.volume !== undefined) {
     const synopsisText = volumeSynopsis?.trim() ?? ""
+    const outlineText = volumeOutline?.trim() ?? ""
+    const plan = parseVolumeBatchPlan(volumePlanMarkdown)
     const report = volumeHookReport
     return <aside className="chapter-browse-rail" data-testid="chapter-browse-detail-rail" data-mode="volume">
       <header className="chapter-browse-rail-header">
@@ -215,9 +245,34 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
           {props.backLabel ?? "返回正文章节"}
         </button>}
         <h3>{props.volume.folderName}</h3>
-        <span className="chapter-browse-volume-meta">{String(props.volume.chapters.length)} 章</span>
+        <span className="chapter-browse-volume-meta">{plan === undefined ? "规划待完成" : `${String(plan.targetChapterCount)} 章目标`}</span>
       </header>
 
+      <div className="chapter-rail-tabs" data-testid="volume-detail-tabs" role="tablist" aria-label="卷详情">
+        {VOLUME_DETAIL_TABS.map((tab) => {
+          const Icon = tab.icon
+          return <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={volumeTab === tab.id}
+            className={volumeTab === tab.id ? "active" : ""}
+            data-testid={`volume-detail-tab-${tab.id}`}
+            onClick={() => setVolumeTab(tab.id)}
+          ><Icon size={12} aria-hidden="true" />{tab.label}</button>
+        })}
+      </div>
+
+      {volumeTab === "info" ? <>
+      <section className="chapter-browse-section" data-testid="chapter-browse-volume-info">
+        <h4><Info size={13} aria-hidden="true" />卷规划</h4>
+        <ul className="chapter-workflow-stage-list" data-testid="volume-planning-status">
+          <li><span>章节进度</span><span>{plan === undefined ? "0/待规划" : `${String(Math.min(props.volume.chapters.filter((chapter) => chapter.bodyPath !== undefined).length, plan.targetChapterCount))}/${String(plan.targetChapterCount)}`}</span></li>
+          <li><span>已有字数 / 预计字数</span><span>{volumeWordCount.toLocaleString("zh-CN")} / {plan === undefined ? "待规划" : (plan.targetWordCount ?? 0).toLocaleString("zh-CN")}</span></li>
+          <li><span>梗概</span><span>{volumeArtifactWriteStatus(plan?.synopsisWriteCount)}</span></li>
+          <li><span>大纲</span><span>{volumeArtifactWriteStatus(plan?.outlineWriteCount)}</span></li>
+        </ul>
+      </section>
       <section className="chapter-browse-section" data-testid="chapter-browse-volume-hooks">
         <h4>
           <Link2 size={13} aria-hidden="true" />
@@ -258,18 +313,24 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
               </ul>
             </>}
       </section>
-
-      <section className="chapter-browse-section" data-testid="chapter-browse-volume-synopsis">
+      </> : volumeTab === "synopsis" ? <section className="chapter-browse-section" data-testid="chapter-browse-volume-synopsis">
         <h4>
           <Library size={13} aria-hidden="true" />
-          本卷剧情梗概
+          本卷梗概
         </h4>
         {synopsisLoading
-          ? <p className="chapter-browse-muted">正在汇总本卷章节剧情梗概…</p>
+          ? <p className="chapter-browse-muted">正在读取卷梗概…</p>
           : synopsisText.length > 0
             ? <pre className="chapter-browse-markdown">{synopsisText}</pre>
-            : <p className="chapter-browse-muted">本卷各章尚无剧情梗概可汇总。</p>}
-      </section>
+            : <p className="chapter-browse-muted">卷梗概待写入。</p>}
+      </section> : <section className="chapter-browse-section" data-testid="chapter-browse-volume-outline">
+        <h4><ScrollText size={13} aria-hidden="true" />本卷大纲</h4>
+        {synopsisLoading
+          ? <p className="chapter-browse-muted">正在读取卷大纲…</p>
+          : outlineText.length > 0
+            ? <pre className="chapter-browse-markdown">{outlineText}</pre>
+            : <p className="chapter-browse-muted">卷大纲待写入。</p>}
+      </section>}
     </aside>
   }
 
@@ -646,6 +707,34 @@ export async function assembleVolumeSynopsis(
     }
   }
   return parts.join("\n\n")
+}
+
+async function readWorkspaceMarkdown(
+  projectId: string,
+  workspaceRootRef: string,
+  relativePath: string,
+): Promise<string> {
+  try {
+    const result = await invokeBackend<{ content: string }>("workspace.read", {
+      projectId,
+      workspaceRootRef,
+      relativePath,
+    })
+    return result.content
+  } catch {
+    return ""
+  }
+}
+
+async function countVolumePublishedWords(
+  projectId: string,
+  workspaceRootRef: string,
+  chapters: readonly DiscussFocusChapterOption[],
+): Promise<number> {
+  const bodies = await Promise.all(chapters
+    .filter((chapter) => chapter.bodyPath !== undefined)
+    .map((chapter) => readWorkspaceMarkdown(projectId, workspaceRootRef, chapter.bodyPath!)))
+  return bodies.reduce((total, body) => total + countChapterCharacters(stripLeadingHeadingKeepBody(body)), 0)
 }
 
 function formatHookWindow(goal: Readonly<{

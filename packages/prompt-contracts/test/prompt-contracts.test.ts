@@ -186,7 +186,7 @@ describe("prompt contracts", () => {
     expect(sourceRetrieval).toContain("设定集默认查询规则")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("设定集修订规则")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("表现输出/本作品描写/*.md")
-    expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("开书冷启动（硬门槛，先于卷大纲/正文）")
+    expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("开书流程（硬门槛）")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("表现输出/本作品描写/作品风格.md")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("1→8 维全部定好写入")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("人称指称")
@@ -745,5 +745,23 @@ describe("prompt contracts", () => {
     expect(parsed.volumeChapterPlans).toHaveLength(2)
     expect(parsed.chapterDraftProposals?.[0]?.chapterSequence).toBe(1)
     expect(parsed.volumePlanMeta?.targetChapterCount).toBe(2)
+  })
+
+  it("requires both volume targets and accepts a distinct volume synopsis artifact", () => {
+    const base = {
+      assistantMessage: "卷规划已完成。",
+      finalSelfReview: "卷级产物有效。",
+    }
+    expect(synopsisDiscussArtifactSchema.safeParse({
+      ...base,
+      volumePlanMeta: { targetChapterCount: 8 },
+    }).success).toBe(false)
+    const parsed = synopsisDiscussArtifactSchema.parse({
+      ...base,
+      volumePlanMeta: { targetChapterCount: 8, targetWordCount: 24_000 },
+      volumeSynopsis: { markdown: "# 第一卷梗概\n主线与卷末转折。" },
+      arcPlan: { markdown: "# 第一卷大纲\n第一章与第二章的关键事件。" },
+    })
+    expect(parsed.volumeSynopsis?.markdown).toContain("卷末转折")
   })
 })

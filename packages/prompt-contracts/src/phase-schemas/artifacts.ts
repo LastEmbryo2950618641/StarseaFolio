@@ -741,10 +741,11 @@ export const synopsisDiscussArtifactSchema = z.object({
   }).optional(),
   /** Optional volume-level targets when emitting volumeChapterPlans. */
   volumePlanMeta: z.object({
-    targetWordCount: z.number().int().positive().max(10_000_000).optional(),
-    targetChapterCount: z.number().int().positive().max(500).optional(),
+    targetWordCount: z.number().int().positive().max(10_000_000),
+    targetChapterCount: z.number().int().positive().max(50),
     notes: z.string().min(1).max(2_000).optional(),
   }).optional(),
+  volumeSynopsis: z.object({ markdown: z.string().min(1).max(20_000) }).optional(),
   finalSelfReview: z.string().min(1),
 }).superRefine((value, ctx) => {
   // Hard gate after coerce: toolRequest must stand alone. Prefer

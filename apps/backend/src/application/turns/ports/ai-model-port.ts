@@ -184,6 +184,15 @@ export type TurnPhaseInput = Readonly<{
       status: "awaiting_choice" | "style_selected"
       selectedProseStylePath?: string
     }>
+    volumePlanning?: Readonly<{
+      volumeFolderName: string
+      ready: boolean
+      targetChapterCount?: number
+      targetWordCount?: number
+      synopsisWriteCount: number
+      outlineWriteCount: number
+      missing: readonly string[]
+    }>
     /** ChapterPanel 批量推演：允许同轮写梗概+细纲并驱动工具链。 */
     batchAutomation?: boolean
     titleAlignmentIssue?: Readonly<{

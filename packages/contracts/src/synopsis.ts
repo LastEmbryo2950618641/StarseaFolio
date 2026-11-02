@@ -255,6 +255,8 @@ export type SynopsisConversationStartResult = z.infer<typeof synopsisConversatio
 export const synopsisConversationSendResultSchema = z.object({
   session: synopsisConversationSessionSchema,
   messages: z.array(synopsisConversationMessageSchema),
+  /** The current send began in first-write volume planning; the client should show that volume's planning panel. */
+  volumePlanningStage: z.boolean().optional(),
   pendingProposals: z.array(deductionGoalProposalSchema).optional(),
   pendingStagingPromotes: z.array(synopsisStagingPromoteProposalSchema).optional(),
   budgetAdvisory: synopsisConversationBudgetAdvisorySchema.optional(),
