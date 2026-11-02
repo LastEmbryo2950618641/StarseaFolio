@@ -33,6 +33,162 @@ describe("graph governance result normalization", () => {
 })
 
 describe("assembleModelPhaseResult", () => {
+  it("merges duplicate source settlement records before coverage validation", () => {
+    const request = {
+      ...createRequest(),
+      phase: "graph_governance" as const,
+      input: {
+        ...createRequest().input,
+        sourceUnitIds: ["source-1"],
+        readEvidence: [{
+          ...createRequest().input.readEvidence[0],
+          ownerId: "node_1",
+        }],
+      },
+    }
+    const result = assembleModelPhaseResult({
+      outcome: "continue",
+      artifact: {
+        executionMode: "local_governance",
+        mutations: [],
+        retrievalProjections: [],
+        settlementRecords: [
+          { sourceUnitIndex: 0, graphRefs: [{ targetKind: "node", targetRef: "node_1" }], reason: "第一条", status: "derived" },
+          { sourceUnitIndex: 0, graphRefs: [{ targetKind: "node", targetRef: "node_1" }], reason: "第二条", status: "derived" },
+        ],
+        mutationSpacetimeSettlements: [],
+        sceneSpacetimeBindings: [],
+        affectedFrontierRefs: [],
+        archiveOutletRefs: [],
+        decisionRecords: [],
+      },
+      requestedReads: [],
+      citedReadIds: [],
+      unresolvedDependencies: [],
+      reason: "合并重复原文结算",
+      selfReview: "同一原文单元只保留一条结算记录",
+    }, request)
+
+    expect(result.artifact).toMatchObject({
+      settlementRecords: [{
+        sourceUnitIndex: 0,
+        graphRefs: [{ targetKind: "node", targetRef: "node_1" }],
+        reason: "第一条；第二条",
+      }],
+    })
+  })
+
+  it("accepts graph owners exposed through source relatedOwnerRefs", () => {
+    const base = createRequest()
+    const request = {
+      ...base,
+      phase: "dependency_audit" as const,
+      input: {
+        ...base.input,
+        sourceUnitIds: ["source-1"],
+        readEvidence: [{
+          ...base.input.readEvidence[0],
+          ownerKind: "source",
+          ownerId: "source-1",
+          relatedOwnerRefs: [{ ownerKind: "node", ownerId: "node_7" }],
+        }],
+      },
+    }
+
+    expect(() => assembleModelPhaseResult({
+      outcome: "continue",
+      artifact: {
+        missingDependencies: [],
+        unplannedContent: [],
+        sceneContinuity: [],
+        temporalClaims: [{
+          claimRef: "claim:related-owner",
+          sceneIndex: 0,
+          sourceUnitIndexes: [0],
+          proseExcerpt: "原文事实",
+          referenceDescription: "关联图节点",
+          referenceRefs: ["node_7"],
+          evidenceRefs: ["evidence_1"],
+          timelineRefs: [],
+          relationDescription: "由 Source 关联图入口支持",
+          verdict: "pass",
+          reason: "关联图入口可读",
+          missingEvidence: [],
+        }],
+        informationBoundary: "pass",
+      },
+      requestedReads: [],
+      citedReadIds: ["evidence_1"],
+      unresolvedDependencies: [],
+      reason: "核对关联图入口",
+      selfReview: "只引用当前 Source 暴露的关联节点",
+    }, request)).not.toThrow()
+  })
+
+  it("keeps local handles declared by governance visible to later graph phases", () => {
+    const base = createRequest()
+    const request = {
+      ...base,
+      phase: "graph_retrieval_design" as const,
+      input: {
+        ...base.input,
+        validationArtifacts: {
+          graph_governance: {
+            mutations: [{
+              operation: "create_node",
+              ref: "local:governance-node",
+              data: { content: { name: "治理阶段节点" } },
+            }],
+            retrievalProjections: [],
+            settlementRecords: [],
+            mutationSpacetimeSettlements: [],
+            sceneSpacetimeBindings: [],
+            affectedFrontierRefs: [],
+            archiveOutletRefs: [],
+            decisionRecords: [],
+          },
+          graph_structure_plan: {
+            proposals: [{
+              proposalRef: "proposal:structure-node",
+              mutation: {
+                operation: "create_node",
+                ref: "local:structure-node",
+                data: { content: { name: "结构阶段节点" } },
+              },
+              reason: "声明结构阶段节点",
+              selfReview: "引用句柄来自结构阶段",
+            }],
+            affectedFrontierRefs: [],
+            archiveOutletRefs: [],
+            decisionRecords: [{
+              decisionKind: "retain",
+              proposalRefs: ["proposal:structure-node"],
+              reason: "保留结构阶段节点",
+              payload: {},
+              selfReview: "已覆盖该提案",
+            }],
+          },
+        },
+      },
+    }
+
+    expect(() => assembleModelPhaseResult({
+      outcome: "continue",
+      artifact: {
+        projections: [
+          { ownerRef: "local:governance-node", exactKeys: ["治理节点"], semanticText: "治理节点" },
+          { ownerRef: "local:structure-node", exactKeys: ["结构节点"], semanticText: "结构节点" },
+        ],
+        sourceSettlements: [],
+      },
+      requestedReads: [],
+      citedReadIds: [],
+      unresolvedDependencies: [],
+      reason: "设计图谱检索投影",
+      selfReview: "治理阶段和结构阶段的本地句柄都可见",
+    }, request)).not.toThrow()
+  })
+
   it("normalizes a visible evidence alias to its canonical read ID", () => {
     const request = createRequest()
 

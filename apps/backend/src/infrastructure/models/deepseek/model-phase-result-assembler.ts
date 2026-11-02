@@ -213,9 +213,10 @@ function normalizeOptionalModelFields(phase: AIPhase, artifact: unknown): unknow
     return normalizeDependencySceneIndexes(record)
   }
   if (phase === "graph_governance" && Array.isArray(record.settlementRecords)) {
+    const settlementRecords = mergeSettlementRecords(record.settlementRecords)
     return {
       ...record,
-      settlementRecords: record.settlementRecords.map((settlement) => {
+      settlementRecords: settlementRecords.map((settlement) => {
         if (typeof settlement !== "object" || settlement === null || Array.isArray(settlement)) return settlement
         const settlementRecord = settlement as Record<string, unknown>
         if (!Array.isArray(settlementRecord.graphRefs)) return settlement
@@ -234,6 +235,54 @@ function normalizeOptionalModelFields(phase: AIPhase, artifact: unknown): unknow
     }
   }
   return artifact
+}
+
+function mergeSettlementRecords(records: readonly unknown[]): readonly unknown[] {
+  const merged = new Map<number, {
+    sourceUnitIndex: number
+    graphRefs: unknown[]
+    reasons: string[]
+    statuses: string[]
+    template: Record<string, unknown>
+  }>()
+  for (const value of records) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) continue
+    const record = value as Record<string, unknown>
+    if (typeof record.sourceUnitIndex !== "number") continue
+    const current = merged.get(record.sourceUnitIndex) ?? {
+      sourceUnitIndex: record.sourceUnitIndex,
+      graphRefs: [],
+      reasons: [],
+      statuses: [],
+      template: record,
+    }
+    if (Array.isArray(record.graphRefs)) {
+      for (const graphRef of record.graphRefs) {
+        if (typeof graphRef !== "object" || graphRef === null || Array.isArray(graphRef)) continue
+        const ref = graphRef as Record<string, unknown>
+        const key = JSON.stringify([ref.targetKind, ref.targetRef, ref.mutationIndex ?? null])
+        if (!current.graphRefs.some((existing) => {
+          if (typeof existing !== "object" || existing === null || Array.isArray(existing)) return false
+          const existingRef = existing as Record<string, unknown>
+          return JSON.stringify([existingRef.targetKind, existingRef.targetRef, existingRef.mutationIndex ?? null]) === key
+        })) current.graphRefs.push(graphRef)
+      }
+    }
+    if (typeof record.reason === "string" && record.reason.trim().length > 0 && !current.reasons.includes(record.reason)) {
+      current.reasons.push(record.reason)
+    }
+    if (typeof record.status === "string" && record.status.trim().length > 0 && !current.statuses.includes(record.status)) {
+      current.statuses.push(record.status)
+    }
+    merged.set(record.sourceUnitIndex, current)
+  }
+  return [...merged.values()].map((record) => ({
+    ...record.template,
+    sourceUnitIndex: record.sourceUnitIndex,
+    graphRefs: record.graphRefs,
+    reason: record.reasons.join("；"),
+    status: record.statuses.join("/") || String(record.template.status ?? "settled"),
+  }))
 }
 
 function normalizeDependencySceneIndexes(record: Record<string, unknown>): Record<string, unknown> {
@@ -497,9 +546,11 @@ function assertArtifactReferences(request: PhaseRequestEnvelope, artifact: unkno
   const structure = artifacts.graph_structure_plan === undefined
     ? undefined
     : graphStructurePlanArtifactSchema.parse(artifacts.graph_structure_plan)
-  const readableGraphIds = new Set(input.readEvidence
-    .filter((evidence) => evidence.ownerKind === "node" || evidence.ownerKind === "link")
-    .map((evidence) => evidence.ownerId))
+  const declaredLocalMutations = [
+    ...(governance?.mutations ?? []),
+    ...(structure?.proposals.map((proposal) => proposal.mutation) ?? []),
+  ]
+  const readableGraphIds = readableGraphOwnerIds(input.readEvidence)
   if (request.phase === "frontier_settlement" && input.stageProjection !== undefined) {
     for (const reference of frontierProjectionGraphReferences(input.stageProjection)) readableGraphIds.add(reference)
   }
@@ -509,10 +560,19 @@ function assertArtifactReferences(request: PhaseRequestEnvelope, artifact: unkno
     readableWorkspacePaths: new Set(input.readEvidence
       .filter((evidence) => evidence.ownerKind.startsWith("workspace:"))
       .map((evidence) => evidence.ownerId)),
-    declaredLocalGraphRefs: new Set((governance?.mutations ?? structure?.proposals.map((proposal) => proposal.mutation) ?? []).flatMap((mutation) => (
+    declaredLocalGraphRefs: new Set(declaredLocalMutations.flatMap((mutation) => (
       mutation.operation === "create_node" || mutation.operation === "create_link" ? [mutation.ref] : []
-    )) ?? []),
+    ))),
   })
+}
+
+function readableGraphOwnerIds(input: readonly TurnPhaseInput["readEvidence"][number][]): Set<string> {
+  return new Set(input.flatMap((evidence) => [
+    ...(evidence.ownerKind === "node" || evidence.ownerKind === "link" ? [evidence.ownerId] : []),
+    ...(evidence.relatedOwnerRefs ?? [])
+      .filter((owner) => owner.ownerKind === "node" || owner.ownerKind === "link")
+      .map((owner) => owner.ownerId),
+  ]))
 }
 
 function frontierProjectionGraphReferences(value: unknown): string[] {

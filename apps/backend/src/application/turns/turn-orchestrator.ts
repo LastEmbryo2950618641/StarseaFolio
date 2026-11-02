@@ -40,6 +40,7 @@ import {
   parsePhaseArtifact,
   ruleAssemblyArtifactSchema,
   responseReviewArtifactSchema,
+  retrievalArtifactSchema,
   semanticReviewArtifactSchema,
   settlementReviewArtifactSchema,
   type EmergencePlanningArtifact,
@@ -1059,7 +1060,7 @@ export class TurnOrchestrator {
       const failedQueryReview = workflow === "query"
         && latestRun.phase === "response_review"
         && latestResult !== undefined
-        ? queryReviewDecision(latestResult)
+        ? queryReviewDecision(latestResult, readStoredPhaseArtifact(effectiveRuns, "source_retrieval"))
         : undefined
       if (failedQueryReview?.requiresRevision === true) {
         startPhaseIndex = executionPhases.indexOf("draft")
@@ -1302,18 +1303,22 @@ export class TurnOrchestrator {
           spacetimeEntry.input.sourceUnitIds.length,
         )
         const structure = graphStructurePlanArtifactSchema.parse(artifacts.graph_structure_plan)
+        const governance = artifacts.graph_governance === undefined
+          ? undefined
+          : graphGovernanceArtifactSchema.parse(artifacts.graph_governance)
         assertPhaseReferenceContract(
           "graph_spacetime_settlement",
           artifacts.graph_spacetime_settlement,
           {
-            readableGraphIds: new Set(spacetimeEntry.input.readEvidence
-              .filter((evidence) => evidence.ownerKind === "node" || evidence.ownerKind === "link")
-              .map((evidence) => evidence.ownerId)),
+            readableGraphIds: graphOwnerIdsFromEvidence(spacetimeEntry.input.readEvidence),
             readableEvidenceIds: new Set(spacetimeEntry.input.readEvidence.map((evidence) => evidence.readId)),
             readableWorkspacePaths: new Set(),
-            declaredLocalGraphRefs: new Set(structure.proposals.flatMap((proposal) => (
-              proposal.mutation.operation === "create_node" || proposal.mutation.operation === "create_link"
-                ? [proposal.mutation.ref]
+            declaredLocalGraphRefs: new Set([
+              ...(governance?.mutations ?? []),
+              ...structure.proposals.map((proposal) => proposal.mutation),
+            ].flatMap((mutation) => (
+              mutation.operation === "create_node" || mutation.operation === "create_link"
+                ? [mutation.ref]
                 : []
             ))),
           },
@@ -1372,18 +1377,22 @@ export class TurnOrchestrator {
       let invalidRetrievalError: unknown
       try {
         const structure = graphStructurePlanArtifactSchema.parse(artifacts.graph_structure_plan)
+        const governance = artifacts.graph_governance === undefined
+          ? undefined
+          : graphGovernanceArtifactSchema.parse(artifacts.graph_governance)
         assertPhaseReferenceContract(
           "graph_retrieval_design",
           artifacts.graph_retrieval_design,
           {
-            readableGraphIds: new Set(retrievalEntry.input.readEvidence
-              .filter((evidence) => evidence.ownerKind === "node" || evidence.ownerKind === "link")
-              .map((evidence) => evidence.ownerId)),
+            readableGraphIds: graphOwnerIdsFromEvidence(retrievalEntry.input.readEvidence),
             readableEvidenceIds: new Set(retrievalEntry.input.readEvidence.map((evidence) => evidence.readId)),
             readableWorkspacePaths: new Set(),
-            declaredLocalGraphRefs: new Set(structure.proposals.flatMap((proposal) => (
-              proposal.mutation.operation === "create_node" || proposal.mutation.operation === "create_link"
-                ? [proposal.mutation.ref]
+            declaredLocalGraphRefs: new Set([
+              ...(governance?.mutations ?? []),
+              ...structure.proposals.map((proposal) => proposal.mutation),
+            ].flatMap((mutation) => (
+              mutation.operation === "create_node" || mutation.operation === "create_link"
+                ? [mutation.ref]
                 : []
             ))),
           },
@@ -1924,7 +1933,7 @@ export class TurnOrchestrator {
           }
         }
         if (workflow === "query" && phase === "response_review") {
-          const reviewDecision = queryReviewDecision(result)
+          const reviewDecision = queryReviewDecision(result, artifacts.source_retrieval)
           if (reviewDecision.requiresRevision) {
             queryDraftAuditRounds += 1
             queryRevisionFeedback = reviewDecision.feedback
@@ -4637,9 +4646,7 @@ export class TurnOrchestrator {
         verificationProbeCount: semantic.verificationProbeAssessments.length,
       })
     }
-    const readableGraphIds = new Set(readEvidence
-      .filter((evidence) => evidence.ownerKind === "node" || evidence.ownerKind === "link")
-      .map((evidence) => evidence.ownerId))
+    const readableGraphIds = graphOwnerIdsFromEvidence(readEvidence)
     const approvedAffectedFrontierRefs = mode === "full" || mode === "compact"
       ? semanticReviewArtifactSchema.parse(artifacts.semantic_review).approvedAffectedFrontierRefs
       : []
@@ -6086,15 +6093,23 @@ function errorMessage(error: unknown): string {
   }
 }
 
-function queryReviewDecision(result: Pick<PhaseResultEnvelope, "outcome" | "artifact" | "reason" | "selfReview">): Readonly<{
+function queryReviewDecision(
+  result: Pick<PhaseResultEnvelope, "outcome" | "artifact" | "reason" | "selfReview">,
+  retrievalArtifactInput?: unknown,
+): Readonly<{
   requiresRevision: boolean
   review: ReturnType<typeof responseReviewArtifactSchema.parse>
   feedback: NonNullable<TurnPhaseInput["revisionFeedback"]>
 }> {
   const review = responseReviewArtifactSchema.parse(result.artifact)
   const grounding = review.queryGrounding
+  const retrieval = retrievalArtifactInput === undefined
+    ? undefined
+    : retrievalArtifactSchema.safeParse(retrievalArtifactInput)
+  const unresolvedRetrievalEvidence = retrieval?.success === true && retrieval.data.missingEvidence.length > 0
   const groundingRequiresRevision = grounding === undefined
     || grounding.answerDisposition === "unsupported"
+    || (grounding.answerDisposition === "supported" && unresolvedRetrievalEvidence)
     || (grounding.answerDisposition === "supported" && grounding.constraints.some((constraint) => (
       constraint.kind === "fact"
       && (
@@ -6116,11 +6131,30 @@ function queryReviewDecision(result: Pick<PhaseResultEnvelope, "outcome" | "arti
       outcome: result.outcome,
       artifact: review,
       reason: groundingRequiresRevision
-        ? `${result.reason}\nQuery grounding failed: preserve every original question condition, cite read evidence for each supported condition, or explicitly state that the answer is unknown. An abstention must identify an unresolved condition.`
+        ? `${result.reason}\nQuery grounding failed: preserve every original question condition, cite read evidence for each supported condition, or explicitly state that the answer is unknown. An abstention must identify an unresolved condition.${unresolvedRetrievalEvidence ? " Source retrieval still reports missing evidence, so a definitive answer cannot be approved." : ""}`
         : result.reason,
       selfReview: result.selfReview,
     },
   }
+}
+
+function graphOwnerIdsFromEvidence(evidence: readonly TurnReadEvidence[]): Set<string> {
+  return new Set(evidence.flatMap((item) => [
+    ...(item.ownerKind === "node" || item.ownerKind === "link" ? [item.ownerId] : []),
+    ...(item.relatedOwnerRefs ?? [])
+      .filter((owner) => owner.ownerKind === "node" || owner.ownerKind === "link")
+      .map((owner) => owner.ownerId),
+  ]))
+}
+
+function readStoredPhaseArtifact(
+  runs: readonly { phase: AIPhase; status: string; result?: unknown }[],
+  phase: AIPhase,
+): unknown {
+  const run = [...runs].reverse().find((candidate) => candidate.phase === phase && candidate.status === "completed")
+  if (run?.result === undefined) return undefined
+  const parsed = phaseResultEnvelopeSchema.safeParse(run.result)
+  return parsed.success ? parsed.data.artifact : undefined
 }
 
 function countFailedQueryReviews(runs: readonly { phase: AIPhase; status: string; result?: unknown }[]): number {
