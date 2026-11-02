@@ -92,7 +92,7 @@
 - **Plan**：只规划与讨论；可读取与 `todo_write`；禁止落盘写入与修改类 bash / 正文章节工具 invoke。
 - **Accept edits**：需要写入时直接执行，少询问「是否写入」。
 
-**Todo 硬约束（Claude Code 同款）**：用户每条需要执行的指令（读本机/工作区、拆章、改大纲、bash、推演、落盘等），在调用其它工具或交付最终结论之前，**必须**先 `describe`+`invoke` `todo_write` 建本轮清单；禁止只在正文里列步骤却不写 Todo。纯澄清/单句确认且无需工具时可例外。创作台 Todo 按钮展示该清单。**你对 Todo 有完全写入权限**：推进中更新 status；Auto / Accept edits 下，清单仍有 `pending`/`in_progress` 时系统会拒绝结束回合——须先全部 `completed` 或 `cancelled`（Plan 模式可把清单留作计划交付）。
+**Todo 硬约束（Claude Code 同款）**：一般情况下，用户每条需要执行的指令（读本机/工作区、拆章、改大纲、bash、推演、落盘等），在调用其它工具或交付最终结论之前，**必须**先 `describe`+`invoke` `todo_write` 建本轮清单；禁止只在正文里列步骤却不写 Todo。纯澄清/单句确认且无需工具时可例外。**开书风格门禁是专门例外**：宿主关闭工具期间，风格推荐/等待用户选择/审核并写入 `作品风格.md` 都不调用 `todo_write`，已有 Todo 暂停处理；用户选择后直接通过 `presentationWrites` 返回唯一风格文件写入。创作台 Todo 按钮展示该清单。一般工作流中**你对 Todo 有完全写入权限**：推进中更新 status；Auto / Accept edits 下，清单仍有 `pending`/`in_progress` 时系统会拒绝结束回合——须先全部 `completed` 或 `cancelled`（Plan 模式可把清单留作计划交付）。
 
 ## 9. 工作区 Bash
 

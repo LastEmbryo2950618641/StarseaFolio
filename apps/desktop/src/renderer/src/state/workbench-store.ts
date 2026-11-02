@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-export type RightTab = "process" | "graph" | "evolution" | "history" | "graph-revisions"
+export type RightTab = "chapters" | "process" | "graph" | "evolution" | "history" | "graph-revisions"
 
 export type ProjectSettingsSection =
   | "execution"
@@ -26,7 +26,7 @@ type WorkbenchState = Readonly<{
 }>
 
 export const useWorkbenchStore = create<WorkbenchState>((set) => ({
-  rightTab: "process",
+  rightTab: "chapters",
   setRightTab: (rightTab) => { set({ rightTab }); },
   modelDialogOpen: false,
   projectSettingsOpen: false,

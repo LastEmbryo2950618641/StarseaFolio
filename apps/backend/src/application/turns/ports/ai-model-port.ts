@@ -180,6 +180,10 @@ export type TurnPhaseInput = Readonly<{
     userEditedOutlineSinceAgent?: boolean
     currentWorkDisplayName?: string
     synopsisConfirmed?: boolean
+    workStyleGate?: Readonly<{
+      status: "awaiting_choice" | "style_selected"
+      selectedProseStylePath?: string
+    }>
     /** ChapterPanel 批量推演：允许同轮写梗概+细纲并驱动工具链。 */
     batchAutomation?: boolean
     titleAlignmentIssue?: Readonly<{

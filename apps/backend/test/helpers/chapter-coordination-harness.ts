@@ -4,6 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import Database from "better-sqlite3"
+
 import { PROTOCOL_VERSION } from "@worldseed/contracts"
 
 import type { AIModelPort } from "../../src/application/turns/ports/ai-model-port.js"
@@ -13,6 +15,9 @@ import {
   type BackendContainer as BackendContainerType,
 } from "../../src/index.js"
 import { FakeAiModelAdapter } from "../../src/infrastructure/models/fake-ai-model-adapter.js"
+import { siblingPlanningMarkdownPath } from "../../src/core/chapters/synopsis-path.js"
+import { digest } from "../../src/core/identity/digest.js"
+import { assessWorkStyleMarkdown, WORK_STYLE_RULE_PATH } from "../../src/core/workspace/work-style-gate.js"
 
 export type ChapterHarness = Readonly<{
   root: string
@@ -25,7 +30,7 @@ export type ChapterHarness = Readonly<{
 
 export async function openChapterHarness(
   displayName = "Conversation Test",
-  options?: Readonly<{ model?: AIModelPort }>,
+  options?: Readonly<{ model?: AIModelPort; workStyleGateReady?: boolean }>,
 ): Promise<ChapterHarness> {
   const root = mkdtempSync(join(tmpdir(), "worldseed-chapter-harness-"))
   const workspaceRootRef = join(root, "workspace")
@@ -44,6 +49,34 @@ export async function openChapterHarness(
     method: "project.create",
     payload: { projectId, displayName, workspaceRootRef },
   })
+  if (options?.workStyleGateReady !== false) {
+    const styleMarkdown = [
+      "# 作品风格",
+      "## 1. 语体笔风\n主锚：表现输出/笔风规则/仙侠.md。语气硬朗冷峻，描写密度适中，感官偏视觉。",
+      "## 2. 时代科技生活\n冷兵器与符箓并行；货币用灵石；机构写宗门与城卫，不写现代警察。",
+      "## 3. 规则称谓能力\n战力用境界名落笔；技能先效果后名称；称谓按辈分与阵营。",
+      "## 4. 命名\n人名双/三音节错开姓与偏旁；常同框禁止同姓墙。正例：林烬、沈砚。反例：凌寒与凌霜同批不合格。势力正派用宗门，商会用阁。",
+      "## 5. 角色声口\n主角短句、少形容词，示例：「先活下来再说。」配角谋士长句带停顿，示例：「若依我看……此局已半输。」",
+      "## 6. 尺度意象章钩\n暴力写后果不写虐杀展览；章末钩落在选择代价。",
+      "## 7. 人称指称\n第三人称限知，贴林烬；正文以姓名为主。示例句：林烬抬眼，没接话。",
+      "## 8. 句子与对话\n句长偏短；对白白话口语；禁对白乒乓，群戏按受损者到权力高位分层。正例：「滚。」反例：全员使用同一书面腔。",
+    ].join("\n\n")
+    const styleAssessment = assessWorkStyleMarkdown(styleMarkdown)
+    if (!styleAssessment.complete) {
+      throw new Error(`Test style fixture is incomplete: ${styleAssessment.weakHeadings.join("; ")}`)
+    }
+    await container.workspace.saveUserMarkdown(workspaceRootRef, WORK_STYLE_RULE_PATH, styleMarkdown)
+    const database = new Database(join(applicationDataRoot, "projects", projectId, "project.sqlite"))
+    try {
+      database.prepare(`
+        INSERT INTO work_style_gate_states (
+          project_id, status, selected_prose_style_path, style_digest, updated_at_ms
+        ) VALUES (?, 'ready', ?, ?, ?)
+      `).run(projectId, "表现输出/笔风规则/仙侠.md", digest(styleMarkdown), Date.now())
+    } finally {
+      database.close()
+    }
+  }
   return { root, workspaceRootRef, applicationDataRoot, projectId, container, facade }
 }
 
@@ -118,12 +151,44 @@ export async function listFirstChapter(facade: BackendFacade, projectId: string,
   return listed.data[0] as { chapterId: string; sourceId: string; publishPath: string; heading?: string }
 }
 
+export async function prepareChapterPlanning(harness: ChapterHarness): Promise<void> {
+  const started = await harness.facade.handle({
+    protocolVersion: PROTOCOL_VERSION,
+    requestId: randomUUID(),
+    method: "synopsis.conversation.start",
+    payload: {
+      projectId: harness.projectId,
+      workspaceRootRef: harness.workspaceRootRef,
+      title: "雨夜旧站台",
+    },
+  })
+  if (!started.ok) throw new Error(started.error.message)
+  const session = (started.data as { session: { synopsisPath: string } }).session
+  const outlinePath = siblingPlanningMarkdownPath(session.synopsisPath, "outline")
+  if (outlinePath === undefined) throw new Error("Test session did not create a synopsis path")
+  const synopsisMarkdown = "# 第一章 雨夜旧站台 剧情梗概\n\n旧站台的灯引出一段等待，主角必须在雨停前作出选择。\n"
+  const outlineMarkdown = "# 第一章 雨夜旧站台 剧情细纲\n\n- 章定位：让主角发现无人认领的灯。\n- 分场：雨夜站台、灯下选择。\n- 人物准备：主角与失踪者建立因果线。\n"
+  await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, session.synopsisPath, synopsisMarkdown)
+  await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, outlinePath, outlineMarkdown)
+  const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+  try {
+    database.prepare(`
+      update synopsis_conversation_sessions
+      set synopsis_confirmed_at_ms = ?, last_agent_digest = ?, last_outline_agent_digest = ?, focus_kind = 'chapter_body'
+      where project_id = ? and chapter_sequence = 1
+    `).run(Date.now(), digest(synopsisMarkdown), digest(outlineMarkdown), harness.projectId)
+  } finally {
+    database.close()
+  }
+}
+
 export async function seedCommittedChapter(harness: ChapterHarness): Promise<{
   chapterId: string
   sourceId: string
   body: string
   heading: string
 }> {
+  await prepareChapterPlanning(harness)
   await runTurn(
     harness.facade,
     harness.projectId,

@@ -5,6 +5,7 @@ import { Plus } from "lucide-react"
 import {
   getBookCover,
   invokeBackend,
+  readImageFile,
   selectImageFile,
   setBookCover,
   type OpenProject,
@@ -12,13 +13,18 @@ import {
 import projectDefaultIcon from "../../assets/project-default-icon.png"
 import { folderLabelFromPath, isUnderWorkDirectories } from "./book-path.js"
 import { DeleteBookDialog } from "./DeleteBookDialog.js"
+import { ImageCropDialog } from "./ImageCropDialog.js"
 import { type ProjectRailItem } from "./ProjectRail.js"
 import { useWorkDirectory } from "./use-work-directory.js"
 import { WorkNamePromptDialog } from "./WorkNamePromptDialog.js"
 import { WorkDirectoryPromptDialog } from "./WorkDirectoryPromptDialog.js"
 import { rememberWorkName } from "./work-name-history.js"
 
-type Props = Readonly<{ onOpen(project: OpenProject): void }>
+type Props = Readonly<{
+  onOpen(project: OpenProject): void
+  onCoverChanged?(projectId: string, dataUrl: string): void
+}>
+type PendingCover = Readonly<{ item: ProjectRailItem; src: string }>
 
 function formatOpenedAgo(lastOpenedAtMs: number, nowMs: number): string {
   const deltaMs = Math.max(0, nowMs - lastOpenedAtMs)
@@ -32,7 +38,7 @@ function formatOpenedAgo(lastOpenedAtMs: number, nowMs: number): string {
   return new Date(lastOpenedAtMs).toLocaleDateString()
 }
 
-export function ProjectLauncher({ onOpen }: Props): React.JSX.Element {
+export function ProjectLauncher({ onOpen, onCoverChanged }: Props): React.JSX.Element {
   const workDirectoryState = useWorkDirectory()
   const [projects, setProjects] = useState<readonly ProjectRailItem[]>([])
   const [coverByProjectId, setCoverByProjectId] = useState<Readonly<Record<string, string>>>({})
@@ -41,6 +47,7 @@ export function ProjectLauncher({ onOpen }: Props): React.JSX.Element {
   const [busy, setBusy] = useState<"new" | string>()
   const [pendingCreatePath, setPendingCreatePath] = useState<string>()
   const [pendingDelete, setPendingDelete] = useState<ProjectRailItem>()
+  const [pendingCover, setPendingCover] = useState<PendingCover>()
   const [nowMs, setNowMs] = useState(() => Date.now())
 
   const refreshProjects = useCallback(async (): Promise<void> => {
@@ -133,15 +140,32 @@ export function ProjectLauncher({ onOpen }: Props): React.JSX.Element {
 
   const changeCover = async (item: ProjectRailItem): Promise<void> => {
     setError(undefined)
+    setBusy(`cover-select:${item.projectId}`)
     try {
       const sourcePath = await selectImageFile({ title: "选择封面图片" })
       if (sourcePath === undefined) return
-      setBusy(`cover:${item.projectId}`)
-      const dataUrl = await setBookCover({
+      const src = await readImageFile(sourcePath)
+      setPendingCover({ item, src })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const confirmCover = async (dataUrl: string): Promise<void> => {
+    if (pendingCover === undefined) return
+    const { item } = pendingCover
+    setBusy(`cover:${item.projectId}`)
+    setError(undefined)
+    try {
+      const savedCover = await setBookCover({
         workspaceRootRef: item.workspaceRootRef,
-        sourcePath,
+        dataUrl,
       })
-      setCoverByProjectId((prev) => ({ ...prev, [item.projectId]: dataUrl }))
+      setCoverByProjectId((prev) => ({ ...prev, [item.projectId]: savedCover }))
+      onCoverChanged?.(item.projectId, savedCover)
+      setPendingCover(undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -191,7 +215,7 @@ export function ProjectLauncher({ onOpen }: Props): React.JSX.Element {
     </>
   }
 
-  const interactionLocked = busy !== undefined || pendingCreatePath !== undefined || pendingDelete !== undefined
+  const interactionLocked = busy !== undefined || pendingCreatePath !== undefined || pendingDelete !== undefined || pendingCover !== undefined
 
   return (
     <main className="launcher launcher--library">
@@ -288,6 +312,15 @@ export function ProjectLauncher({ onOpen }: Props): React.JSX.Element {
           busy={busy === `delete:${pendingDelete.projectId}`}
           onCancel={() => { setPendingDelete(undefined) }}
           onConfirm={() => { void confirmDelete() }}
+        />,
+        document.body,
+      )}
+      {pendingCover === undefined ? null : createPortal(
+        <ImageCropDialog
+          src={pendingCover.src}
+          busy={busy === `cover:${pendingCover.item.projectId}`}
+          onCancel={() => { if (busy === undefined) setPendingCover(undefined) }}
+          onConfirm={(dataUrl) => { void confirmCover(dataUrl) }}
         />,
         document.body,
       )}

@@ -57,6 +57,18 @@ export function partitionChapterDraftSequences(
   return { allowed, deferred }
 }
 
+export function shouldRetryDeferredChapterDraft(input: Readonly<{
+  hadDraftIntent: boolean
+  hasAllowedDraft: boolean
+  deferredSequences: readonly number[]
+  remainingCalls: number
+}>): boolean {
+  return input.hadDraftIntent
+    && !input.hasAllowedDraft
+    && input.deferredSequences.length > 0
+    && input.remainingCalls > 1
+}
+
 const WRITE_LIKE_TODO = /写|草稿|落盘|发布|推演|焦点|梗概|细纲|大纲|设定|focus|draft|publish|synopsis|outline/iu
 const TOOL_LIKE_TODO = /工具|读取|request_read|bash|todo|describe|invoke|列目录|本机/iu
 const CHAPTER_SEQ_IN_TODO = /第\s*(\d+)\s*章/u

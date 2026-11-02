@@ -33,6 +33,7 @@ import type { DocumentRepository, RetrievalRepository, ScopeCommitRepository, Ta
 import type { ChapterRevisionRepository, StoredChapterRevision } from "./ports/index.js"
 import type { ChapterIndexRecord } from "../../infrastructure/sqlite/repositories/sqlite-chapter-index-repository.js"
 import type { SqliteRevisionDraftVersionRepository } from "../../infrastructure/sqlite/repositories/sqlite-revision-draft-version-repository.js"
+import type { ChapterSynopsisService } from "./chapter-synopsis-service.js"
 
 export type ChapterRevisionServiceDependencies = Readonly<{
   workspaceRootRef?: string
@@ -42,6 +43,7 @@ export type ChapterRevisionServiceDependencies = Readonly<{
   commit: ScopeCommitRepository
   revisions: ChapterRevisionRepository
   draftVersions: SqliteRevisionDraftVersionRepository
+  chapterSynopsis: Pick<ChapterSynopsisService, "getWorkflowGate" | "restageChapter" | "recordDraftVersionState">
   chapterIndex: {
     list(projectId: ProjectId): Promise<readonly ChapterIndexRecord[]>
     find(projectId: ProjectId, chapterId: string): Promise<ChapterIndexRecord | undefined>
@@ -98,8 +100,10 @@ export class ChapterRevisionService {
 
   public async listUnpublished(projectId: ProjectId): Promise<readonly ChapterRevisionReadResult[]> {
     const revisions = await this.dependencies.revisions.listUnpublished(projectId)
-    const official = new Set((await this.dependencies.documents.listCommittedChapters(projectId)).map((chapter) => chapter.chapterId))
-    return Promise.all(revisions.filter((revision) => !official.has(revision.chapterId)).map((revision) => this.toRevisionReadResult(revision)))
+    // A draft can revise an existing official chapter. Keep every unfinished
+    // revision visible so the chapter browser and the discussion panel share
+    // the same draft source.
+    return Promise.all(revisions.map((revision) => this.toRevisionReadResult(revision)))
   }
 
   public async getDraftWorkspace(input: Readonly<{
@@ -135,6 +139,7 @@ export class ChapterRevisionService {
     if (!Number.isSafeInteger(input.chapterSequence) || input.chapterSequence < 1) {
       throw new RevisionInvalidStateError("Chapter sequence must be a positive integer")
     }
+    await this.assertChapterWorkflowGate(input.projectId, input.workspaceRootRef, input.chapterSequence)
     if (input.chapterSequence > await this.dependencies.chapterIndex.nextSequence(input.projectId)) {
       throw new RevisionInvalidStateError("Publish the preceding chapter before drafting the next chapter")
     }
@@ -174,11 +179,19 @@ export class ChapterRevisionService {
         contentRef, contentScopeId: scopeId, baseContentDigest: "",
       }
       await this.dependencies.revisions.create(record)
-      return this.dependencies.draftVersions.append({
+      const version = await this.dependencies.draftVersions.append({
         versionId: this.dependencies.createId(), projectId: input.projectId, revisionTaskId,
         source: input.source, ...(input.messageId === undefined ? {} : { messageId: input.messageId }),
         heading, body: input.body, createdAtMs: nowMs,
       })
+      await this.dependencies.chapterSynopsis.recordDraftVersionState({
+        projectId: input.projectId,
+        chapterSequence: input.chapterSequence,
+        versionId: version.versionId,
+        body: version.body,
+        source: input.source,
+      })
+      return version
     }
     return this.appendDraftVersion({
       revisionTaskId: revision.revisionTaskId, source: input.source, heading: input.heading, body: input.body,
@@ -270,6 +283,10 @@ export class ChapterRevisionService {
     inputMode?: "direct" | "agent"
   }>): Promise<ChapterRevision> {
     const current = await this.requireCurrentChapter(input.projectId, input.chapterId)
+    const chapterSequence = (await this.dependencies.chapterIndex.find(input.projectId, input.chapterId))?.sequence
+    if (chapterSequence !== undefined) {
+      await this.assertChapterWorkflowGate(input.projectId, input.workspaceRootRef, chapterSequence)
+    }
     const inflight = await this.dependencies.revisions.findActiveForChapter(input.projectId, input.chapterId)
     if (inflight !== undefined) {
       await this.ensureBaselineDraft(inflight.revisionTaskId)
@@ -395,6 +412,15 @@ export class ChapterRevisionService {
       createdAtMs: this.dependencies.now(),
     })
     await this.update(input.revisionTaskId, stored.heading, stored.body)
+    if (revision.chapterSequence !== undefined) {
+      await this.dependencies.chapterSynopsis.recordDraftVersionState({
+        projectId: revision.projectId,
+        chapterSequence: revision.chapterSequence,
+        versionId: stored.versionId,
+        body: stored.body,
+        source: input.source,
+      })
+    }
     return (await this.dependencies.draftVersions.find(stored.versionId)) ?? stored
   }
 
@@ -412,20 +438,60 @@ export class ChapterRevisionService {
   }
 
   private async ensureBaselineDraft(revisionTaskId: string): Promise<readonly RevisionDraftVersion[]> {
-    const listed = await this.dependencies.draftVersions.list(revisionTaskId)
-    if (listed.length > 0) return listed
     const revision = await this.requireRevision(revisionTaskId)
-    if (revision.isInitialPublication === true) return listed
+    let listed = [...await this.dependencies.draftVersions.list(revisionTaskId)]
+    const legacyMigrationPending = await this.dependencies.draftVersions.isLegacyMigrationPending(revisionTaskId)
+    if (!legacyMigrationPending) {
+      if (listed.length > 0 || revision.isInitialPublication === true) return listed
+      const detail = await this.readRevision(revisionTaskId)
+      await this.dependencies.draftVersions.append({
+        versionId: this.dependencies.createId(),
+        projectId: revision.projectId,
+        revisionTaskId,
+        source: "baseline",
+        heading: revision.heading,
+        body: detail.proposedBody,
+        createdAtMs: revision.createdAtMs,
+      })
+      return this.dependencies.draftVersions.list(revisionTaskId)
+    }
+
     const detail = await this.readRevision(revisionTaskId)
-    await this.dependencies.draftVersions.append({
-      versionId: this.dependencies.createId(),
-      projectId: revision.projectId,
-      revisionTaskId,
-      source: "baseline",
-      heading: revision.heading,
-      body: detail.proposedBody,
-      createdAtMs: revision.createdAtMs,
-    })
+    if (revision.isInitialPublication !== true && !listed.some((version) => version.source === "baseline")) {
+      await this.dependencies.draftVersions.append({
+        versionId: this.dependencies.createId(),
+        projectId: revision.projectId,
+        revisionTaskId,
+        source: "baseline",
+        heading: revision.heading,
+        body: detail.proposedBody,
+        createdAtMs: revision.createdAtMs,
+      })
+      listed = [...await this.dependencies.draftVersions.list(revisionTaskId)]
+    }
+    if (!listed.some((version) => version.source !== "baseline")) {
+      const source = revision.inputMode === "direct" ? "manual" : "agent"
+      const migrated = await this.dependencies.draftVersions.append({
+        versionId: this.dependencies.createId(),
+        projectId: revision.projectId,
+        revisionTaskId,
+        ...(listed.at(-1)?.versionId === undefined ? {} : { parentVersionId: listed.at(-1)!.versionId }),
+        source,
+        heading: revision.heading,
+        body: detail.proposedBody,
+        createdAtMs: revision.createdAtMs + 1,
+      })
+      if (revision.chapterSequence !== undefined) {
+        await this.dependencies.chapterSynopsis.recordDraftVersionState({
+          projectId: revision.projectId,
+          chapterSequence: revision.chapterSequence,
+          versionId: migrated.versionId,
+          body: migrated.body,
+          source,
+        })
+      }
+    }
+    await this.dependencies.draftVersions.completeLegacyMigration(revisionTaskId)
     return this.dependencies.draftVersions.list(revisionTaskId)
   }
 
@@ -437,6 +503,15 @@ export class ChapterRevisionService {
     }
     const revision = await this.update(revisionTaskId, heading, body)
     await this.dependencies.draftVersions.update(versionId, revision.heading, body)
+    if (revision.chapterSequence !== undefined) {
+      await this.dependencies.chapterSynopsis.recordDraftVersionState({
+        projectId: revision.projectId,
+        chapterSequence: revision.chapterSequence,
+        versionId,
+        body,
+        source: "manual",
+      })
+    }
     return revision
   }
 
@@ -480,10 +555,26 @@ export class ChapterRevisionService {
 
   public async review(input: Readonly<{
     revisionTaskId: string
+    draftVersionId?: string
+    workspaceRootRef?: string
     maxModelCalls?: number
     deadlineMs?: number
   }>, model: AIModelPort): Promise<ChapterRevision> {
-    const revision = await this.requireRevision(input.revisionTaskId)
+    let revision = await this.requireRevision(input.revisionTaskId)
+    if (input.draftVersionId !== undefined) {
+      const draft = await this.readDraftVersion(input.draftVersionId)
+      if (draft.revisionTaskId !== revision.revisionTaskId) throw new RevisionConflictError("Draft version belongs to a different revision")
+      const content = assembleChapterDocument(draft.heading, draft.body)
+      if (digest(content) !== revision.contentDigest) {
+        await this.update(revision.revisionTaskId, draft.heading, draft.body)
+        revision = await this.requireRevision(revision.revisionTaskId)
+      }
+    }
+    if (revision.chapterSequence !== undefined) {
+      const root = input.workspaceRootRef ?? this.dependencies.workspaceRootRef
+      if (root === undefined) throw new RevisionInvalidStateError("Workspace is required to validate the chapter workflow")
+      await this.assertChapterWorkflowGate(revision.projectId, root, revision.chapterSequence)
+    }
     if (revision.status === "completed" || revision.status === "retired" || isContentCommitState(revision.status)) {
       throw new RevisionInvalidStateError(`Revision cannot be reviewed in state: ${revision.status}`)
     }
@@ -516,7 +607,8 @@ export class ChapterRevisionService {
       contextViewRef: `chapter-revision:${revision.revisionTaskId}`,
       committedReadIds: [],
       visiblePendingIds: [],
-      remainingBudget: createReviewBudget(input.maxModelCalls ?? 1, deadlineAtMs),
+      // Allow the adapter's bounded schema repair instead of failing the first malformed response.
+      remainingBudget: createReviewBudget(input.maxModelCalls ?? 3, deadlineAtMs),
       input: {
         workflow: "revision",
         userInput: "审核用户编辑后的章节正文，并给出连续性建议。",
@@ -581,6 +673,9 @@ export class ChapterRevisionService {
       }
     }
     if (isFinalized(revision)) return toPublicRevision(revision)
+    if (revision.chapterSequence !== undefined) {
+      await this.assertChapterWorkflowGate(revision.projectId, input.workspaceRootRef, revision.chapterSequence)
+    }
     const canResume = revision.decision === "submit"
       && (
         isContentCommitState(revision.status)
@@ -589,13 +684,42 @@ export class ChapterRevisionService {
       )
     if (!canResume) assertEditable(revision)
     await this.assertPublicationBase(revision)
-    const review = revision.review
-    if (input.mode === "reviewed" && (review === undefined || review.reviewId !== input.reviewId
-      || review.proposedSourceId !== revision.proposedSourceId || review.contentDigest !== revision.contentDigest)) {
-      throw new RevisionConflictError("Reviewed submission requires a review for the current proposed version")
+    let review = revision.review
+    let autoReviewed = false
+    // Older callers may still send direct + forced. Normalize that request into
+    // an automatic review so it cannot bypass the review and graph stages.
+    if (review === undefined && input.mode === "direct" && input.forced && input.model !== undefined) {
+      review = (await this.review({
+        revisionTaskId: revision.revisionTaskId,
+        workspaceRootRef: input.workspaceRootRef,
+      }, input.model)).review
+      revision = await this.requireRevision(input.revisionTaskId)
+      autoReviewed = true
     }
-    if (input.mode === "direct" && !input.forced) {
-      throw new RevisionConflictError("Direct submission must be recorded as a user-forced edit")
+    const effectiveReviewId = autoReviewed ? review?.reviewId : input.reviewId
+    if (review === undefined || review.reviewId !== effectiveReviewId
+      || review.proposedSourceId !== revision.proposedSourceId || review.contentDigest !== revision.contentDigest) {
+      throw new RevisionConflictError(
+        input.mode === "direct" && input.forced
+          ? "正文发布前必须先完成当前草稿审核，且当前调用未提供可执行审核模型"
+          : "正文发布前必须先完成当前草稿审核",
+      )
+    }
+    const submissionMode = input.mode === "direct" && input.forced ? "reviewed" : input.mode
+    if (submissionMode !== "reviewed" || (input.forced && input.mode !== "direct")) {
+      throw new RevisionConflictError("正文发布必须按审核结果提交，不能直接提交")
+    }
+    if (review.recommendation === "material_conflict") {
+      if (revision.chapterSequence !== undefined) {
+        await this.dependencies.chapterSynopsis.restageChapter({
+          projectId: revision.projectId,
+          workspaceRootRef: input.workspaceRootRef,
+          chapterSequence: revision.chapterSequence,
+          targetStage: "synopsis",
+          reason: "章节审核发现设定或逻辑冲突，强制回到剧情梗概阶段",
+        })
+      }
+      throw new RevisionInvalidStateError("审核发现设定或逻辑冲突，请回退到剧情梗概并重新完成大纲、草稿和审核")
     }
     input.signal?.throwIfAborted()
     if (revision.decision !== "submit") {
@@ -603,17 +727,19 @@ export class ChapterRevisionService {
     }
     let withDecision = revision
     if (revision.decision !== "submit") {
-      const reason = chapterRevisionDecisionReasonSchema.parse(input.forced ? "user_forced_edit" : "user_reviewed_edit")
+      const reason = chapterRevisionDecisionReasonSchema.parse(
+        input.mode === "direct" && input.forced ? "user_reviewed_edit" : input.forced ? "user_forced_edit" : "user_reviewed_edit",
+      )
       const decision: ChapterRevisionDecision = {
         decisionId: this.dependencies.createId(),
         revisionTaskId: revision.revisionTaskId,
         proposedSourceId: revision.proposedSourceId,
         contentDigest: revision.contentDigest,
-        mode: input.mode,
+        mode: submissionMode,
         action: "submit",
         forced: input.forced,
         reason,
-        ...(input.reviewId === undefined ? {} : { reviewId: input.reviewId }),
+        ...(effectiveReviewId === undefined ? {} : { reviewId: effectiveReviewId }),
         ...(input.note === undefined ? {} : { note: input.note }),
         createdAtMs: this.dependencies.now(),
       }
@@ -699,6 +825,11 @@ export class ChapterRevisionService {
     if (revision === undefined) return undefined
     if (revision.status === "completed") return toPublicRevision(revision)
     if (revision.decision !== "submit" || revision.status === "retired") return undefined
+    if (revision.chapterSequence !== undefined) {
+      const root = workspaceRootRef ?? this.dependencies.workspaceRootRef
+      if (root === undefined) throw new RevisionInvalidStateError("Workspace is required to validate the chapter workflow")
+      await this.assertChapterWorkflowGate(revision.projectId, root, revision.chapterSequence)
+    }
     const graphTask = await this.dependencies.taskScopes.findTask(graphSyncTaskId)
     if (graphTask?.status !== "completed") throw new RevisionInvalidStateError("Graph synchronization has not completed")
     const contentTask = await this.dependencies.taskScopes.findTask(revision.revisionTaskId)
@@ -879,6 +1010,23 @@ export class ChapterRevisionService {
     const chapter = await this.dependencies.documents.findCurrentChapter(projectId, chapterId)
     if (chapter === undefined) throw new ChapterNotFoundError(chapterId)
     return chapter
+  }
+
+  private async assertChapterWorkflowGate(
+    projectId: ProjectId,
+    workspaceRootRef: string,
+    chapterSequence: number,
+  ): Promise<void> {
+    const gate = await this.dependencies.chapterSynopsis.getWorkflowGate({
+      projectId,
+      workspaceRootRef,
+      chapterSequence,
+    })
+    if (!gate.readyForDraft) {
+      throw new RevisionInvalidStateError(
+        `${gate.blockedReasons.join("；")}。流程必须按“剧情梗概 → 大纲/人物准备 → 草稿 → 审核 → 图治理 → 正文”执行`,
+      )
+    }
   }
 
   private async toRevisionReadResult(revision: StoredChapterRevision): Promise<ChapterRevisionReadResult> {

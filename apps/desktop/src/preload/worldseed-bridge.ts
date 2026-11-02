@@ -181,8 +181,9 @@ export type WorldseedBridge = Readonly<{
   selectDirectory(input?: { title?: string; defaultPath?: string }): Promise<string | undefined>
   selectMarkdownFiles(input?: { title?: string; defaultPath?: string }): Promise<readonly string[]>
   selectImageFile(input?: { title?: string; defaultPath?: string }): Promise<string | undefined>
+  readImageFile(sourcePath: string): Promise<string>
   getBookCover(workspaceRootRef: string): Promise<string | undefined>
-  setBookCover(input: Readonly<{ workspaceRootRef: string; sourcePath: string }>): Promise<string>
+  setBookCover(input: Readonly<{ workspaceRootRef: string; dataUrl: string }>): Promise<string>
   onCommand(listener: (command: WorldseedCommand) => void): () => void
   windowControl(action: WindowControlAction): Promise<boolean | undefined>
   onWindowMaximized(listener: (maximized: boolean) => void): () => void
@@ -236,6 +237,7 @@ export const worldseedBridge: WorldseedBridge = {
     return Array.isArray(paths) ? paths.filter((entry): entry is string => typeof entry === "string") : []
   },
   selectImageFile: async (input) => ipcRenderer.invoke("worldseed:select-image-file", input) as Promise<string | undefined>,
+  readImageFile: async (sourcePath) => ipcRenderer.invoke("worldseed:image-file:read", { sourcePath }) as Promise<string>,
   getBookCover: async (workspaceRootRef) => {
     const result = await ipcRenderer.invoke("worldseed:book-cover:get", { workspaceRootRef }) as unknown
     return typeof result === "string" && result.length > 0 ? result : undefined

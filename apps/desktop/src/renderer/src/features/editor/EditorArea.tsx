@@ -207,6 +207,7 @@ export function EditorArea(props: Props): React.JSX.Element {
 
   const documentPane = mode === "chapters"
     ? <ChapterPanel
+        projectId={props.projectId ?? ""}
         chapters={props.focusChapters ?? []}
         chapterSummaries={props.chapterSummaries ?? []}
         unpublishedDrafts={props.unpublishedDrafts ?? []}
@@ -884,7 +885,6 @@ function ChapterRevisionEditor(props: {
     busy={busy}
     error={actionError}
     onReview={() => { void review(); }}
-    onDirectSubmit={() => { void submit("direct"); }}
     onReviewedSubmit={() => { void submit("reviewed"); }}
   />
   const revisionErrorBanner = props.dockToolbar && actionError !== undefined
@@ -969,7 +969,6 @@ function ChapterRevisionEditor(props: {
     revisionStage={reviewStage}
     draftChanged={changed}
     onReview={() => { void review(); }}
-    onDirectSubmit={() => { void submit("direct"); }}
     onReviewedSubmit={() => { void submit("reviewed"); }}
     onSelectVersion={selectDraftVersion}
     onEnterDiff={enterDiffMode}
@@ -1218,18 +1217,27 @@ function ChapterRevisionEditor(props: {
     {editorStatusBar}
     {toolbar}
     {pane === "draft" && reviewStage === "reviewed" && canReviseLatestDraft
-      ? <ChapterReviewResults issues={(revision?.review?.issues ?? []).map(toRevisionIssue)} />
+      ? <ChapterReviewResults
+          issues={(revision?.review?.issues ?? []).map(toRevisionIssue)}
+          recommendation={revision?.review?.recommendation}
+        />
       : null}
   </article>
 }
 
-function ChapterReviewResults(props: { issues: readonly RevisionIssue[] }): React.JSX.Element {
+function ChapterReviewResults(props: {
+  issues: readonly RevisionIssue[]
+  recommendation: NonNullable<ChapterRevision["review"]>["recommendation"] | undefined
+}): React.JSX.Element {
+  const rejected = props.recommendation === "material_conflict"
   return <aside className="chapter-review-results" data-testid="chapter-review-results">
     <div className="revision-advisory-callout">
       <AlertTriangle size={14} />
       <div>
-        <strong>审核完成 · 发现 {String(props.issues.length)} 条建议</strong>
-        <p>建议仅供参考，不会阻止提交。你可以继续改草稿，或直接提交。</p>
+        <strong>{rejected ? "审核驳回" : "审核完成"} · 发现 {String(props.issues.length)} 条问题</strong>
+        <p>{rejected
+          ? "当前草稿存在设定或逻辑冲突，不能提交正文。请更新剧情梗概、大纲和草稿后重新审核。"
+          : "当前草稿已通过审核，可按审核结果提交并进入图治理。"}</p>
       </div>
     </div>
     {props.issues.length === 0

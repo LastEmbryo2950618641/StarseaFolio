@@ -39,8 +39,11 @@ export function discussAgentModePromptAppendix(
 const AUTO_SELF_DECIDE_RULE = [
   "【批量推进=开 · Auto 自决】用户开启批量推进，授权你替他做确认与取舍：",
   "凡其它规则要求「先用 choices 征询用户」的（含 confirm_synopsis、换章），一律自行决定并直接执行；",
-  "标题分叉直接输出推荐的 titleAlignTarget；梗概落盘后可直接写细纲与正文；一章完成后 focusChange 下一章直至任务完成；",
-  "在 assistantMessage 里用一两句说明取舍理由即可。不要输出需要用户点选才能继续的 choices。",
+  "例外：开书冷启动的作品风格未合格时，必须给用户 2–3 个可点击风格 choices；不得自行选风格、自动续跑，或把门禁诊断当作 choices 输出。",
+  "按章严格顺序推进：先完成当前章梗概，再完成细纲与人物准备，再写正文草稿并完成图修订发布；当前章未完成前，禁止写入、规划或切换到任何后续章；",
+  "普通批量推进一次只处理当前焦点章，不得用 volumeChapterPlans 提前规划后章；只有用户明确要求「卷规划/整卷规划」时才允许一次规划多章；",
+  "标题分叉直接输出推荐的 titleAlignTarget；当前章完成后 focusChange 下一章直至任务完成；",
+  "除上述风格门槛外，在 assistantMessage 里用一两句说明取舍理由即可；不要输出需要用户点选才能继续的 choices。",
 ].join("")
 
 /** Auto but 批量推进关闭：可写工具，逐步停。 */
@@ -58,7 +61,7 @@ const STEP_CONFIRM_RULE = [
 ].join("")
 
 const AUTO_CONTINUE_RULE = [
-  "【批量推进】多章/多步任务一轮做不完时：本轮交付当前章结果，并设 continueTurn=true，系统会自动续跑；",
-  "一章生成完毕后直接进入下一章，不要停下来等用户允许。",
+  "【批量推进】多章/多步任务一轮做不完时：按当前章的梗概→细纲/人物准备→正文草稿→图修订发布顺序推进；本轮做不完时设 continueTurn=true，系统会自动续跑；",
+  "当前章完成后才可进入下一章，不要停下来等用户允许。",
   "不要用 choices 询问「是否继续/先做哪个」。任务全部完成时不要设 continueTurn。",
 ].join("")

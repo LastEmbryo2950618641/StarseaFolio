@@ -64,6 +64,7 @@ import {
   synopsisResolveTurnInputPayloadSchema,
   synopsisBeginTurnPayloadSchema,
   chapterSynopsisGetPayloadSchema,
+  chapterWorkflowGateGetPayloadSchema,
   deductionGoalsListPayloadSchema,
   deductionGoalsCreatePayloadSchema,
   deductionGoalsUpdatePayloadSchema,
@@ -469,6 +470,9 @@ export class BackendFacade {
       case "chapter.draft.start": {
         const payload = chapterStartDraftPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        if (payload.source === "agent" || payload.source === "workflow") {
+          await runtime.assertWorkStyleGateReady()
+        }
         const volumes = await this.container.workspace.listVolumeFolderNames(payload.workspaceRootRef)
         return runtime.createChapterRevisionService().startForChapterSequence({
           ...payload,
@@ -488,6 +492,8 @@ export class BackendFacade {
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
         return runtime.createChapterRevisionService().review({
           revisionTaskId: payload.revisionTaskId,
+          ...(payload.draftVersionId === undefined ? {} : { draftVersionId: payload.draftVersionId }),
+          workspaceRootRef: payload.workspaceRootRef,
           ...(payload.maxModelCalls === undefined ? {} : { maxModelCalls: payload.maxModelCalls }),
           ...(payload.deadlineMs === undefined ? {} : { deadlineMs: payload.deadlineMs }),
         }, this.resolveModel(payload.model))
@@ -542,6 +548,9 @@ export class BackendFacade {
       case "chapter.revision.draftVersion.append": {
         const payload = chapterDraftVersionAppendPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        if (payload.source === "agent" || payload.source === "workflow") {
+          await runtime.assertWorkStyleGateReady()
+        }
         return runtime.createChapterRevisionService().appendDraftVersion({
           revisionTaskId: payload.revisionTaskId,
           source: payload.source,
@@ -687,6 +696,15 @@ export class BackendFacade {
           projectId: payload.projectId,
           ...(payload.chapterId === undefined ? {} : { chapterId: payload.chapterId }),
           ...(payload.publishPath === undefined ? {} : { publishPath: payload.publishPath }),
+        })
+      }
+      case "chapter.workflowGate.get": {
+        const payload = chapterWorkflowGateGetPayloadSchema.parse(request.payload)
+        const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        return runtime.createChapterSynopsisService().getWorkflowGate({
+          projectId: payload.projectId,
+          workspaceRootRef: payload.workspaceRootRef,
+          chapterSequence: payload.chapterSequence,
         })
       }
       case "deduction.goals.list": {
@@ -1139,6 +1157,7 @@ export class BackendFacade {
     const chapterResolve = runtime.createChapterResolveService()
     let chapterSequence = input.chapterSequence
     if (input.workflow === "turn") {
+      await runtime.assertWorkStyleGateReady()
       if (await chapterResolve.isGraphSyncBlocking(input.projectId)) {
         runtimeLog("warn", "backend-facade", "turn.blocked.graph_sync", { projectId: input.projectId })
         throw new RevisionInvalidStateError("存在尚未完成图同步的章节修订，请先完成图同步后再开始新一轮推演")
@@ -1146,6 +1165,16 @@ export class BackendFacade {
       const nextChapterSequence = await chapterResolve.nextChapterSequence(input.projectId)
       if (chapterSequence > nextChapterSequence) {
         throw new RevisionInvalidStateError("前一章尚未经过图修订发布为正文，不能处理下一章")
+      }
+      const workflowGate = await runtime.createChapterSynopsisService().getWorkflowGate({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        chapterSequence,
+      })
+      if (!workflowGate.readyForDraft) {
+        throw new RevisionInvalidStateError(
+          `${workflowGate.blockedReasons.join("；")}。必须先完成剧情梗概、确认梗概并完成人物准备与剧情细纲，再开始正式推演`,
+        )
       }
       runtimeLog("debug", "backend-facade", "turn.sequence.assigned", {
         projectId: input.projectId,

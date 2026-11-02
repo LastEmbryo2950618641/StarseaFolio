@@ -13,6 +13,7 @@ import {
   isPrecedingChapterPublishGateError,
   partitionChapterDraftSequences,
   settleToolGateTodos,
+  shouldRetryDeferredChapterDraft,
 } from "../src/application/chapters/synopsis-todo-gate.js"
 
 describe("synopsis todo gate", () => {
@@ -77,6 +78,27 @@ describe("synopsis todo gate", () => {
     expect(aligned.find((item) => item.id === "2")?.status).toBe("pending")
     expect(aligned.some((item) => item.status === "in_progress" && item.content.includes("第2章"))).toBe(true)
     expect(discussChapterSequenceGateHint(2, [5])).toContain("第2章")
+  })
+
+  it("retries a deferred draft when the active chapter has no allowed proposal", () => {
+    expect(shouldRetryDeferredChapterDraft({
+      hadDraftIntent: true,
+      hasAllowedDraft: false,
+      deferredSequences: [3],
+      remainingCalls: 2,
+    })).toBe(true)
+    expect(shouldRetryDeferredChapterDraft({
+      hadDraftIntent: true,
+      hasAllowedDraft: false,
+      deferredSequences: [3],
+      remainingCalls: 1,
+    })).toBe(false)
+    expect(shouldRetryDeferredChapterDraft({
+      hadDraftIntent: true,
+      hasAllowedDraft: true,
+      deferredSequences: [3],
+      remainingCalls: 2,
+    })).toBe(false)
   })
 
   it("settles the gate-tool step after a tool ran and promotes real work", () => {

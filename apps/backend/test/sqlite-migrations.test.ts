@@ -56,10 +56,9 @@ describe("SQLite migrations", () => {
     const busyTimeout = await sql<{ timeout: number }>`PRAGMA busy_timeout`.execute(database)
     const frontierColumns = await sql<{ name: string }>`PRAGMA table_info(frontier_refs)`.execute(database)
     const sourceUnitColumns = await sql<{ name: string }>`PRAGMA table_info(source_units)`.execute(database)
+    const chapterArtifactColumns = await sql<{ name: string }>`PRAGMA table_info(chapter_artifact_states)`.execute(database)
 
-    expect(migrations.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
-    ])
+    expect(migrations.map((migration) => migration.version)).toEqual(Array.from({ length: 56 }, (_, index) => index + 1))
     expect(tableNames).toEqual(expect.objectContaining(new Set([
       "projects",
       "project_manifests",
@@ -117,6 +116,7 @@ describe("SQLite migrations", () => {
       "task_workspace_catalog_snapshots",
       "evidence_objects",
       "synopsis_conversation_sessions",
+      "work_style_gate_states",
       "synopsis_conversation_messages",
       "synopsis_discuss_context_messages",
       "chapter_synopsis",
@@ -127,6 +127,12 @@ describe("SQLite migrations", () => {
     expect(journalMode.rows[0]?.journal_mode).toBe("wal")
     expect(foreignKeys.rows[0]?.foreign_keys).toBe(1)
     expect(busyTimeout.rows[0]?.timeout).toBe(5000)
+    expect(chapterArtifactColumns.rows.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "synopsis_write_count",
+      "outline_write_count",
+      "body_write_count",
+      "body_digest",
+    ]))
     expect(frontierColumns.rows.map((column) => column.name)).toEqual([
       "id",
       "project_id",

@@ -5,8 +5,8 @@ import type { DiscussFocusChapterOption } from "./synopsis-path.js"
 
 export function isHookScheduleIncomplete(goal: Readonly<{
   narrativeKind: DeductionGoal["narrativeKind"]
-  plantChapterSequence?: number
-  payoffChapterSequence?: number
+  plantChapterSequence?: number | undefined
+  payoffChapterSequence?: number | undefined
 }>): boolean {
   if (goal.narrativeKind !== "foreshadow" && goal.narrativeKind !== "climax") return false
   return goal.plantChapterSequence === undefined || goal.payoffChapterSequence === undefined

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { rmSync } from "node:fs"
+import { join } from "node:path"
 
+import Database from "better-sqlite3"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { PROTOCOL_VERSION } from "@worldseed/contracts"
@@ -124,6 +126,61 @@ describe("revision draft versions", () => {
         },
       })
       expect((committed.data as { body: string }).body).toBe(chapter.body)
+    })
+  })
+
+  it("repairs legacy agent revisions that only persisted the proposed document", async () => {
+    await withHarness(async (harness) => {
+      const chapter = await seedCommittedChapter(harness)
+      const started = await harness.facade.handle({
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: randomUUID(),
+        method: "chapter.startRevision",
+        payload: {
+          projectId: harness.projectId,
+          workspaceRootRef: harness.workspaceRootRef,
+          chapterId: chapter.chapterId,
+          baseSourceId: chapter.sourceId,
+          heading: chapter.heading,
+          body: chapter.body,
+          inputMode: "agent",
+        },
+      })
+      expect(started.ok).toBe(true)
+      const revisionTaskId = (started.data as { revisionTaskId: string }).revisionTaskId
+
+      const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      try {
+        database.prepare("INSERT INTO legacy_revision_draft_migrations (revision_task_id) VALUES (?)").run(revisionTaskId)
+      } finally {
+        database.close()
+      }
+
+      const listed = await harness.facade.handle({
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: randomUUID(),
+        method: "chapter.revision.draftVersion.list",
+        payload: {
+          projectId: harness.projectId,
+          workspaceRootRef: harness.workspaceRootRef,
+          revisionTaskId,
+        },
+      })
+      expect(listed.ok).toBe(true)
+      const versions = (listed.data as { versions: Array<{ source: string; label: string; isLatest: boolean; body: string }> }).versions
+      expect(versions).toHaveLength(2)
+      expect(versions[0]?.source).toBe("baseline")
+      expect(versions[1]?.source).toBe("agent")
+      expect(versions[1]?.label).toBe("v1")
+      expect(versions[1]?.isLatest).toBe(true)
+      expect(versions[1]?.body).toBe(chapter.body)
+
+      const databaseAfter = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      try {
+        expect(databaseAfter.prepare("SELECT 1 FROM legacy_revision_draft_migrations WHERE revision_task_id = ?").get(revisionTaskId)).toBeUndefined()
+      } finally {
+        databaseAfter.close()
+      }
     })
   })
 })

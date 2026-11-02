@@ -155,6 +155,12 @@ export function assembleGraphGovernanceArtifact(input: Readonly<{
     proposal.proposalRef,
     proposal.mutation.operation.endsWith("_node") ? "node" as const : "link" as const,
   ]))
+  const proposalRefByMutationRef = new Map(structure.proposals.flatMap((proposal) => {
+    const mutation = proposal.mutation
+    return mutation.operation === "create_node" || mutation.operation === "create_link"
+      ? [[mutation.ref, proposal.proposalRef] as const]
+      : []
+  }))
   const mutationIndexes = (proposalRefs: readonly string[]): number[] => proposalRefs.map((proposalRef) => {
     const index = mutationIndexByProposalRef.get(proposalRef)
     if (index === undefined) throw new Error(`Unknown graph proposal reference: ${proposalRef}`)
@@ -163,16 +169,20 @@ export function assembleGraphGovernanceArtifact(input: Readonly<{
 
   const governance = graphGovernanceArtifactSchema.parse({
     mutations: structure.proposals.map((proposal) => proposal.mutation),
-    retrievalProjections: retrieval.projections.map((projection) => ({
-      ownerKind: projection.ownerProposalRef === undefined
-        ? inferExistingOwnerKind(projection.ownerRef as string)
-        : ownerKindByProposalRef.get(projection.ownerProposalRef),
-      ...(projection.ownerProposalRef === undefined
-        ? { ownerRef: projection.ownerRef }
-        : { ownerMutationIndex: mutationIndexes([projection.ownerProposalRef])[0] }),
-      exactKeys: projection.exactKeys,
-      semanticText: projection.semanticText,
-    })),
+    retrievalProjections: retrieval.projections.map((projection) => {
+      const matchedProposalRef = projection.ownerProposalRef
+        ?? (projection.ownerRef === undefined ? undefined : proposalRefByMutationRef.get(projection.ownerRef))
+      return {
+        ownerKind: matchedProposalRef === undefined
+          ? inferExistingOwnerKind(projection.ownerRef as string)
+          : ownerKindByProposalRef.get(matchedProposalRef),
+        ...(matchedProposalRef === undefined
+          ? { ownerRef: projection.ownerRef }
+          : { ownerMutationIndex: mutationIndexes([matchedProposalRef])[0] }),
+        exactKeys: projection.exactKeys,
+        semanticText: projection.semanticText,
+      }
+    }),
     settlementRecords: retrieval.sourceSettlements.map((settlement) => ({
       ...settlement,
       graphRefs: settlement.graphRefs.map((reference) => ({

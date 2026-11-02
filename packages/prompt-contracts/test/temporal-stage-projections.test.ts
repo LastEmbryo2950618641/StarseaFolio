@@ -67,6 +67,32 @@ describe("temporal continuity contracts", () => {
     }); }).toThrow(/Read evidence references must belong to this turn/u)
   })
 
+  it("accepts only declared governance handles in a compact dependency audit", () => {
+    const artifact = {
+      ...dependencyArtifact(),
+      temporalClaims: [{
+        ...temporalClaim("claim:one"),
+        referenceRefs: ["local:event_repair"],
+        timelineRefs: ["local:time_preflood"],
+      }],
+    }
+    const visibility = {
+      readableEvidenceIds: new Set(["evidence_1"]),
+      readableGraphIds: new Set<string>(),
+      readableWorkspacePaths: new Set<string>(),
+      declaredLocalGraphRefs: new Set(["local:event_repair", "local:time_preflood"]),
+    }
+    expect(() => { assertPhaseReferenceContract("dependency_audit", artifact, visibility); }).not.toThrow()
+    expect(() => { assertPhaseReferenceContract("dependency_audit", artifact, {
+      ...visibility,
+      declaredLocalGraphRefs: new Set(["local:event_repair"]),
+    }); }).toThrow(/local:time_preflood/u)
+    expect(() => { assertPhaseReferenceContract("dependency_audit", {
+      ...artifact,
+      temporalClaims: [{ ...artifact.temporalClaims[0], evidenceRefs: ["evidence_unread"] }],
+    }, visibility); }).toThrow(/Read evidence references/u)
+  })
+
   it("rejects local graph handles in temporal assessment evidence fields", () => {
     expect(() => graphGovernanceReviewArtifactSchema.parse({
       ...governanceReviewArtifact(),

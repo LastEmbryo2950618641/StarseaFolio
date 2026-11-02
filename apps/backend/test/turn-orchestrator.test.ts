@@ -2164,8 +2164,8 @@ describe("TurnOrchestrator", () => {
       phase: "response_review",
       outcome: "revise",
       artifact: { evidenceClosed: false },
-      reason: "旧答案遗漏了已经读取的 Source 原文",
     })
+    expect(revisionFeedback?.reason).toContain("旧答案遗漏了已经读取的 Source 原文")
     const queryAttempts = await fixture.database.selectFrom("phase_runs").select(["phase", "status"])
       .where("phase", "in", ["draft", "response_review"]).orderBy("started_at").execute()
     expect(queryAttempts).toEqual([
@@ -2217,6 +2217,94 @@ describe("TurnOrchestrator", () => {
 
     expect(draftCalls).toBe(2)
     expect(reviewCalls).toBe(2)
+  })
+
+  it.each([
+    { disposition: "supported", status: "unknown", omit: false },
+    { disposition: "supported", status: "supported", omit: false },
+    { disposition: "unsupported", status: "unknown", omit: false },
+    { disposition: "abstained", status: "supported", omit: false },
+    { disposition: "supported", status: "unknown", omit: true },
+  ])("rewrites an unsupported temporal answer even when evidenceClosed says true: $disposition/$status/omit=$omit", async ({ disposition, status, omit }) => {
+    const fixture = await createFixture()
+    const fake = new FakeAiModelAdapter(randomUUID)
+    let draftCalls = 0
+    let reviewCalls = 0
+    let feedback: TurnPhaseInput["revisionFeedback"]
+    const model: AIModelPort = {
+      info: fake.info,
+      execute: async (request) => {
+        const execution = await fake.execute(request)
+        if (request.phase === "draft") {
+          draftCalls += 1
+          feedback = (request.input as TurnPhaseInput).revisionFeedback
+        }
+        if (request.phase !== "response_review" || ++reviewCalls > 1) return execution
+        return {
+          ...execution,
+          result: {
+            ...execution.result,
+            outcome: "continue",
+            artifact: {
+              evidenceClosed: true, leaksUnobservedInformation: false, requiresWorkflowUpgrade: false,
+              ...(omit ? {} : { queryGrounding: {
+                answerDisposition: disposition,
+                constraints: [{
+                  condition: "Custodian on the future opening day",
+                  status, evidenceRefs: [],
+                  reason: "Only the current custodian is recorded",
+                }],
+              } }),
+            },
+          },
+        }
+      },
+    }
+    await fixture.createOrchestrator(model, fixture.commit).execute({
+      workflow: "query", projectId: fixture.projectId, workspaceRootRef: fixture.workspaceRoot,
+      internalStore: fixture.store, userInput: "开张当天会由谁保管？", chapterSequence: 2,
+      allowWorkspaceChapterReads: false,
+    })
+    expect(draftCalls).toBe(2)
+    expect(reviewCalls).toBe(2)
+    expect(feedback?.reason).toContain("Query grounding failed")
+  })
+
+  it("accepts a query abstention that identifies an unresolved condition", async () => {
+    const fixture = await createFixture()
+    const fake = new FakeAiModelAdapter(randomUUID)
+    let reviewCalls = 0
+    const model: AIModelPort = {
+      info: fake.info,
+      execute: async (request) => {
+        const execution = await fake.execute(request)
+        if (request.phase !== "response_review") return execution
+        reviewCalls += 1
+        return {
+          ...execution,
+          result: {
+            ...execution.result,
+            artifact: {
+              evidenceClosed: true, leaksUnobservedInformation: false, requiresWorkflowUpgrade: false,
+              queryGrounding: {
+                answerDisposition: "abstained",
+                constraints: [{
+                  condition: "Custodian on the future opening day", status: "unknown", evidenceRefs: [],
+                  reason: "The event has not happened in the visible snapshot",
+                }],
+              },
+            },
+          },
+        }
+      },
+    }
+    const result = await fixture.createOrchestrator(model, fixture.commit).execute({
+      workflow: "query", projectId: fixture.projectId, workspaceRootRef: fixture.workspaceRoot,
+      internalStore: fixture.store, userInput: "开张当天会由谁保管？", chapterSequence: 2,
+      allowWorkspaceChapterReads: false,
+    })
+    expect(result.kind).toBe("query")
+    expect(reviewCalls).toBe(1)
   })
 
   it("pauses after query review exhaustion and resumes from a revised draft", async () => {

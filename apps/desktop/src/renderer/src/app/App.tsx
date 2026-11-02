@@ -52,7 +52,6 @@ import { WorkspaceNameDialog } from "../features/workspace/WorkspaceNameDialog.j
 import { AUTO_DESCRIPTION_RULE_PATH, canCreateFolderInDirectory, findDuplicateVolumeSequence, isValidVolumeFolderName, isChapterVolumeContainerPath, isVolumeDirectoryPath, resolveCreateDestination } from "../features/workspace/workspace-locks.js"
 import { EditorArea } from "../features/editor/EditorArea.js"
 import { ChapterBrowseDetailRail } from "../features/editor/ChapterBrowseDetailRail.js"
-import { SynopsisConversationComposer } from "../features/editor/SynopsisConversationComposer.js"
 import { useCreationDeskPresentationPreferences, reconcileSelectedRulePath } from "../features/editor/creation-desk-presentation-preferences.js"
 import { SettingsLineagePanel } from "../features/settings/SettingsLineagePanel.js"
 import { ChapterWorkspaceRail } from "../features/editor/ChapterWorkspaceRail.js"
@@ -110,6 +109,7 @@ type PendingGraphLoad = Readonly<{
 
 export function App(): React.JSX.Element {
   const [project, setProject] = useState<OpenProject | undefined>(browserDemoProject)
+  const [coverByProjectId, setCoverByProjectId] = useState<Readonly<Record<string, string>>>({})
   const [report, setReport] = useState<WorkspaceReport>({ inventory: [], issues: [] })
   const [workspaceFilePaths, setWorkspaceFilePaths] = useState<readonly string[]>([])
   const [selectedPath, setSelectedPath] = useState<string>()
@@ -131,6 +131,7 @@ export function App(): React.JSX.Element {
   const [discussDraftPromotion, setDiscussDraftPromotion] = useState<{
     revisionTaskId: string
     chapterId: string
+    draftVersionId: string
   }>()
   const [synopsisConversation, setSynopsisConversation] = useState<SynopsisConversationListResult>({ messages: [] })
   const [synopsisConversationBusy, setSynopsisConversationBusy] = useState(false)
@@ -197,7 +198,7 @@ export function App(): React.JSX.Element {
   }>()
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>()
   const [history, setHistory] = useState<HistoryOverview>()
-  const [historyLoading, setHistoryLoading] = useState(false)
+  const [, setHistoryLoading] = useState(false)
   const [modelProfiles, setModelProfiles] = useState<readonly ModelProfile[]>([])
   const [activeModelProfileId, setActiveModelProfileId] = useState("")
   const monitoredChapterRevisionIds = useRef(new Set<string>())
@@ -217,6 +218,10 @@ export function App(): React.JSX.Element {
     setSynopsisConversation(result)
     setSynopsisUsage(result.usage)
   }, [project])
+
+  const handleCoverChanged = useCallback((projectId: string, dataUrl: string): void => {
+    setCoverByProjectId((current) => ({ ...current, [projectId]: dataUrl }))
+  }, [])
 
   const syncDiscussFocus = useCallback(async (path: string): Promise<void> => {
     if (project === undefined) return
@@ -967,16 +972,34 @@ export function App(): React.JSX.Element {
     revisionTaskId: string
     mode: "direct" | "reviewed"
     forced: boolean
+    draftVersionId?: string
     reviewId?: string
   }>): Promise<ChapterRevision> => {
     if (project === undefined) throw new Error("当前没有打开项目")
     setError(undefined)
     let revision: ChapterRevision
     try {
+      const submission = input.mode === "direct"
+        ? await invokeBackend<ChapterRevision>("chapter.reviewRevision", {
+            projectId: project.projectId,
+            workspaceRootRef: project.workspaceRootRef,
+            revisionTaskId: input.revisionTaskId,
+            ...(input.draftVersionId === undefined ? {} : { draftVersionId: input.draftVersionId }),
+            ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
+          }).then((reviewed) => {
+            if (reviewed.review === undefined) throw new Error("当前草稿审核未生成结果，不能提交正文")
+            return {
+              ...input,
+              mode: "reviewed" as const,
+              forced: false,
+              reviewId: reviewed.review.reviewId,
+            }
+          })
+        : input
       revision = await invokeBackend<ChapterRevision>("chapter.submitRevision", {
         projectId: project.projectId,
         workspaceRootRef: project.workspaceRootRef,
-        ...input,
+        ...submission,
         ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
       })
     } catch (cause) {
@@ -1052,7 +1075,16 @@ export function App(): React.JSX.Element {
       revisionTaskId,
       mode: "direct",
       forced: true,
+      ...(discussDraftPromotion?.revisionTaskId === revisionTaskId
+        ? { draftVersionId: discussDraftPromotion.draftVersionId }
+        : {}),
     })
+  }
+
+  const selectDiscussDraftCandidate = (revisionTaskId: string, draftVersionId: string): void => {
+    setDiscussDraftPromotion((current) => current?.revisionTaskId !== revisionTaskId
+      ? current
+      : { ...current, draftVersionId })
   }
 
   const loadCommittedGraph = async (
@@ -1484,6 +1516,7 @@ export function App(): React.JSX.Element {
         setDiscussDraftPromotion({
           revisionTaskId: sent.appendedDraft.revisionTaskId,
           chapterId: sent.appendedDraft.chapterId,
+          draftVersionId: sent.appendedDraft.draftVersionId,
         })
         try {
           const applied = await invokeBackend<ChapterRevisionReadResult>("chapter.readRevision", {
@@ -2014,6 +2047,10 @@ export function App(): React.JSX.Element {
           volumeChapters = incomplete.chapters
         }
         if (options?.skipOutlineGate !== true) {
+          if (volumeFolderName === undefined) {
+            setError("未找到可推演的卷")
+            return
+          }
           const outlineFile = volumeOutlinePath(volumeFolderName)
           let outlineMarkdown = ""
           try {
@@ -2202,12 +2239,20 @@ export function App(): React.JSX.Element {
             }
             updateBatchStatus("publish", chapterSequence)
             try {
+              const reviewed = await invokeBackend<ChapterRevision>("chapter.reviewRevision", {
+                projectId: project.projectId,
+                workspaceRootRef: project.workspaceRootRef,
+                revisionTaskId: publishDraft.revisionTaskId,
+                ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
+              })
+              if (reviewed.review === undefined) throw new Error("当前草稿审核未生成结果，不能提交正文")
               const submitted = await invokeBackend<ChapterRevision>("chapter.submitRevision", {
                 projectId: project.projectId,
                 workspaceRootRef: project.workspaceRootRef,
                 revisionTaskId: publishDraft.revisionTaskId,
-                mode: "direct",
-                forced: true,
+                mode: "reviewed",
+                forced: false,
+                reviewId: reviewed.review.reviewId,
                 ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
               })
               setChapterRevision(submitted)
@@ -2367,12 +2412,20 @@ export function App(): React.JSX.Element {
           }
           updateBatchStatus("publish", sequence)
           try {
+            const reviewed = await invokeBackend<ChapterRevision>("chapter.reviewRevision", {
+              projectId: project.projectId,
+              workspaceRootRef: project.workspaceRootRef,
+              revisionTaskId: draft.revisionTaskId,
+              ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
+            })
+            if (reviewed.review === undefined) throw new Error("当前草稿审核未生成结果，不能提交正文")
             const submitted = await invokeBackend<ChapterRevision>("chapter.submitRevision", {
               projectId: project.projectId,
               workspaceRootRef: project.workspaceRootRef,
               revisionTaskId: draft.revisionTaskId,
-              mode: "direct",
-              forced: true,
+              mode: "reviewed",
+              forced: false,
+              reviewId: reviewed.review.reviewId,
               ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
             })
             setChapterRevision(submitted)
@@ -2492,49 +2545,6 @@ export function App(): React.JSX.Element {
       metricIds,
     })
     setTask((current) => current === undefined ? current : { ...current, runtimeMetrics })
-  }
-
-  const applyHistoryCheckout = async (method: "history.restore" | "history.continueFrom", entryId: string): Promise<void> => {
-    if (project === undefined) return
-    const result = await invokeBackend<HistoryCheckoutResult>(method, {
-      projectId: project.projectId,
-      workspaceRootRef: project.workspaceRootRef,
-      operationId: crypto.randomUUID(),
-      entryId,
-    })
-    setSelectedPath(undefined)
-    setOpenedDocumentPath(undefined)
-    setSelectedChapter(undefined)
-    setChapterRevision(undefined)
-    setContent("")
-    setChapterBody("")
-    setSavedContent("")
-    setChapterRevision(undefined)
-    setChapterRevisionContent(undefined)
-    setChapterDraftVersions([])
-    await Promise.all([refreshWorkspace(), refreshHistory(), loadHistoryGraph(result.graphAnchorIds)])
-    const recoverable = await invokeBackend<RecoverableTaskList>("turn.recoverable.list", {
-      projectId: project.projectId,
-      workspaceRootRef: project.workspaceRootRef,
-    })
-    setTask(result.restoredTaskId === undefined
-      ? undefined
-      : recoverable.find((candidate) => candidate.handle?.taskId === result.restoredTaskId))
-    setPostCommitNotice(method === "history.continueFrom"
-      ? `已从“${result.entry.name}”创建并切换到 ${result.branch.name}。`
-      : `已加载“${result.entry.name}”，章节、世界图、Markdown 与上下文链已恢复。`)
-  }
-
-  const saveHistory = async (): Promise<void> => {
-    if (project === undefined) return
-    const now = new Date()
-    await invokeBackend("history.saveManual", {
-      projectId: project.projectId,
-      workspaceRootRef: project.workspaceRootRef,
-      operationId: crypto.randomUUID(),
-      name: `手动保存 · ${now.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`,
-    })
-    await refreshHistory()
   }
 
   const returnPreviousRound = async (): Promise<void> => {
@@ -2755,6 +2765,7 @@ export function App(): React.JSX.Element {
       <AppChrome
         rail={
           <ProjectRail
+            coverByProjectId={coverByProjectId}
             onOpen={resetWorkbenchForProject}
             updateAvailable={appUpdate.available}
             onUpdateClick={() => {
@@ -2763,7 +2774,7 @@ export function App(): React.JSX.Element {
           />
         }
       >
-        <ProjectLauncher onOpen={resetWorkbenchForProject} />
+        <ProjectLauncher onOpen={resetWorkbenchForProject} onCoverChanged={handleCoverChanged} />
       </AppChrome>
       {appUpdate.dialog !== null
         ? <AppUpdateDialog
@@ -2819,6 +2830,7 @@ export function App(): React.JSX.Element {
     rail={
       <ProjectRail
         activeProjectId={project.projectId}
+        coverByProjectId={coverByProjectId}
         onOpen={resetWorkbenchForProject}
         onBrowseAllBooks={() => { resetWorkbenchForProject(undefined) }}
         updateAvailable={appUpdate.available}
@@ -3101,70 +3113,14 @@ export function App(): React.JSX.Element {
                       projectId={project.projectId}
                       workspaceRootRef={project.workspaceRootRef}
                       chapter={browseChapter}
+                      unpublishedDrafts={unpublishedDrafts}
+                      {...(discussDraftPromotion?.draftVersionId === undefined ? {} : { draftCandidateVersionId: discussDraftPromotion.draftVersionId })}
+                      onSelectDraftCandidate={selectDiscussDraftCandidate}
                       {...(browseVolume === undefined ? {} : { volume: browseVolume })}
                       onOpenBody={(path) => { void openFile(path) }}
                     />
                   : <ChapterWorkspaceRail
                       key={selectedPath}
-                      conversation={<SynopsisConversationComposer
-                        layout="rail"
-                        focusLocked
-                        projectId={project.projectId}
-                        workspaceRootRef={project.workspaceRootRef}
-                        session={synopsisConversation.session}
-                        messages={synopsisConversation.messages}
-                        busy={synopsisConversationBusy}
-                        stream={synopsisStream}
-                        {...(synopsisDraftRestore === undefined ? {} : { draftRestore: synopsisDraftRestore })}
-                        running={task?.status === "running"}
-                        {...(pendingStagingPromotes.length === 0
-                          ? {}
-                          : { pendingStagingPromotes })}
-                        onSend={async (message, sendOptions) => {
-                          const lockedChapterSequence = selectedChapter?.sequence
-                            ?? (selectedPath === undefined
-                              ? undefined
-                              : parseChapterSequenceFromPath(selectedPath))
-                          if (lockedChapterSequence === undefined) {
-                            setError("无法锁定当前章节焦点")
-                            return
-                          }
-                          await sendSynopsisMessage(message, {
-                            focusLocked: true,
-                            lockedChapterSequence,
-                            ...(sendOptions?.agentMode === undefined ? {} : { agentMode: sendOptions.agentMode }),
-                          })
-                        }}
-                        {...(stopSynopsisMessage === undefined ? {} : { onStop: stopSynopsisMessage })}
-                        onRefreshChoices={refreshSynopsisChoices}
-                        onPromoteStaging={promoteStaging}
-                        onPromoteDraftToBody={promoteDiscussDraftToBody}
-                        {...(rejectStagingPromote === undefined ? {} : { onRejectStagingPromote: rejectStagingPromote })}
-                        onStartTurn={() => { startTurn(); }}
-                        onOpenSynopsisFile={(path) => { void openFile(path); }}
-                        onOpenSettingsLineage={openSettingsLineage}
-                        requireCompleteHookSchedules={projectSettings?.creationDesk.requireCompleteHookSchedules !== false}
-                        chapterWorkflowEnabled={projectSettings?.creationDesk.chapterWorkflowEnabled === true}
-                        descriptionRule={descriptionRule}
-                        proseRule={proseRule}
-                        minimumWordCount={minimumWordCount}
-                        maximumWordCount={maximumWordCount}
-                        wordCountValid={wordCountValid}
-                        descriptionRules={descriptionRules}
-                        proseRules={proseRules}
-                        boundaryPace={boundaryPace}
-                        causalityFocus={causalityFocus}
-                        onDescriptionRuleChange={(value) => { updatePresentation({ descriptionRule: value }); }}
-                        onProseRuleChange={(value) => { updatePresentation({ proseRule: value }); }}
-                        onMinimumWordCountChange={(value) => { updatePresentation({ minimumWordCount: value }); }}
-                        onMaximumWordCountChange={(value) => { updatePresentation({ maximumWordCount: value }); }}
-                        onBoundaryPaceChange={(value) => { updatePresentation({ boundaryPace: value }); }}
-                        onCausalityFocusChange={(value) => { updatePresentation({ causalityFocus: value }); }}
-                        modelProfiles={modelProfiles}
-                        activeModelProfileId={activeModelProfileId}
-                        onActiveModelIdChange={(modelId) => { void updateActiveModelId(modelId); }}
-                        onReasoningEffortChange={(effort) => { void updateActiveReasoningEffort(effort); }}
-                      />}
                       {...(railSynopsisMarkdown === undefined ? {} : { synopsisMarkdown: railSynopsisMarkdown })}
                       {...(railOutlineMarkdown === undefined ? {} : { outlineMarkdown: railOutlineMarkdown })}
                       {...(railSynopsisPath === undefined ? {} : { synopsisPath: railSynopsisPath })}
@@ -3174,20 +3130,18 @@ export function App(): React.JSX.Element {
                 defaultPanel={<RightRail
           revisionModel={activeModelProfile === undefined ? undefined : modelSelection(activeModelProfile)}
           task={task}
-          focusedChapterSequence={synopsisConversation.session?.chapterSequence}
                   project={project}
           graphSlice={graphSlice}
           graphSettings={projectSettings?.graph}
-          historyRetentionLimit={projectSettings?.history.retentionLimit}
-          history={history}
-          historyLoading={historyLoading}
-                  contextWindowTokens={activeModelProfile?.contextWindowTokens}
-          onOpenProjectSettings={() => { useWorkbenchStore.getState().openProjectSettings(); }}
+          chapters={discussFocusChapters}
+          chapterSummaries={chapterSummaries}
+          unpublishedDrafts={unpublishedDrafts}
+          {...(discussDraftPromotion?.draftVersionId === undefined ? {} : { draftCandidateVersionId: discussDraftPromotion.draftVersionId })}
+          onSelectDraftCandidate={selectDiscussDraftCandidate}
+          selectedChapterPath={selectedPath}
+          onOpenChapter={(path) => { void openFile(path) }}
           onResumeTask={resumeTask}
           onResetTaskMetrics={resetTaskMetrics}
-          onSaveHistory={saveHistory}
-          onRestoreHistory={(entryId) => applyHistoryCheckout("history.restore", entryId)}
-          onContinueFromHistory={(entryId) => applyHistoryCheckout("history.continueFrom", entryId)}
           onReturnPreviousRound={returnPreviousRound}
                   onRefreshTask={async () => {
                     const taskId = task?.handle?.taskId
@@ -3195,7 +3149,7 @@ export function App(): React.JSX.Element {
                     const snapshot = await invokeBackend<TaskSnapshot>("turn.status", { taskId })
                     setTask(snapshot)
                   }}
-                  onRefreshWorkspace={refreshWorkspace}
+                  onRefreshWorkspace={async () => { await refreshWorkspace() }}
                 />}
         />
       </Panel>

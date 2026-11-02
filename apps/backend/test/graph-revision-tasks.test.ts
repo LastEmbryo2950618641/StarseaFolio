@@ -136,7 +136,7 @@ describe("graph revision task operations", () => {
       })
       await expect(call("chapter.submitRevision", { ...revision, mode: "direct", forced: true })).rejects.toThrow("conflicts with an existing file")
       expect(await call("chapter.read", { chapterId: chapter.chapterId })).toMatchObject(original)
-      expect(await call("chapter.readRevision", revision)).toMatchObject({ decision: "pending", status: "editing" })
+      expect(await call("chapter.readRevision", revision)).toMatchObject({ decision: "pending", status: "ready_to_submit" })
       expect(await call("chapter.graphRevision.list")).toMatchObject([{ status: "completed" }])
       expect(readFileSync(conflictPath, "utf8")).toBe("Independent content")
       unlinkSync(conflictPath)

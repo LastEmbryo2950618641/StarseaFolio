@@ -174,6 +174,7 @@ function createModelInput(value: unknown): unknown {
     stageProjection,
     synopsisDiscuss,
     deductionGoalBundle,
+    revision,
     ...semanticInput
   } = value
   void ignoredSourceId
@@ -188,6 +189,7 @@ function createModelInput(value: unknown): unknown {
     ...(deductionGoalBundle === undefined
       ? {}
       : { deductionGoalBundle: createModelDeductionGoalBundle(deductionGoalBundle) }),
+    ...(revision === undefined ? {} : { revision: createModelRevision(revision) }),
     ...(stageProjection === undefined ? {} : { stageProjection: createModelStageProjection(stageProjection) }),
     ...(Array.isArray(readEvidence)
       ? { readEvidence: readEvidence.map(createModelReadEvidence) }
@@ -202,6 +204,20 @@ function createModelInput(value: unknown): unknown {
       ? { workspaceCatalog: { entries: workspaceCatalog.entries } }
       : workspaceCatalog === undefined ? {} : { workspaceCatalog }),
   }
+}
+
+function createModelRevision(value: unknown): unknown {
+  if (!isRecord(value)) return value
+  const {
+    chapterId: ignoredChapterId,
+    baseSourceId: ignoredBaseSourceId,
+    proposedSourceId: ignoredProposedSourceId,
+    ...revision
+  } = value
+  void ignoredChapterId
+  void ignoredBaseSourceId
+  void ignoredProposedSourceId
+  return revision
 }
 
 /** Keep goal IDs (aliased later); drop turn taskId which is application-only. */

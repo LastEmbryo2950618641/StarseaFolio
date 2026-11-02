@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { applyColdStartStyleGate } from "../src/application/chapters/cold-start-style-gate.js"
+import {
+  applyColdStartStyleGate,
+  resolveColdStartStyleSelectionPath,
+} from "../src/application/chapters/cold-start-style-gate.js"
 import {
   WORK_STYLE_REQUIRED_HEADINGS,
   WORK_STYLE_SEED_MARKDOWN,
@@ -73,11 +76,38 @@ describe("work style gate", () => {
     expect(assessWorkStyleMarkdown(completeStyleMarkdown()).complete).toBe(true)
   })
 
+  it("requires an explicit user selection from a style choice", () => {
+    const choices = [{
+      label: "以「表现输出/笔风规则/仙侠.md」为主笔风：氛围沉浸、描写细腻",
+      action: "continue_discuss" as const,
+    }]
+    const messages = [{
+      role: "assistant",
+      content: "先选择一套作品风格方案。",
+      choices,
+    }]
+
+    const paths = ["表现输出/笔风规则/仙侠.md"]
+    expect(resolveColdStartStyleSelectionPath(messages, "继续推进下一章", paths)).toBeUndefined()
+    expect(resolveColdStartStyleSelectionPath(messages, choices[0].label, paths)).toBe(paths[0])
+    expect(resolveColdStartStyleSelectionPath([], "按你的推荐来定风格", paths)).toBe(paths[0])
+    expect(resolveColdStartStyleSelectionPath([
+      ...messages,
+      { role: "assistant", content: "继续讨论章节", choices: [{ label: "写下一章", action: "continue_discuss" as const }] },
+    ], choices[0].label, paths)).toBeUndefined()
+  })
+
   it("strips drafts and volume plans when style incomplete", () => {
     const { assist, blocked, notices } = applyColdStartStyleGate({
       diskStyleMarkdown: WORK_STYLE_SEED_MARKDOWN,
+      gateReady: false,
+      styleChoicePending: true,
       assist: {
+        synopsisBody: "不应写入的梗概",
+        outlineBody: "不应写入的细纲",
+        bodyEdits: { target: "outline", ops: [{ oldText: "旧", newText: "新" }] },
         chapterDraftProposal: { base: "draft", heading: "x", body: "y" },
+        continueTurn: true,
         volumeChapterPlans: [{ chapterSequence: 1, synopsisBody: "a", outlineBody: "b" }],
         arcPlanMarkdown: "# 卷大纲",
         presentationWrites: [{
@@ -89,18 +119,33 @@ describe("work style gate", () => {
       },
     })
     expect(blocked).toBe(true)
+    expect(assist.synopsisBody).toBeUndefined()
+    expect(assist.outlineBody).toBeUndefined()
+    expect(assist.bodyEdits).toBeUndefined()
     expect(assist.chapterDraftProposal).toBeUndefined()
+    expect(assist.continueTurn).toBeUndefined()
     expect(assist.volumeChapterPlans).toBeUndefined()
     expect(assist.arcPlanMarkdown).toBeUndefined()
-    expect(assist.presentationWrites?.length).toBe(1)
-    expect(assist.choices?.length).toBe(1)
-    expect(notices.some((line) => line.includes("开书冷启动"))).toBe(true)
+    expect(assist.presentationWrites).toBeUndefined()
+    expect(assist.choices).toEqual([])
+    expect(assist.content).toContain("AI尚未给出有效的风格评估")
+    expect(notices).toEqual([])
   })
 
-  it("nudges for style choices when none offered", () => {
-    const { notices } = applyColdStartStyleGate({
+  it("replaces gate diagnostics with clickable style choices when none were offered", () => {
+    const { assist, notices } = applyColdStartStyleGate({
       diskStyleMarkdown: WORK_STYLE_SEED_MARKDOWN,
+      availableProseStylePaths: [
+        "表现输出/笔风规则/东方玄幻.md",
+        "表现输出/笔风规则/轻小说.md",
+      ],
+      styleChoicePending: true,
       assist: {
+        content: "模型错误地继续写了规划。",
+        choices: [
+          { label: "AI推荐「表现输出/笔风规则/东方玄幻.md」：规则贴合本书", action: "continue_discuss" },
+          { label: "AI推荐「表现输出/笔风规则/轻小说.md」：可适配人物声口", action: "continue_discuss" },
+        ],
         presentationWrites: [{
           relativePath: "表现输出/本作品描写/其他.md",
           markdown: "# 其他\n",
@@ -108,12 +153,19 @@ describe("work style gate", () => {
         }],
       },
     })
-    expect(notices.some((line) => line.includes("风格备选") && line.includes("笔风规则"))).toBe(true)
+    expect(notices).toEqual([])
+    expect(assist.content).toBe("模型错误地继续写了规划。")
+    expect(assist.content).not.toContain("尚未合格")
+    expect(assist.choices).toHaveLength(2)
+    expect(assist.choices?.[0]?.label).toContain("东方玄幻.md")
+    expect(assist.choices?.[1]?.label).toContain("轻小说.md")
+    expect(assist.choices?.every((choice) => choice.action === "continue_discuss")).toBe(true)
   })
 
-  it("allows drafts when same-turn presentationWrites completes style", () => {
+  it("persists style writes but blocks chapter drafts until a later ready turn", () => {
     const { blocked, assist } = applyColdStartStyleGate({
       diskStyleMarkdown: WORK_STYLE_SEED_MARKDOWN,
+      gateReady: false,
       assist: {
         chapterDraftProposal: { base: "draft", heading: "x", body: "y".repeat(100) },
         presentationWrites: [{
@@ -123,7 +175,8 @@ describe("work style gate", () => {
         }],
       },
     })
-    expect(blocked).toBe(false)
-    expect(assist.chapterDraftProposal).toBeDefined()
+    expect(blocked).toBe(true)
+    expect(assist.chapterDraftProposal).toBeUndefined()
+    expect(assist.presentationWrites).toHaveLength(1)
   })
 })

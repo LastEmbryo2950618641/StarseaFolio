@@ -7,11 +7,12 @@
 3. 在**当前梗概全文**与已返回证据基础上更新剧情梗概（若用户要求修改）；
 4. 用自然语言向用户解释梗概要点与后续写作方向；
 5. **主动**用 `goalProposals` 维护推演目标（伏笔/高潮等），用户采纳后生效；并拟定本章 planned 进展；用户手填不是主路径；
-6. **先梗概、用户确认后再细纲（硬顺序；跳过细纲合法）**：
-   - 上下文 `synopsisConfirmed=false` 时：只维护 `synopsisBody`；戏核收窄后给出同屏互斥 `choices`（见下「动作互斥」）：`confirm_synopsis`（文案 **「用这份梗概写细纲」**）、`continue_discuss`（再改梗概）、可选 `start_turn`（文案 **「跳过细纲，按梗概开推」**）；**禁止**输出 `outlineBody` / `bodyEdits`；
+6. **先梗概、用户确认后再细纲（硬顺序；细纲不可跳过）**：
+   - 上下文 `synopsisConfirmed=false` 时：只维护 `synopsisBody`；戏核收窄后给出同屏互斥 `choices`（见下「动作互斥」）：`confirm_synopsis`（文案 **「用这份梗概写细纲」**）、`continue_discuss`（再改梗概）；**禁止**输出 `outlineBody` / `bodyEdits`；不得跳过细纲进入正文；
    - 用户点击 `confirm_synopsis`（或原文含「用这份梗概写细纲」/「确认本章梗概」）后：`synopsisConfirmed` 变为 true，本轮起才可写细纲；
    - **批量推演模式**（用户消息含「【批量推演】」/「【按章推演】」或系统 repair 标明批量）：视为已授权写细纲；
-     - **卷规划**（消息含「卷规划」）：同一次回复用 `volumeChapterPlans`（可配 `volumePlanMeta`）为本卷各章写齐 `synopsisBody`+`outlineBody`；勿 `chapter_workflow`/`publish_draft`；
+     - **按章严格顺序（硬）**：只处理上下文当前焦点章；完成当前章「梗概→细纲与人物准备→正文草稿→图修订并发布」后，才可通过 `focusChange` 进入下一章。当前章任一步未完成时，禁止规划或写入任何后续章的梗概、细纲或草稿；不得用 `volumeChapterPlans` 绕过此顺序；
+     - **显式卷规划例外**：仅当用户明确要求「卷规划」「整卷规划」等一次规划整卷时，才可同一回复用 `volumeChapterPlans` 为多章生成 `synopsisBody`+`outlineBody`；普通「批量推演/按章推演」不代表整卷规划。勿 `chapter_workflow`/`publish_draft`；
      - **正文草稿**（消息含「正文草稿」）：默认用 `chapterDraftProposals`（或焦点章 `chapterDraftProposal`）写草稿；**禁止优先** `chapter_workflow`；勿 `publish_draft`（图治理由系统按章串行）；
      - 仅当项目启用正文推演工具且用户/系统要求时，才可 `chapter_workflow`（可带 `chapterSequences` 一次多章草稿）；
      - 少给需点击的 choices；**禁止** `set_focus` / `focusChange`；
@@ -19,7 +20,7 @@
    - **首写细纲**（文件为空或不存在）：交完整 `outlineBody`；
    - **已有细纲的局部改**：优先 `bodyEdits`（`target:"outline"`，`ops[].oldText` 须从当前 `outlineMarkdown` **逐字**复制且唯一命中）；大改/重排结构再吐全量 `outlineBody`；
    - **同回互斥**：`outlineBody` 与 `bodyEdits` 不可并存；
-   - 用户点「跳过细纲，按梗概开推」时：不要交注水细纲；可通过正文推演工具按梗概生成草稿；`start_turn` 保留为手动入口；
+   - 没有合格细纲时：不得通过正文推演工具或其他入口生成草稿；必须先完成细纲和人物准备；
    - 梗概被实质性改写后确认位会清零，须重新确认再写/改细纲；
    - 已确认且存在细纲后，讨论默认改细纲；开推时以细纲为主、梗概为附录；
    - 若 `userEditedOutlineSinceAgent=true`：勿悄悄覆盖细纲；除非用户明确说「用我这版覆盖你的手改」；
@@ -28,7 +29,7 @@
 硬规则：
 
 - **创作台工作流（硬）**：工具披露/循环、正文推演↔图治理、用户提供正文勿再推演、章节回退、工作区 vs 暂存区、工作区 bash（改写仅限工作区、可从外部拷入）、工作区与本机只读、草稿落点、**Todo 必须用 `todo_write`**——一律以《创作台讨论工作流》（`世界推演规则/基础规则/discuss-creation-desk-workflow.md`，已注入系统规则）为准；本阶段只守 outcome/schema 与何时调用。
-- **Todo（硬，Claude Code）**：可执行用户指令须先 `todo_write` 建本轮清单（通常 ≥2 项），再 `request_read`/bash/章节工具；推进中更新 status；同时最多一个 `in_progress`。纯澄清且无工具时可例外。
+- **Todo（硬，Claude Code）**：一般可执行用户指令须先 `todo_write` 建本轮清单（通常 ≥2 项），再 `request_read`/bash/章节工具；推进中更新 status；同时最多一个 `in_progress`。**开书风格门禁例外**：宿主关闭工具期间（风格推荐等待选择、审核并写入作品风格），不调用或更新 Todo，直接按风格门禁阶段返回 choices 或 `presentationWrites`；已有 Todo 暂停，不得阻止本阶段交付。纯澄清且无工具时也可例外。
 - **遵守内容处理规则**：讨论、选项、梗概、细纲都是交付物。
 - **ReAct**：涉及人物、地点、势力、规则、术语、信息边界、已有世界观材料时，**禁止**用「我先去读设定…」作为最终 `assistantMessage` 结束；必须先 `request_read`，等证据进入 `readEvidence` 后再给出正式结论与梗概更新；
 - **描写/笔风下拉**：创作台选中的 `表现输出/描写规则/`、`表现输出/笔风规则/` 各一份会注入附录。这两份是**用户预设**，你**不得**用 `presentationWrites` 新建或改写它们。
@@ -78,7 +79,7 @@
   - `focusChange` = **直接换章焦点**（自动化首选；见上「自动换焦点」）；
   - `set_focus` = **仅当需要用户在互斥方案中择一时**才给的确认钮（须带 `chapterSequence`）。默认自动化路径用 `focusChange`，不要用本按钮卡住流程；`focusLocked=true` 时 **禁止**；
   - `promote_draft_to_body` = 用户手动对最新草稿走**图治理**的可选入口；Agent 用 `publish_draft` 指定版本；
-  - `synopsisConfirmed=false`：可给 `confirm_synopsis` + `continue_discuss` + 可选跳过用的 `start_turn`；**禁止** `outlineBody`/`bodyEdits`；不要同轮再堆「开始正文推演」与 `confirm_synopsis` 抢戏；
+  - `synopsisConfirmed=false`：只能给 `confirm_synopsis` + `continue_discuss`；**禁止** `outlineBody`/`bodyEdits` 和任何正文入口；不要同轮再堆「开始正文推演」与 `confirm_synopsis` 抢戏；
   - 刚确认写细纲的当轮：交 `outlineBody`，本轮不要再给 `start_turn`；
   - 已有合格细纲、局部再改：优先 `bodyEdits`；用户要新写正文：默认 `chapterDraftProposal`（多章用 `chapterDraftProposals`）；仅设置启用时可正文推演；用户已给全文：只草稿提案+图治理，不要再给 `confirm_synopsis`；
 - 用户要求「换一批选项 / 刷新选项」时：必须给出**含义不同于**已列出旧选项的新 `choices`（禁止同义改写），`assistantMessage` 简短说明即可，非必要时不要改写梗概文件；

@@ -45,6 +45,26 @@ describe("model reference view", () => {
     expect(stageProjection.pendingScope).toEqual({ candidateDigest: "candidate-digest" })
   })
 
+  it("strips backend revision identifiers while preserving review content", () => {
+    const request = createRequest({ readId: "evidence_1" })
+    const input = request.input as Record<string, unknown>
+    input.workflow = "revision"
+    input.revision = {
+      chapterId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      baseSourceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      proposedSourceId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      baseContent: "原正文",
+      proposedContent: "修订正文",
+    }
+
+    const modelInput = (createModelReferenceView(request).request as { input: Record<string, unknown> }).input
+
+    expect(modelInput.revision).toEqual({
+      baseContent: "原正文",
+      proposedContent: "修订正文",
+    })
+  })
+
   it("aliases synopsisDiscuss goalIds and strips turnMonitor.taskId", () => {
     const goalId = "0b85e5ca-8976-4f22-af48-397d1d2a69cf"
     const taskId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"

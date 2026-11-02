@@ -121,9 +121,9 @@ export class SqliteChapterRevisionRepository implements ChapterRevisionRepositor
   public async listUnpublished(projectId: ProjectId): Promise<readonly StoredChapterRevision[]> {
     const rows = await this.database.selectFrom("chapter_revision_tasks").selectAll()
       .where("project_id", "=", projectId)
-      .where("is_initial_publication", "=", 1)
       .where("status", "not in", ["retired", "completed"])
       .orderBy("chapter_sequence", "asc")
+      .orderBy("updated_at", "desc")
       .execute()
     return Promise.all(rows.map((row) => this.map(row)))
   }

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import type { Kysely } from "kysely"
 
 import type {
+  ChapterArtifactContentState,
   ModelContextMessage,
   ModelContextMessageDraft,
   ProjectId,
@@ -27,6 +28,12 @@ import {
 import { digest } from "../../../core/index.js"
 import type { ProjectDatabase } from "../database-types.js"
 import { decodeJson, encodeJson } from "../json-codec.js"
+import {
+  initialWorkStyleGateState,
+  transitionWorkStyleGateState,
+  type WorkStyleGateEvent,
+  type WorkStyleGateState,
+} from "../../../core/workspace/work-style-gate-state.js"
 
 export type DiscussContextDigests = Readonly<{
   synopsis?: string
@@ -36,6 +43,134 @@ export type DiscussContextDigests = Readonly<{
 
 export class SqliteSynopsisConversationRepository {
   public constructor(private readonly database: Kysely<ProjectDatabase>) {}
+
+  public async findWorkStyleGateState(projectId: ProjectId): Promise<WorkStyleGateState> {
+    await this.database.insertInto("work_style_gate_states").values({
+      project_id: projectId,
+      status: "awaiting_choice",
+      selected_prose_style_path: null,
+      style_digest: null,
+      updated_at_ms: Date.now(),
+    }).onConflict((conflict) => conflict.column("project_id").doNothing()).executeTakeFirstOrThrow()
+    const row = await this.database.selectFrom("work_style_gate_states").selectAll()
+      .where("project_id", "=", projectId)
+      .executeTakeFirst()
+    return row === undefined ? initialWorkStyleGateState() : mapWorkStyleGateState(row)
+  }
+
+  public async transitionWorkStyleGate(input: Readonly<{
+    projectId: ProjectId
+    event: WorkStyleGateEvent
+    updatedAtMs: number
+  }>): Promise<WorkStyleGateState> {
+    return this.database.transaction().execute(async (transaction) => {
+      const row = await transaction.selectFrom("work_style_gate_states").selectAll()
+        .where("project_id", "=", input.projectId)
+        .executeTakeFirst()
+      const current = row === undefined ? initialWorkStyleGateState() : mapWorkStyleGateState(row)
+      const next = transitionWorkStyleGateState(current, input.event)
+      await transaction.insertInto("work_style_gate_states").values({
+        project_id: input.projectId,
+        status: next.status,
+        selected_prose_style_path: next.status === "awaiting_choice" ? null : next.selectedProseStylePath,
+        style_digest: next.status === "ready" ? next.styleDigest : null,
+        updated_at_ms: input.updatedAtMs,
+      }).onConflict((conflict) => conflict.column("project_id").doUpdateSet({
+        status: next.status,
+        selected_prose_style_path: next.status === "awaiting_choice" ? null : next.selectedProseStylePath,
+        style_digest: next.status === "ready" ? next.styleDigest : null,
+        updated_at_ms: input.updatedAtMs,
+      })).executeTakeFirstOrThrow()
+      return next
+    })
+  }
+
+  public async findChapterArtifactState(projectId: ProjectId, chapterSequence: number): Promise<Readonly<{
+    synopsisContentState: ChapterArtifactContentState
+    outlineContentState: ChapterArtifactContentState
+    draftContentState: ChapterArtifactContentState
+    synopsisDigest?: string
+    outlineDigest?: string
+    draftVersionId?: string
+    draftDigest?: string
+    synopsisWriteCount: number
+    outlineWriteCount: number
+    bodyWriteCount: number
+    bodyDigest?: string
+  }> | undefined> {
+    const row = await this.database.selectFrom("chapter_artifact_states").selectAll()
+      .where("project_id", "=", projectId)
+      .where("chapter_sequence", "=", chapterSequence)
+      .executeTakeFirst()
+    if (row === undefined) return undefined
+    return {
+      synopsisContentState: row.synopsis_content_state,
+      outlineContentState: row.outline_content_state,
+      draftContentState: row.draft_content_state,
+      ...(row.synopsis_digest === null ? {} : { synopsisDigest: row.synopsis_digest }),
+      ...(row.outline_digest === null ? {} : { outlineDigest: row.outline_digest }),
+      ...(row.draft_version_id === null ? {} : { draftVersionId: row.draft_version_id }),
+      ...(row.draft_digest === null ? {} : { draftDigest: row.draft_digest }),
+      synopsisWriteCount: row.synopsis_write_count,
+      outlineWriteCount: row.outline_write_count,
+      bodyWriteCount: row.body_write_count,
+      ...(row.body_digest === null ? {} : { bodyDigest: row.body_digest }),
+    }
+  }
+
+  public async updateChapterArtifactState(input: Readonly<{
+    projectId: ProjectId
+    chapterSequence: number
+    synopsisContentState?: ChapterArtifactContentState
+    outlineContentState?: ChapterArtifactContentState
+    draftContentState?: ChapterArtifactContentState
+    synopsisDigest?: string | null
+    outlineDigest?: string | null
+    draftVersionId?: string | null
+    draftDigest?: string | null
+    bodyDigest?: string | null
+    synopsisHasContent?: boolean
+    outlineHasContent?: boolean
+    bodyHasContent?: boolean
+    updatedAtMs: number
+  }>): Promise<void> {
+    const current = await this.database.selectFrom("chapter_artifact_states").selectAll()
+      .where("project_id", "=", input.projectId)
+      .where("chapter_sequence", "=", input.chapterSequence)
+      .executeTakeFirst()
+    const synopsisWriteCount = incrementWriteCount(current?.synopsis_digest, input.synopsisDigest, current?.synopsis_write_count ?? 0, input.synopsisHasContent)
+    const outlineWriteCount = incrementWriteCount(current?.outline_digest, input.outlineDigest, current?.outline_write_count ?? 0, input.outlineHasContent)
+    const bodyWriteCount = incrementWriteCount(current?.body_digest, input.bodyDigest, current?.body_write_count ?? 0, input.bodyHasContent)
+    await this.database.insertInto("chapter_artifact_states").values({
+      project_id: input.projectId,
+      chapter_sequence: input.chapterSequence,
+      synopsis_content_state: input.synopsisContentState ?? current?.synopsis_content_state ?? "empty",
+      outline_content_state: input.outlineContentState ?? current?.outline_content_state ?? "empty",
+      draft_content_state: input.draftContentState ?? current?.draft_content_state ?? "empty",
+      synopsis_digest: input.synopsisDigest === undefined ? current?.synopsis_digest ?? null : input.synopsisDigest,
+      outline_digest: input.outlineDigest === undefined ? current?.outline_digest ?? null : input.outlineDigest,
+      draft_version_id: input.draftVersionId === undefined ? current?.draft_version_id ?? null : input.draftVersionId,
+      draft_digest: input.draftDigest === undefined ? current?.draft_digest ?? null : input.draftDigest,
+      synopsis_write_count: synopsisWriteCount,
+      outline_write_count: outlineWriteCount,
+      body_write_count: bodyWriteCount,
+      body_digest: input.bodyDigest === undefined ? current?.body_digest ?? null : input.bodyDigest,
+      updated_at_ms: input.updatedAtMs,
+    }).onConflict((conflict) => conflict.columns(["project_id", "chapter_sequence"]).doUpdateSet({
+      synopsis_content_state: input.synopsisContentState ?? current?.synopsis_content_state ?? "empty",
+      outline_content_state: input.outlineContentState ?? current?.outline_content_state ?? "empty",
+      draft_content_state: input.draftContentState ?? current?.draft_content_state ?? "empty",
+      synopsis_digest: input.synopsisDigest === undefined ? current?.synopsis_digest ?? null : input.synopsisDigest,
+      outline_digest: input.outlineDigest === undefined ? current?.outline_digest ?? null : input.outlineDigest,
+      draft_version_id: input.draftVersionId === undefined ? current?.draft_version_id ?? null : input.draftVersionId,
+      draft_digest: input.draftDigest === undefined ? current?.draft_digest ?? null : input.draftDigest,
+      synopsis_write_count: synopsisWriteCount,
+      outline_write_count: outlineWriteCount,
+      body_write_count: bodyWriteCount,
+      body_digest: input.bodyDigest === undefined ? current?.body_digest ?? null : input.bodyDigest,
+      updated_at_ms: input.updatedAtMs,
+    })).executeTakeFirstOrThrow()
+  }
 
   public async findActiveSession(projectId: ProjectId): Promise<SynopsisConversationSession | undefined> {
     const row = await this.database.selectFrom("synopsis_conversation_sessions").selectAll()
@@ -79,6 +214,9 @@ export class SqliteSynopsisConversationRepository {
     chapterSequence: number
     synopsisPath: string
     title: string
+    synopsisContentState?: SynopsisConversationSession["synopsisContentState"]
+    outlineContentState?: SynopsisConversationSession["outlineContentState"]
+    draftContentState?: SynopsisConversationSession["draftContentState"]
     createdAtMs: number
   }>): Promise<SynopsisConversationSession> {
     await this.database.insertInto("synopsis_conversation_sessions").values({
@@ -91,6 +229,11 @@ export class SqliteSynopsisConversationRepository {
       turn_bootstrap_input: null,
       synopsis_confirmed_at_ms: null,
       last_outline_agent_digest: null,
+      synopsis_content_state: input.synopsisContentState ?? "empty",
+      outline_content_state: input.outlineContentState ?? "empty",
+      draft_content_state: input.draftContentState ?? "empty",
+      draft_version_id: null,
+      last_draft_digest: null,
       last_context_synopsis_digest: null,
       last_context_outline_digest: null,
       last_context_bootstrap_digest: null,
@@ -111,6 +254,11 @@ export class SqliteSynopsisConversationRepository {
     lastOutlineAgentDigest?: string | null
     turnBootstrapInput?: string | null
     synopsisConfirmedAtMs?: number | null
+    synopsisContentState?: SynopsisConversationSession["synopsisContentState"]
+    outlineContentState?: SynopsisConversationSession["outlineContentState"]
+    draftContentState?: SynopsisConversationSession["draftContentState"]
+    draftVersionId?: string | null
+    lastDraftDigest?: string | null
     focusKind?: SynopsisConversationSession["focusKind"]
     status?: SynopsisConversationSession["status"]
     updatedAtMs: number
@@ -127,6 +275,11 @@ export class SqliteSynopsisConversationRepository {
       ...(input.synopsisConfirmedAtMs === undefined
         ? {}
         : { synopsis_confirmed_at_ms: input.synopsisConfirmedAtMs }),
+      ...(input.synopsisContentState === undefined ? {} : { synopsis_content_state: input.synopsisContentState }),
+      ...(input.outlineContentState === undefined ? {} : { outline_content_state: input.outlineContentState }),
+      ...(input.draftContentState === undefined ? {} : { draft_content_state: input.draftContentState }),
+      ...(input.draftVersionId === undefined ? {} : { draft_version_id: input.draftVersionId }),
+      ...(input.lastDraftDigest === undefined ? {} : { last_draft_digest: input.lastDraftDigest }),
       ...(input.focusKind === undefined ? {} : { focus_kind: input.focusKind }),
       ...(input.status === undefined ? {} : { status: input.status }),
       updated_at_ms: input.updatedAtMs,
@@ -400,6 +553,34 @@ export class SqliteSynopsisConversationRepository {
   }
 }
 
+function mapWorkStyleGateState(row: {
+  status: WorkStyleGateState["status"]
+  selected_prose_style_path: string | null
+  style_digest: string | null
+}): WorkStyleGateState {
+  if (row.status === "awaiting_choice" || row.selected_prose_style_path === null) {
+    return initialWorkStyleGateState()
+  }
+  if (row.status === "ready" && row.style_digest !== null) {
+    return {
+      status: "ready",
+      selectedProseStylePath: row.selected_prose_style_path,
+      styleDigest: row.style_digest,
+    }
+  }
+  return { status: "style_selected", selectedProseStylePath: row.selected_prose_style_path }
+}
+
+function incrementWriteCount(
+  previousDigest: string | null | undefined,
+  nextDigest: string | null | undefined,
+  previousCount: number,
+  hasContent: boolean | undefined,
+): number {
+  if (nextDigest === undefined || nextDigest === previousDigest || hasContent !== true) return previousCount
+  return previousCount + 1
+}
+
 function mapSession(row: {
   session_id: string
   project_id: string
@@ -408,6 +589,11 @@ function mapSession(row: {
   title: string
   last_agent_digest: string | null
   last_outline_agent_digest: string | null
+  synopsis_content_state?: SynopsisConversationSession["synopsisContentState"] | null
+  outline_content_state?: SynopsisConversationSession["outlineContentState"] | null
+  draft_content_state?: SynopsisConversationSession["draftContentState"] | null
+  draft_version_id?: string | null
+  last_draft_digest?: string | null
   turn_bootstrap_input: string | null
   synopsis_confirmed_at_ms: number | null
   focus_kind?: string | null
@@ -428,6 +614,11 @@ function mapSession(row: {
     ...(row.last_outline_agent_digest === null
       ? {}
       : { lastOutlineAgentDigest: row.last_outline_agent_digest }),
+    synopsisContentState: row.synopsis_content_state ?? (row.last_agent_digest === null ? "empty" : "ai_written"),
+    outlineContentState: row.outline_content_state ?? (row.last_outline_agent_digest === null ? "empty" : "ai_written"),
+    draftContentState: row.draft_content_state ?? "empty",
+    ...(row.draft_version_id === null || row.draft_version_id === undefined ? {} : { draftVersionId: row.draft_version_id }),
+    ...(row.last_draft_digest === null || row.last_draft_digest === undefined ? {} : { lastDraftDigest: row.last_draft_digest }),
     ...(row.turn_bootstrap_input === null ? {} : { turnBootstrapInput: row.turn_bootstrap_input }),
     ...(row.synopsis_confirmed_at_ms === null
       ? {}

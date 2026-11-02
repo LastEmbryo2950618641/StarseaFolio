@@ -248,6 +248,15 @@ export class FakeAiModelAdapter implements AIModelPort {
           evidenceClosed: true,
           leaksUnobservedInformation: false,
           requiresWorkflowUpgrade: false,
+          queryGrounding: {
+            answerDisposition: input.readEvidence.length > 0 ? "supported" : "abstained",
+            constraints: [{
+              condition: "Deterministic query fixture",
+              status: input.readEvidence.length > 0 ? "supported" : "unknown",
+              evidenceRefs: input.readEvidence.map((evidence) => evidence.readId),
+              reason: "Deterministic fixture audit, not a semantic quality measurement",
+            }],
+          },
         }
       case "revision_review":
         return {
@@ -650,6 +659,11 @@ export class FakeAiModelAdapter implements AIModelPort {
       goalProposals?: Array<{ payload: { kind: string; [key: string]: unknown }; reason?: string }>
       reason?: string
     }
+    presentationWrites?: Array<{
+      relativePath: string
+      markdown: string
+      mode: "create" | "update"
+    }>
     arcPlan?: {
       markdown: string
       estimatedChapterCount?: number
@@ -659,6 +673,32 @@ export class FakeAiModelAdapter implements AIModelPort {
   } {
     const discuss = input.synopsisDiscuss
     const userMessage = input.userInput.trim()
+    if (discuss?.workStyleGate?.status === "awaiting_choice") {
+      const candidates = input.readEvidence.filter((item) => (
+        item.ownerKind === "workspace:prose_style_candidate"
+      )).slice(0, 3)
+      return {
+        assistantMessage: `根据你的构思「${userMessage.slice(0, 80)}」，我已逐份对照预定义笔风规则。下面是适配度较高的候选，请按偏好选择；选定后我会再审核并整理本书风格。`,
+        choices: candidates.map((candidate) => ({
+          label: `AI推荐「${candidate.ownerId}」：结合本书构思评估后适配，采用前请确认其规则取向`,
+          action: "continue_discuss" as const,
+        })),
+        finalSelfReview: "已对照每份候选笔风规则正文和用户构思，仅提供路径真实的推荐选项，未写章节内容。",
+      }
+    }
+    if (discuss?.workStyleGate?.status === "style_selected") {
+      const selectedPath = discuss.workStyleGate.selectedProseStylePath ?? "表现输出/笔风规则/默认笔风规则.md"
+      const hasExistingStyle = input.readEvidence.some((item) => item.ownerKind === "workspace:work_style_current")
+      return {
+        assistantMessage: `我已审核所选预定义笔风「${selectedPath}」与本书构思的适配性，并整理了作品级风格方案；本轮只完成风格审核，没有写入章节内容。`,
+        presentationWrites: [{
+          relativePath: "表现输出/本作品描写/作品风格.md",
+          markdown: buildFakeWorkStyleMarkdown(selectedPath),
+          mode: hasExistingStyle ? "update" : "create",
+        }],
+        finalSelfReview: "风格方案覆盖八个必需维度并保留已选笔风路径；未写梗概、大纲或正文。",
+      }
+    }
     const wantsRefreshChoices = /换一批决策选项|静默刷新/u.test(userMessage)
     const wantsPromote = !wantsRefreshChoices && /确认落盘|落盘到设定集|把草案写入设定集/u.test(userMessage)
     const wantsArcPlan = !wantsRefreshChoices && /先落大纲|弧线规划|分几章|多章/u.test(userMessage)
@@ -917,6 +957,20 @@ export class FakeAiModelAdapter implements AIModelPort {
         : "Returned synopsis-level draft and confirm_synopsis choice without outlineBody.",
     }
   }
+}
+
+function buildFakeWorkStyleMarkdown(selectedPath: string): string {
+  return [
+    "# 作品风格",
+    `## 1. 语体笔风\n主锚：${selectedPath}。语气硬朗冷峻，描写密度适中，感官偏视觉。`,
+    "## 2. 时代科技生活\n冷兵器与符箓并行；货币用灵石；机构写宗门与城卫，不写现代警察。",
+    "## 3. 规则称谓能力\n战力用境界名落笔；技能先效果后名称；称谓按辈分与阵营。",
+    "## 4. 命名\n人名双/三音节错开姓与偏旁；常同框禁止同姓墙。正例：林烬、沈砚。反例：凌寒与凌霜同批不合格。势力正派用宗门，商会用阁。",
+    "## 5. 角色声口\n主角短句、少形容词，示例：「先活下来再说。」配角谋士长句带停顿，示例：「若依我看……此局已半输。」",
+    "## 6. 尺度意象章钩\n暴力写后果不写虐杀展览；章末钩落在选择代价。",
+    "## 7. 人称指称\n第三人称限知，贴林烬；正文以姓名为主。示例句：林烬抬眼，没接话。",
+    "## 8. 句子与对话\n句长偏短；对白白话口语；禁对白乒乓，群戏按受损者到权力高位分层。正例：「滚。」反例：全员使用同一书面腔。",
+  ].join("\n\n")
 }
 
 function stripMarkdownHeading(markdown: string): string {

@@ -3,6 +3,7 @@ import {
   type ChapterRevisionReadResult,
   type ChapterSummary,
   type BackendMethod,
+  type DeductionGoalsSnapshot,
   type ClientRequest,
   type HistoryCheckoutResult,
   type HistoryOverview,
@@ -279,6 +280,14 @@ export async function selectImageFile(input?: Readonly<{
   return bridge.selectImageFile(input)
 }
 
+export async function readImageFile(sourcePath: string): Promise<string> {
+  const bridge = getWorldseedBridge()
+  if (bridge === undefined || typeof bridge.readImageFile !== "function") {
+    throw new Error("请重启应用后再更换封面（主进程尚未加载图片读取能力）")
+  }
+  return bridge.readImageFile(sourcePath)
+}
+
 export async function getBookCover(workspaceRootRef: string): Promise<string | undefined> {
   const bridge = getWorldseedBridge()
   if (bridge === undefined || typeof bridge.getBookCover !== "function") return undefined
@@ -287,7 +296,7 @@ export async function getBookCover(workspaceRootRef: string): Promise<string | u
 
 export async function setBookCover(input: Readonly<{
   workspaceRootRef: string
-  sourcePath: string
+  dataUrl: string
 }>): Promise<string> {
   const bridge = getWorldseedBridge()
   if (bridge === undefined || typeof bridge.setBookCover !== "function") {
@@ -779,6 +788,18 @@ async function demoInvoke(method: BackendMethod, payload: unknown): Promise<unkn
       return []
     case "chapter.read":
       return { ...structuredClone(demoChapter), content: demoChapterContent, body: demoChapterContent.replace(/^#\s+[^\n]+\n*/u, "").trim() }
+    case "deduction.goals.list": {
+      const projectId = typeof payload === "object" && payload !== null && "projectId" in payload
+        ? String((payload as { projectId: string }).projectId)
+        : browserDemoProject?.projectId ?? "11111111-1111-4111-8111-111111111111"
+      return {
+        projectId,
+        goals: [],
+        progress: [],
+        pendingProposals: [],
+        updatedAtMs: Date.now(),
+      } satisfies DeductionGoalsSnapshot
+    }
     case "chapter.graphRevision.list":
       return []
     case "chapter.findActiveRevision":
@@ -1022,6 +1043,8 @@ async function demoInvoke(method: BackendMethod, payload: unknown): Promise<unkn
       throw new Error("Browser demo cannot restore settings lineage")
     case "settings.lineage.annotate":
       throw new Error("Browser demo cannot annotate settings lineage")
+    case "synopsis.conversation.list":
+      return { messages: [] }
     case "synopsis.conversation.discardLastUserTurn":
       return { messages: [] }
     case "synopsis.conversation.setFocus":

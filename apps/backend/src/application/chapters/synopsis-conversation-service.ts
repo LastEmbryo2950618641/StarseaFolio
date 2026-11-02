@@ -59,6 +59,7 @@ import {
   siblingPlanningMarkdownPath,
   isChapterBodyMarkdownPath,
   isOutlineMarkdownPath,
+  isSynopsisPlaceholderDocument,
   isSynopsisMarkdownPath,
   validateSynopsisMarkdownPath,
   validateVolumeFolderName,
@@ -66,9 +67,16 @@ import {
   assertWorkDescriptionWriteBatch,
   resolveDescriptionRulePaths,
   listWorkDescriptionRuleFiles,
+  assessWorkStyleMarkdown,
   WORK_STYLE_RULE_PATH,
 } from "../../core/index.js"
-import { applyColdStartStyleGate } from "./cold-start-style-gate.js"
+import {
+  applyColdStartStyleGate,
+  resolveColdStartStyleSelectionPath,
+} from "./cold-start-style-gate.js"
+import {
+  canProceedPastWorkStyleGate,
+} from "../../core/workspace/work-style-gate-state.js"
 import type { GoalProposalPayload } from "@worldseed/contracts"
 import type { AIModelPort, PromptResourcePort, TurnReadEvidence, TurnRetrievalGap } from "../turns/ports/ai-model-port.js"
 import type { WorkspacePort, InternalStorePort } from "../workspace/index.js"
@@ -126,6 +134,7 @@ import {
   isDiscussTodoBootstrapTool,
   isPrecedingChapterPublishGateError,
   partitionChapterDraftSequences,
+  shouldRetryDeferredChapterDraft,
   settleToolGateTodos,
 } from "./synopsis-todo-gate.js"
 import { normalizeThinkingDisplayText } from "./synopsis-thinking-text.js"
@@ -277,6 +286,13 @@ export class SynopsisConversationService {
     const preferredVolume = pickPreferredVolumeFolderName(existingVolumes) ?? DEFAULT_VOLUME_FOLDER_NAME
     const synopsisPath = claimed?.path
       ?? deriveSynopsisMarkdownPath(chapterSequence, title, preferredVolume)
+    const claimedSynopsisMarkdown = claimed === undefined
+      ? ""
+      : await this.readSynopsisFile(input.workspaceRootRef, synopsisPath)
+    const claimedOutlinePath = siblingPlanningMarkdownPath(synopsisPath, "outline")
+    const claimedOutlineMarkdown = claimedOutlinePath === undefined
+      ? ""
+      : await this.readSynopsisFile(input.workspaceRootRef, claimedOutlinePath)
     if (claimed === undefined) {
       const placeholder = assembleSynopsisPlaceholderDocument(chapterSequence, title)
       await this.dependencies.workspace.saveSynopsisMarkdown(input.workspaceRootRef, synopsisPath, placeholder)
@@ -289,6 +305,8 @@ export class SynopsisConversationService {
       chapterSequence,
       synopsisPath,
       title: title.length === 0 ? formatChapterSequenceLabel(chapterSequence) : title,
+      synopsisContentState: hasPlanningContent(claimedSynopsisMarkdown, true) ? "manual_modified" : "empty",
+      outlineContentState: hasPlanningContent(claimedOutlineMarkdown, false) ? "manual_modified" : "empty",
       createdAtMs: nowMs,
     })
     runtimeLog("debug", "synopsis-conversation", "started", {
@@ -378,6 +396,11 @@ export class SynopsisConversationService {
       lastAgentDigest: null,
       lastOutlineAgentDigest: null,
       synopsisConfirmedAtMs: null,
+      synopsisContentState: "empty",
+      outlineContentState: "empty",
+      draftContentState: "empty",
+      draftVersionId: null,
+      lastDraftDigest: null,
       updatedAtMs: nowMs,
     })
     await this.dependencies.conversation.saveDiscussContextDigests({
@@ -525,6 +548,44 @@ export class SynopsisConversationService {
     const session = await this.ensureActiveSession(input.projectId, input.workspaceRootRef)
     clearSynopsisSendCancellation(input.projectId)
     await this.hydrateDiscussUsage(input.projectId)
+    const priorMessages = await this.dependencies.conversation.listMessages(session.sessionId)
+    let styleMarkdown: string | undefined
+    try {
+      styleMarkdown = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, WORK_STYLE_RULE_PATH)
+    } catch {
+      styleMarkdown = undefined
+    }
+    let styleGateState = await this.dependencies.conversation.findWorkStyleGateState(input.projectId)
+    if (styleGateState.status === "ready" && digest(styleMarkdown ?? "") !== styleGateState.styleDigest) {
+      styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
+        projectId: input.projectId,
+        event: { type: "style_document_changed", currentDigest: digest(styleMarkdown ?? "") },
+        updatedAtMs: this.dependencies.now(),
+      })
+    }
+    let availableProseStylePaths: string[] = []
+    if (styleGateState.status !== "ready") {
+      const catalog = await this.dependencies.catalog.createSnapshot({
+        snapshotId: this.dependencies.createId(),
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        generatedAtMs: this.dependencies.now(),
+      })
+      availableProseStylePaths = catalog.entries
+        .filter((entry) => entry.entryKind === "file"
+          && entry.relativePath.startsWith("表现输出/笔风规则/")
+          && entry.relativePath.endsWith(".md"))
+        .map((entry) => entry.relativePath)
+      const selectedPath = resolveColdStartStyleSelectionPath(priorMessages, input.message, availableProseStylePaths)
+      if (selectedPath !== undefined) {
+        styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
+          projectId: input.projectId,
+          event: { type: "select_style", proseStylePath: selectedPath },
+          updatedAtMs: this.dependencies.now(),
+        })
+      }
+    }
+    const workStyleGateReadyAtStart = canProceedPastWorkStyleGate(styleGateState)
     // Reset stream hub before any further awaits so concurrent streamPeek cannot
     // resurface the previous turn's completed thinking/content.
     const streamStartedAtMs = this.dependencies.now()
@@ -541,6 +602,7 @@ export class SynopsisConversationService {
         )
       const outlineMarkdown = await this.readSynopsisFile(input.workspaceRootRef, outlinePathForRead)
       const outlineDigest = outlineMarkdown.trim().length === 0 ? undefined : digest(outlineMarkdown)
+      const synopsisReady = synopsisMarkdown.trim().length > 0 && !isSynopsisPlaceholderDocument(synopsisMarkdown)
       const chapterBodyMarkdown = await this.readFocusedCommittedBody(
         input.projectId,
         input.workspaceRootRef,
@@ -556,7 +618,7 @@ export class SynopsisConversationService {
       const confirmingSynopsis = isConfirmSynopsisUserMessage(input.message)
       const nowMs = this.dependencies.now()
       let synopsisConfirmedAtMs = session.synopsisConfirmedAtMs
-      if (userEditedSinceAgent && !confirmingSynopsis && synopsisConfirmedAtMs !== undefined) {
+      if ((!synopsisReady || (userEditedSinceAgent && !confirmingSynopsis)) && synopsisConfirmedAtMs !== undefined) {
         synopsisConfirmedAtMs = undefined
         await this.dependencies.conversation.updateSession({
           sessionId: session.sessionId,
@@ -564,7 +626,7 @@ export class SynopsisConversationService {
           updatedAtMs: nowMs,
         })
       }
-      if (confirmingSynopsis && synopsisConfirmedAtMs === undefined) {
+      if (confirmingSynopsis && synopsisReady && synopsisConfirmedAtMs === undefined) {
         synopsisConfirmedAtMs = nowMs
         await this.dependencies.conversation.updateSession({
           sessionId: session.sessionId,
@@ -590,7 +652,7 @@ export class SynopsisConversationService {
       const currentWorkDisplayName = this.dependencies.readDisplayName === undefined
         ? undefined
         : await this.dependencies.readDisplayName()
-      let assist = await this.runSynopsisDiscuss({
+      const discussResult = await this.runSynopsisDiscuss({
         projectId: input.projectId,
         workspaceRootRef: input.workspaceRootRef,
         sessionId: session.sessionId,
@@ -614,7 +676,17 @@ export class SynopsisConversationService {
         chapterProgress,
         hookScheduleAudit,
         model: input.model,
-        allowWorkflowTools: true,
+        allowWorkflowTools: workStyleGateReadyAtStart,
+        ...(!workStyleGateReadyAtStart
+          ? {
+              workStyleGate: {
+                status: styleGateState.status as "awaiting_choice" | "style_selected",
+                ...(styleGateState.status === "style_selected"
+                  ? { selectedProseStylePath: styleGateState.selectedProseStylePath }
+                  : {}),
+              },
+            }
+          : {}),
         agentMode,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
@@ -622,6 +694,9 @@ export class SynopsisConversationService {
         ...(input.maxModelCalls === undefined ? {} : { maxModelCalls: input.maxModelCalls }),
         ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
       })
+      const availableProseStylePaths = discussResult.availableProseStylePaths ?? []
+      const { availableProseStylePaths: _availableProseStylePaths, ...discussAssist } = discussResult
+      let assist = discussAssist
       // Mark stream completed as soon as the visible reply is ready, so the UI can leave
       // the "Stop / streaming" state while we still persist files and messages.
       synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
@@ -635,6 +710,8 @@ export class SynopsisConversationService {
       let sessionTitle = session.title
       let lastAgentDigest = session.lastAgentDigest
       let lastOutlineAgentDigest = session.lastOutlineAgentDigest
+      let nextSynopsisContentState = session.synopsisContentState
+      let nextOutlineContentState = session.outlineContentState
       let wroteSynopsisBody = false
       let nextSynopsisConfirmedAtMs = synopsisConfirmedAtMs
       const writeNotices: string[] = []
@@ -739,6 +816,14 @@ export class SynopsisConversationService {
           })
         }
         lastAgentDigest = digest(assist.synopsisBody)
+        nextSynopsisContentState = hasPlanningContent(assist.synopsisBody, true) ? "ai_written" : "empty"
+        await this.dependencies.chapterSynopsis.recordPlanningArtifactState({
+          projectId: input.projectId,
+          chapterSequence: session.chapterSequence,
+          kind: "synopsis",
+          state: nextSynopsisContentState,
+          markdown: assist.synopsisBody,
+        })
       } else if (assist.synopsisBody !== undefined && userEditedSinceAgent) {
         writeNotices.push("你刚改过梗概文件，本轮未覆盖梗概。若要以我这版为准，请明确说「用我这版覆盖你的手改」。")
         this.emitDiscussEdit(input.projectId, {
@@ -798,12 +883,45 @@ export class SynopsisConversationService {
       } catch {
         styleDiskMarkdown = undefined
       }
+      if (styleGateState.status === "ready" && digest(styleDiskMarkdown ?? "") !== styleGateState.styleDigest) {
+        styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
+          projectId: input.projectId,
+          event: { type: "style_document_changed", currentDigest: digest(styleDiskMarkdown ?? "") },
+          updatedAtMs: this.dependencies.now(),
+        })
+      }
       const styleGated = applyColdStartStyleGate({
         assist,
         diskStyleMarkdown: styleDiskMarkdown,
+        availableProseStylePaths,
+        gateReady: workStyleGateReadyAtStart && canProceedPastWorkStyleGate(styleGateState),
+        styleChoicePending: styleGateState.status === "awaiting_choice",
       })
+      const coldStartStyleNeedsChoice = styleGated.blocked
       assist = styleGated.assist
       if (styleGated.notices.length > 0) writeNotices.push(...styleGated.notices)
+
+      if (assist.volumeChapterPlans !== undefined && assist.volumeChapterPlans.length > 0) {
+        const allowsWholeVolumePlanning = isExplicitWholeVolumePlanningRequest(input.message)
+        const { allowed, deferred } = partitionVolumeChapterPlansBySequence(
+          assist.volumeChapterPlans,
+          session.chapterSequence,
+          allowsWholeVolumePlanning,
+        )
+        if (deferred.length > 0) {
+          assist = { ...assist, volumeChapterPlans: allowed }
+          const deferredSequences = [...new Set(deferred.map((plan) => plan.chapterSequence))].sort((a, b) => a - b)
+          writeNotices.push(
+            `按章顺序门禁：当前是第${String(session.chapterSequence)}章，已暂缓第${deferredSequences.join("、")}章的梗概/细纲规划。请先完成当前章梗概、细纲与正文草稿，再继续下一章。`,
+          )
+          runtimeLog("warn", "synopsis-conversation", "chapter_sequence.planning_deferred", {
+            projectId: input.projectId,
+            sessionId: session.sessionId,
+            currentSequence: session.chapterSequence,
+            deferredSequences,
+          })
+        }
+      }
 
       if (assist.volumeChapterPlans !== undefined && assist.volumeChapterPlans.length > 0) {
         const planVolume = nextVolume
@@ -821,17 +939,37 @@ export class SynopsisConversationService {
             synopsisPath = persisted.synopsisPath
             sessionTitle = persisted.title
             lastAgentDigest = digest(plan.synopsisBody)
+            nextSynopsisContentState = hasPlanningContent(plan.synopsisBody, true) ? "ai_written" : "empty"
+            nextOutlineContentState = hasPlanningContent(plan.outlineBody, false) ? "ai_written" : "empty"
           }
+          await this.dependencies.chapterSynopsis.recordPlanningArtifactState({
+            projectId: input.projectId,
+            chapterSequence: plan.chapterSequence,
+            kind: "synopsis",
+            state: hasPlanningContent(plan.synopsisBody, true) ? "ai_written" : "empty",
+            markdown: plan.synopsisBody,
+          })
+          await this.dependencies.chapterSynopsis.recordPlanningArtifactState({
+            projectId: input.projectId,
+            chapterSequence: plan.chapterSequence,
+            kind: "outline",
+            state: hasPlanningContent(plan.outlineBody, false) ? "ai_written" : "empty",
+            markdown: plan.outlineBody,
+          })
         }
       }
 
-      const outlineWriteAllowed = synopsisConfirmed || confirmingSynopsis || batchAutomation || autonomous
       const outlinePath = siblingPlanningMarkdownPath(synopsisPath, "outline")
         ?? deriveOutlineMarkdownPath(
           session.chapterSequence,
           sessionTitle,
           extractVolumeFolderNameFromPath(synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME,
         )
+      const synopsisMarkdownAfterWrites = await this.readSynopsisFile(input.workspaceRootRef, synopsisPath)
+      const synopsisReadyForOutline = synopsisMarkdownAfterWrites.trim().length > 0
+        && !isSynopsisPlaceholderDocument(synopsisMarkdownAfterWrites)
+      const outlineWriteAllowed = synopsisReadyForOutline
+        && (synopsisConfirmed || (confirmingSynopsis && synopsisReady) || batchAutomation || autonomous)
       if (assist.bodyEdits !== undefined) {
         this.emitDiscussEdit(input.projectId, {
           path: outlinePath,
@@ -841,7 +979,11 @@ export class SynopsisConversationService {
           opsAttempted: assist.bodyEdits.ops.length,
         })
         if (!outlineWriteAllowed) {
-          writeNotices.push("细纲尚未确认可写：本轮 bodyEdits 未落盘。请先点「用这份梗概写细纲」。")
+          writeNotices.push(
+            synopsisReadyForOutline
+              ? "细纲尚未确认可写：本轮 bodyEdits 未落盘。请先点「用这份梗概写细纲」。"
+              : "剧情梗概尚未完成：本轮细纲未落盘，请先完成并确认剧情梗概。",
+          )
           this.emitDiscussEdit(input.projectId, {
             path: outlinePath,
             kind: "body_edits",
@@ -908,6 +1050,14 @@ export class SynopsisConversationService {
                 applied.content,
               )
               lastOutlineAgentDigest = digest(applied.content)
+              nextOutlineContentState = hasPlanningContent(applied.content, false) ? "ai_written" : "empty"
+              await this.dependencies.chapterSynopsis.recordPlanningArtifactState({
+                projectId: input.projectId,
+                chapterSequence: session.chapterSequence,
+                kind: "outline",
+                state: nextOutlineContentState,
+                markdown: applied.content,
+              })
               writeNotices.push(`已局部更新细纲（${String(applied.appliedCount)} 处）。`)
               this.emitDiscussEdit(input.projectId, {
                 path: outlinePath,
@@ -942,6 +1092,14 @@ export class SynopsisConversationService {
             assist.outlineBody,
           )
           lastOutlineAgentDigest = digest(assist.outlineBody)
+          nextOutlineContentState = hasPlanningContent(assist.outlineBody, false) ? "ai_written" : "empty"
+          await this.dependencies.chapterSynopsis.recordPlanningArtifactState({
+            projectId: input.projectId,
+            chapterSequence: session.chapterSequence,
+            kind: "outline",
+            state: nextOutlineContentState,
+            markdown: assist.outlineBody,
+          })
           this.emitDiscussEdit(input.projectId, {
             path: outlinePath,
             kind: "outline",
@@ -950,7 +1108,11 @@ export class SynopsisConversationService {
           })
         }
       } else if (assist.outlineBody !== undefined) {
-        writeNotices.push("细纲尚未确认可写：本轮 outlineBody 未落盘。请先点「用这份梗概写细纲」。")
+        writeNotices.push(
+          synopsisReadyForOutline
+            ? "细纲尚未确认可写：本轮 outlineBody 未落盘。请先点「用这份梗概写细纲」。"
+            : "剧情梗概尚未完成：本轮细纲未落盘，请先完成并确认剧情梗概。",
+        )
         this.emitDiscussEdit(input.projectId, {
           path: outlinePath,
           kind: "outline",
@@ -965,12 +1127,12 @@ export class SynopsisConversationService {
 
       const wroteOutlineThisTurn = lastOutlineAgentDigest !== undefined
         && lastOutlineAgentDigest !== session.lastOutlineAgentDigest
-      if (wroteSynopsisBody && batchAutomation) {
+      if (synopsisReadyForOutline && wroteSynopsisBody && batchAutomation) {
         nextSynopsisConfirmedAtMs = nowMs
       } else if (wroteSynopsisBody && !confirmingSynopsis) {
         nextSynopsisConfirmedAtMs = undefined
       }
-      if (confirmingSynopsis || (batchAutomation && wroteSynopsisBody)) {
+      if (synopsisReadyForOutline && (confirmingSynopsis || (batchAutomation && wroteSynopsisBody))) {
         nextSynopsisConfirmedAtMs = nextSynopsisConfirmedAtMs ?? nowMs
       }
 
@@ -981,9 +1143,20 @@ export class SynopsisConversationService {
       const confirmingOutline = isConfirmOutlineUserMessage(input.message)
       const hasOutlineOnDisk = (outlineDigest !== undefined && outlineMarkdown.trim().length > 0)
         || wroteOutlineThisTurn
-      // 批量推进关闭：须「按细纲写正文」或「跳过细纲按梗概开推」后才写正文。
-      const bodyWriteAllowed = autonomous || batchAutomation || confirmingOutline
-        || isSkipOutlineStartTurnMessage(input.message)
+      if (isExplicitChapterOutlineWriteRequest(input.message) && synopsisReadyForOutline && !hasOutlineOnDisk) {
+        writeNotices.push(
+          `系统状态：第${String(session.chapterSequence)}章细纲没有收到可保存的结构化内容，文件仍未写入；正文草稿不能越过细纲门禁。`,
+        )
+      }
+      // Every chapter must have a non-empty outline before a draft can be written.
+      const bodyWriteAllowed = synopsisReadyForOutline
+        && hasOutlineOnDisk
+        && (
+          autonomous
+          || batchAutomation
+          || confirmingOutline
+          || (session.focusKind ?? "plot_synopsis") === "chapter_body"
+        )
       const mustStopAfterOutline = wroteOutlineThisTurn && !autonomous && !batchAutomation
       const blockBodyPipeline = !bodyWriteAllowed || mustStopAfterOutline
       let draftAssist = assist
@@ -996,7 +1169,7 @@ export class SynopsisConversationService {
           writeNotices.push(
             hasOutlineOnDisk || wroteOutlineThisTurn
               ? "正文尚未确认可写：本轮草稿未落盘。请先点「按细纲写正文」。"
-              : "请先完成梗概确认并写细纲，或点「跳过细纲，按梗概开推」。",
+              : "请先完成梗概确认并写细纲，再开始正文草稿。",
           )
         }
         const {
@@ -1088,6 +1261,15 @@ export class SynopsisConversationService {
           deferredSequences: deferredDraftSequences,
         })
       }
+      if (
+        isExplicitChapterDraftRequest(input.message)
+        && draftApply.appended === undefined
+        && !assist.content.includes("没有写入草稿版本")
+      ) {
+        writeNotices.push(
+          `系统状态：第${String(session.chapterSequence)}章草稿未落入草稿版本（${draftApply.notice ?? "未收到可保存的完整正文"}）。正式正文未变更。`,
+        )
+      }
       let appliedFocusSequence: number | undefined
       let focusGateDeferred = false
       if (draftAssist.focusChange !== undefined) {
@@ -1125,24 +1307,30 @@ export class SynopsisConversationService {
         }
       }
       const gateDeferred = !focusLocked && (focusGateDeferred || deferredDraftSequences.length > 0)
-      const persistedChoices = filterDiscussChoices(
+      const workflowChoices = filterDiscussChoices(
         this.dependencies.publishDraft === undefined
           ? withPromoteDraftChoice(draftAssist.choices, draftApply.appended?.draftLabel)
           : draftAssist.choices,
         {
           focusLocked,
+          synopsisReady: synopsisReadyForOutline,
+          synopsisConfirmed,
+          outlineReady: hasOutlineOnDisk,
           ...(appliedFocusSequence === undefined ? {} : { appliedFocusSequence }),
         },
       )
+      const persistedChoices = !synopsisReadyForOutline && workflowChoices === undefined
+        ? [{ label: "先完成剧情梗概", action: "continue_discuss" as const }]
+        : workflowChoices
       // 批量推进开启时：Todo 未清 / continueTurn / 自决 choices 都自动续跑。
       // 关闭时：仅门禁延迟（如前章发布中）可续跑，流水线步骤必须等用户点确认。
       const todosStillOpen = !discussTodosAreSettled(
         synopsisConversationStreamHub.peek(input.projectId, session.sessionId).todos,
       )
       const offeredChoices = persistedChoices ?? []
-      const waitingOnUser = !autonomous && offeredChoices.length > 0
-      const autoDecideChoices = autonomous && offeredChoices.length > 0
-      const autoContinue = agentMode !== "plan" && !batchAutomation
+      const waitingOnUser = (coldStartStyleNeedsChoice || !autonomous) && offeredChoices.length > 0
+      const autoDecideChoices = autonomous && !coldStartStyleNeedsChoice && offeredChoices.length > 0
+      const autoContinue = agentMode !== "plan" && !batchAutomation && !coldStartStyleNeedsChoice
         && (
           gateDeferred
           || (autonomous && (
@@ -1233,6 +1421,27 @@ export class SynopsisConversationService {
           workspaceRootRef: input.workspaceRootRef,
           writes: assist.presentationWrites,
         })
+        if (assist.presentationWrites.some((write) => (
+          write.relativePath.replaceAll("\\", "/").replace(/^\.\//u, "") === WORK_STYLE_RULE_PATH
+        ))) {
+          const savedStyle = await this.dependencies.workspace.readMarkdown(
+            input.workspaceRootRef,
+            WORK_STYLE_RULE_PATH,
+          )
+          if (styleGateState.status === "style_selected") {
+            styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
+              projectId: input.projectId,
+              event: { type: "style_document_saved", markdown: savedStyle, digest: digest(savedStyle) },
+              updatedAtMs: this.dependencies.now(),
+            })
+          } else if (styleGateState.status === "ready") {
+            styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
+              projectId: input.projectId,
+              event: { type: "style_document_changed", currentDigest: digest(savedStyle) },
+              updatedAtMs: this.dependencies.now(),
+            })
+          }
+        }
         for (const write of assist.presentationWrites) {
           this.emitDiscussEdit(input.projectId, {
             path: write.relativePath,
@@ -1334,6 +1543,14 @@ export class SynopsisConversationService {
           title: sessionTitle,
           ...(lastAgentDigest === undefined ? {} : { lastAgentDigest }),
           ...(lastOutlineAgentDigest === undefined ? {} : { lastOutlineAgentDigest }),
+          synopsisContentState: nextSynopsisContentState,
+          outlineContentState: nextOutlineContentState,
+          ...(draftApply.appended === undefined
+            ? {}
+            : {
+                draftContentState: "ai_written",
+                draftVersionId: draftApply.appended.draftVersionId,
+              }),
           synopsisConfirmedAtMs: nextSynopsisConfirmedAtMs === undefined ? null : nextSynopsisConfirmedAtMs,
           updatedAtMs: nowMs + 1,
         })
@@ -1817,6 +2034,10 @@ export class SynopsisConversationService {
     userEditedOutlineSinceAgent: boolean
     currentWorkDisplayName?: string
     synopsisConfirmed?: boolean
+    workStyleGate?: Readonly<{
+      status: "awaiting_choice" | "style_selected"
+      selectedProseStylePath?: string
+    }>
     /** Injected by ChapterPanel 批量推演. */
     batchAutomation?: boolean
     /** Creation-desk「批量推进」toggle. */
@@ -1886,16 +2107,19 @@ export class SynopsisConversationService {
       mode: "create" | "update"
     }>[]
     arcPlanMarkdown?: string
+    availableProseStylePaths?: readonly string[]
     budgetAdvisory?: SynopsisConversationBudgetAdvisory
     }>> {
     const basePhasePrompt = await this.dependencies.prompts.loadPhase("synopsis_discuss")
     const intentAppendix = chapterNarrativeIntentPhaseAppendix(input.chapterIntent, "synopsis_discuss")
     const presentationAppendix = chapterPresentationPhaseAppendix(input.presentation, "synopsis_discuss")
+    const workStyleGateAppendix = buildWorkStyleGatePromptAppendix(input.workStyleGate)
     const { discussAgentModePromptAppendix } = await import("./discuss-agent-mode.js")
     const modeAppendix = discussAgentModePromptAppendix(input.agentMode ?? "auto", {
       batchProceed: input.batchProceed === true || input.batchAutomation === true,
     })
-    const appendix = [intentAppendix, presentationAppendix, modeAppendix].filter((part): part is string => part !== undefined)
+    const appendix = [intentAppendix, presentationAppendix, modeAppendix, workStyleGateAppendix]
+      .filter((part): part is string => part !== undefined)
     const phasePrompt = appendix.length === 0
       ? basePhasePrompt
       : {
@@ -1930,6 +2154,54 @@ export class SynopsisConversationService {
       workspaceRootRef: input.workspaceRootRef,
       generatedAtMs: nowMs,
     })
+    const availableProseStylePaths = catalog.entries
+      .filter((entry) => entry.entryKind === "file"
+        && entry.relativePath.startsWith("表现输出/笔风规则/")
+        && entry.relativePath.endsWith(".md"))
+      .map((entry) => entry.relativePath)
+    const workStyleCandidateEvidence = input.workStyleGate === undefined
+      ? []
+      : (await Promise.all(availableProseStylePaths.map(async (path) => {
+          try {
+            const markdown = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, path)
+            return {
+              readId: this.dependencies.createId(),
+              visibility: "committed" as const,
+              ownerKind: "workspace:prose_style_candidate",
+              ownerId: path,
+              exactKeys: [path],
+              semanticText: markdown.length > 4_000
+                ? `${markdown.slice(0, 4_000)}\n\n[规则正文过长，评估上下文已截断]`
+                : markdown,
+              sourceRefs: [],
+              digest: digest(markdown),
+              stateRole: "current" as const,
+              temporalRole: "current" as const,
+            }
+          } catch {
+            return undefined
+          }
+        }))).filter((evidence) => evidence !== undefined)
+    let currentWorkStyleEvidence: TurnReadEvidence[] = []
+    if (input.workStyleGate !== undefined) {
+      try {
+        const markdown = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, WORK_STYLE_RULE_PATH)
+        currentWorkStyleEvidence = [{
+          readId: this.dependencies.createId(),
+          visibility: "committed",
+          ownerKind: "workspace:work_style_current",
+          ownerId: WORK_STYLE_RULE_PATH,
+          exactKeys: [WORK_STYLE_RULE_PATH],
+          semanticText: markdown,
+          sourceRefs: [],
+          digest: digest(markdown),
+          stateRole: "current",
+          temporalRole: "current",
+        }]
+      } catch {
+        currentWorkStyleEvidence = []
+      }
+    }
     const titleAlignmentIssue = await this.dependencies.chapterSynopsis.detectTitleAlignmentIssue({
       workspaceRootRef: input.workspaceRootRef,
       chapterSequence: input.chapterSequence,
@@ -2006,6 +2278,7 @@ export class SynopsisConversationService {
         catalog,
         ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
       })]
+    readEvidence = [...readEvidence, ...workStyleCandidateEvidence, ...currentWorkStyleEvidence]
     const sendTurnId = this.dependencies.createId()
     let lastRequestInputTokens = await this.dependencies.conversation.loadDiscussContextInputTokens(input.projectId, input.sessionId)
     const contextId = this.dependencies.createId()
@@ -2015,6 +2288,9 @@ export class SynopsisConversationService {
     let accumulatedReasoning = ""
     let attempt = 0
     let missingArtifactRetries = 0
+    let missingSynopsisArtifactRetries = 0
+    let missingOutlineArtifactRetries = 0
+    let missingDraftProposalRetries = 0
     let goalScheduleRepairs = 0
     const repairHints: string[] = []
     if (input.batchAutomation === true) {
@@ -2023,7 +2299,7 @@ export class SynopsisConversationService {
       )
     } else if (input.synopsisConfirmed !== true) {
       repairHints.push(
-        "当前梗概尚未经用户确认：禁止输出 outlineBody；戏核收窄后须同屏给出「用这份梗概写细纲」(confirm_synopsis)、「再改梗概」、可选「跳过细纲，按梗概开推」(start_turn)。",
+        "当前梗概尚未经用户确认：禁止输出 outlineBody；戏核收窄后只能给出「用这份梗概写细纲」(confirm_synopsis) 或「再改梗概」，不得跳过细纲进入正文。",
       )
     } else if (isConfirmSynopsisUserMessage(input.userMessage)) {
       repairHints.push(
@@ -2038,7 +2314,7 @@ export class SynopsisConversationService {
       )
     }
     const carriedTodos = synopsisConversationStreamHub.carriedTodos(input.projectId)
-    const carriedTodoNotice = carriedTodos.length === 0
+    const carriedTodoNotice = input.workStyleGate !== undefined || carriedTodos.length === 0
       ? undefined
       : [
           "【上轮未完成 Todo 已带入本轮】",
@@ -2107,11 +2383,14 @@ export class SynopsisConversationService {
         return finalizeDiscussReturn(
           input.projectId,
           latestBudgetAdvisory,
-          buildSynopsisDiscussFallbackReturn({
-            projectId: input.projectId,
-            accumulatedReasoning,
-            streamedContent: synopsisConversationStreamHub.peek(input.projectId).content,
-          }),
+          {
+            ...buildSynopsisDiscussFallbackReturn({
+              projectId: input.projectId,
+              accumulatedReasoning,
+              streamedContent: synopsisConversationStreamHub.peek(input.projectId).content,
+            }),
+            availableProseStylePaths,
+          },
         )
       }
       if (remainingCalls <= 0) {
@@ -2166,6 +2445,7 @@ export class SynopsisConversationService {
             userEditedSinceAgent: input.userEditedSinceAgent,
             userEditedOutlineSinceAgent: input.userEditedOutlineSinceAgent,
             synopsisConfirmed: input.synopsisConfirmed === true,
+            ...(input.workStyleGate === undefined ? {} : { workStyleGate: input.workStyleGate }),
             ...(input.batchAutomation === true ? { batchAutomation: true } : {}),
             ...(input.currentWorkDisplayName === undefined
               ? {}
@@ -2355,7 +2635,10 @@ export class SynopsisConversationService {
           synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
             content: softContent,
           })
-          return finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, { content: softContent })
+          return finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, {
+            content: softContent,
+            availableProseStylePaths,
+          })
         }
         throw error
       }
@@ -2598,8 +2881,43 @@ export class SynopsisConversationService {
             "模型未返回完整讨论结果（缺少 artifact）。请重试发送。",
           )
         }
+        if (input.workStyleGate !== undefined) {
+          const validStylePaths = availableProseStylePaths.map((path) => path.replaceAll("\\", "/"))
+          const recommendations = (artifact.data.choices ?? []).filter((choice) => (
+            choice.action === "continue_discuss"
+            && validStylePaths.some((path) => choice.label.includes(path))
+          ))
+          if (input.workStyleGate.status === "awaiting_choice") {
+            const requiredRecommendations = Math.min(2, validStylePaths.length)
+            if (recommendations.length < requiredRecommendations) {
+              repairHints.push(
+                "风格门禁要求你先阅读全部 workspace:prose_style_candidate 证据，再给至少两个绑定真实候选路径的 continue_discuss 推荐；只做风格评估，不写任何文件。",
+              )
+              attempt += 1
+              continue
+            }
+          } else {
+            const styleWrite = artifact.data.presentationWrites?.find((write) => (
+              write.relativePath.replaceAll("\\", "/").replace(/^\.\//u, "") === WORK_STYLE_RULE_PATH
+            ))
+            const selectedPath = input.workStyleGate.selectedProseStylePath?.replaceAll("\\", "/")
+            const styleWriteApproved = styleWrite !== undefined
+              && selectedPath !== undefined
+              && styleWrite.markdown.includes(selectedPath)
+              && assessWorkStyleMarkdown(styleWrite.markdown).complete
+            if (!styleWriteApproved && recommendations.length < Math.min(2, validStylePaths.length)) {
+              repairHints.push(
+                `审核所选笔风「${selectedPath ?? "（缺失）"}」后，必须给出完整合格的 ${WORK_STYLE_RULE_PATH}，且保留所选路径；若不适配，提供至少两个绑定真实候选路径的替代方案。禁止写章节内容。`,
+              )
+              attempt += 1
+              continue
+            }
+          }
+        }
         const turnTodos = synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos
-        if (discussArtifactRequiresTodos(artifact.data) && !discussTurnHasTodos(turnTodos)) {
+        if (input.workStyleGate === undefined
+          && discussArtifactRequiresTodos(artifact.data)
+          && !discussTurnHasTodos(turnTodos)) {
           repairHints.push(DISCUSS_TODO_REQUIRED_HINT)
           attempt += 1
           continue
@@ -2610,6 +2928,7 @@ export class SynopsisConversationService {
         if (
           (input.agentMode ?? "auto") !== "plan"
           && artifact.data.continueTurn !== true
+          && input.workStyleGate === undefined
           && discussTurnHasTodos(turnTodos)
           && !discussTodosAreSettled(turnTodos)
         ) {
@@ -2647,6 +2966,50 @@ export class SynopsisConversationService {
         )
         const rawDraftProposals = artifact.data.chapterDraftProposals
         const focusDraftRequested = artifact.data.chapterDraftProposal !== undefined
+        const currentVolumeSynopsisPlan = artifact.data.volumeChapterPlans?.find((plan) => (
+          plan.chapterSequence === input.chapterSequence && hasPlanningContent(plan.synopsisBody, true)
+        ))
+        const currentVolumeOutlinePlan = artifact.data.volumeChapterPlans?.find((plan) => (
+          plan.chapterSequence === input.chapterSequence && hasPlanningContent(plan.outlineBody, false)
+        ))
+        const missingRequiredSynopsisArtifact = isExplicitChapterSynopsisWriteRequest(input.userMessage)
+          && !hasPlanningContent(input.synopsisMarkdown, true)
+          && !hasPlanningContent(artifact.data.synopsisBody ?? "", true)
+          && currentVolumeSynopsisPlan === undefined
+        if (
+          missingRequiredSynopsisArtifact
+          && missingSynopsisArtifactRetries < 1
+          && !budgetGraceUsed
+        ) {
+          repairHints.push([
+            `【剧情梗概必交】用户要求写入当前焦点第${String(input.chapterSequence)}章剧情梗概，但当前文件仍是空占位。本轮必须在 synopsisBody 提交完整、非空的梗概 Markdown；assistantMessage、暂存区、细纲或正文都不能代替。不得声称已写入，也不得推进细纲或草稿。`,
+            "请直接返回结构化 synopsisBody，不要再 request_read 或继续规划后续章节。",
+          ].join("\n"))
+          missingSynopsisArtifactRetries += 1
+          attempt += 1
+          continue
+        }
+        const missingSynopsisNotice = missingRequiredSynopsisArtifact
+          ? `系统状态：第${String(input.chapterSequence)}章剧情梗概没有收到可保存的结构化内容，文件仍未写入；细纲和正文草稿不能越过梗概门禁。`
+          : undefined
+        const missingRequiredOutlineArtifact = isExplicitChapterOutlineWriteRequest(input.userMessage)
+          && hasPlanningContent(input.synopsisMarkdown, true)
+          && !hasPlanningContent(input.outlineMarkdown, false)
+          && !hasPlanningContent(artifact.data.outlineBody ?? "", false)
+          && currentVolumeOutlinePlan === undefined
+        if (
+          missingRequiredOutlineArtifact
+          && missingOutlineArtifactRetries < 1
+          && !budgetGraceUsed
+        ) {
+          repairHints.push([
+            `【剧情细纲必交】用户已要求为当前焦点第${String(input.chapterSequence)}章写入细纲，但文件仍为空。必须在 outlineBody 提交完整、非空的细纲 Markdown；assistantMessage、暂存区或正文草稿都不能代替。不得声称已写入，也不得推进正文草稿。`,
+            "请直接返回结构化 outlineBody，不要再 request_read 或继续规划后续章节。",
+          ].join("\n"))
+          missingOutlineArtifactRetries += 1
+          attempt += 1
+          continue
+        }
         const draftSequences = [
           ...(rawDraftProposals?.map((proposal) => proposal.chapterSequence) ?? []),
           ...(focusDraftRequested ? [input.chapterSequence] : []),
@@ -2656,12 +3019,33 @@ export class SynopsisConversationService {
           nextDraftSequence,
           indexedSequences,
         )
+        const draftProposalRequired = isExplicitChapterDraftRequest(input.userMessage)
+        const hasCurrentChapterDraftProposal = artifact.data.chapterDraftProposal !== undefined
+          && artifact.data.chapterDraftProposal.body.trim().length > 0
+          || (rawDraftProposals?.some((proposal) => (
+            proposal.chapterSequence === input.chapterSequence && proposal.body.trim().length > 0
+          )) ?? false)
+          || latestToolDraft !== undefined
+        const missingRequiredDraftProposal = draftProposalRequired && !hasCurrentChapterDraftProposal
+        if (missingRequiredDraftProposal && missingDraftProposalRetries < 1 && !budgetGraceUsed) {
+          repairHints.push([
+            `【草稿提案必交】用户已明确要求为当前焦点第${String(input.chapterSequence)}章写正文草稿。必须在 artifact.chapterDraftProposal 中提交完整、非空正文（或在 chapterDraftProposals 中提交 chapterSequence=${String(input.chapterSequence)} 的完整正文）；assistantMessage、暂存区文件或工具说明都不能代替草稿提案。没有结构化提案就不会创建草稿版本，也不得声称已写入或已保存。`,
+            "请直接返回完整提案，不要再 request_read 或重复解释流程。",
+          ].join("\n"))
+          missingDraftProposalRetries += 1
+          attempt += 1
+          continue
+        }
+        const missingDraftNotice = missingRequiredDraftProposal
+          ? `系统状态：模型未返回第${String(input.chapterSequence)}章的有效结构化草稿提案，正文没有写入草稿版本。请重试「按细纲写正文」。`
+          : undefined
         const allowedDraftProposals = rawDraftProposals?.filter((proposal) => (
           indexedSequences.has(proposal.chapterSequence) || proposal.chapterSequence <= nextDraftSequence
         ))
         const focusDraftAllowed = !focusDraftRequested
           || indexedSequences.has(input.chapterSequence)
           || input.chapterSequence <= nextDraftSequence
+        let deferredDraftNotice: string | undefined
         if (deferredDraftSequences.length > 0) {
           this.applyChapterSequenceTodoGate(
             input.projectId,
@@ -2686,22 +3070,21 @@ export class SynopsisConversationService {
               }),
             }],
           })
-          const hasOtherWrites = artifact.data.synopsisBody !== undefined
-            || artifact.data.outlineBody !== undefined
-            || artifact.data.bodyEdits !== undefined
-            || artifact.data.volumeChapterPlans !== undefined
-            || artifact.data.stagingDelta !== undefined
-            || artifact.data.stagingPromote !== undefined
-            || artifact.data.presentationWrites !== undefined
-            || artifact.data.arcPlan !== undefined
-            || artifact.data.goalProposals !== undefined
           const hadDraftIntent = focusDraftRequested
             || (rawDraftProposals !== undefined && rawDraftProposals.length > 0)
           const allowedAnyDraft = (focusDraftRequested && focusDraftAllowed)
             || (allowedDraftProposals !== undefined && allowedDraftProposals.length > 0)
             || latestToolDraft !== undefined
-          if (hadDraftIntent && !allowedAnyDraft && !hasOtherWrites && remainingCalls > 1) {
-            repairHints.push(gateHint)
+          if (shouldRetryDeferredChapterDraft({
+            hadDraftIntent,
+            hasAllowedDraft: allowedAnyDraft,
+            deferredSequences: deferredDraftSequences,
+            remainingCalls,
+          })) {
+            repairHints.push([
+              gateHint,
+              `【草稿序号修复】当前焦点是第${String(input.chapterSequence)}章，但本轮草稿提案均未通过顺序门禁。请重新输出当前焦点章完整正文到 chapterDraftProposal；若用 chapterDraftProposals，chapterSequence 必须为 ${String(input.chapterSequence)}。被拒绝的提案没有进入草稿轴，assistantMessage 不得声称已生成或已保存草稿。`,
+            ].join("\n"))
             runtimeLog("warn", "synopsis-conversation", "chapter_sequence.gate_retry", {
               projectId: input.projectId,
               sessionId: input.sessionId,
@@ -2712,14 +3095,25 @@ export class SynopsisConversationService {
             attempt += 1
             continue
           }
+          if (hadDraftIntent && !allowedAnyDraft) {
+            const deferredLabels = [...new Set(deferredDraftSequences)].sort((a, b) => a - b)
+              .map((sequence) => `第${String(sequence)}章`).join("、")
+            deferredDraftNotice = `系统状态：本轮只收到${deferredLabels}的草稿提案，顺序门禁已拒绝，当前焦点第${String(input.chapterSequence)}章没有生成或保存正文草稿。`
+          }
         }
-        synopsisConversationStreamHub.setContent(input.projectId, artifact.data.assistantMessage, this.dependencies.now())
+        const finalAssistantMessage = missingSynopsisNotice !== undefined
+          ? missingSynopsisNotice
+          : [artifact.data.assistantMessage, deferredDraftNotice, missingDraftNotice]
+              .filter((part): part is string => part !== undefined)
+              .join("\n\n")
+        synopsisConversationStreamHub.setContent(input.projectId, finalAssistantMessage, this.dependencies.now())
         synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
           ...(accumulatedReasoning.length === 0 ? {} : { thinking: accumulatedReasoning }),
-          content: artifact.data.assistantMessage,
+          content: finalAssistantMessage,
         })
         return finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, {
-          content: artifact.data.assistantMessage,
+          content: finalAssistantMessage,
+          availableProseStylePaths,
           ...(accumulatedReasoning.length === 0 ? {} : { reasoningContent: accumulatedReasoning }),
           ...(artifact.data.chapterTitle === undefined ? {} : { chapterTitle: artifact.data.chapterTitle }),
           ...(artifact.data.titleAlignTarget === undefined
@@ -2790,13 +3184,78 @@ export class SynopsisConversationService {
         })
         const artifact = synopsisDiscussArtifactSchema.safeParse(parsedResult.artifact)
         if (artifact.success) {
-          synopsisConversationStreamHub.setContent(input.projectId, artifact.data.assistantMessage, this.dependencies.now())
+          const nextDraftSequence = await this.dependencies.chapters.nextChapterSequence(input.projectId)
+          const indexedSequences = new Set(
+            (await this.dependencies.chapterIndex.list(input.projectId)).map((chapter) => chapter.sequence),
+          )
+          const rawDraftProposals = artifact.data.chapterDraftProposals
+          const focusDraftRequested = artifact.data.chapterDraftProposal !== undefined
+          const draftSequences = [
+            ...(rawDraftProposals?.map((proposal) => proposal.chapterSequence) ?? []),
+            ...(focusDraftRequested ? [input.chapterSequence] : []),
+          ]
+          const { deferred: deferredDraftSequences } = partitionChapterDraftSequences(
+            draftSequences,
+            nextDraftSequence,
+            indexedSequences,
+          )
+          const draftProposalRequired = isExplicitChapterDraftRequest(input.userMessage)
+          const currentVolumeSynopsisPlan = artifact.data.volumeChapterPlans?.find((plan) => (
+            plan.chapterSequence === input.chapterSequence && hasPlanningContent(plan.synopsisBody, true)
+          ))
+          const missingSynopsisNotice = isExplicitChapterSynopsisWriteRequest(input.userMessage)
+            && !hasPlanningContent(input.synopsisMarkdown, true)
+            && !hasPlanningContent(artifact.data.synopsisBody ?? "", true)
+            && currentVolumeSynopsisPlan === undefined
+            ? `系统状态：第${String(input.chapterSequence)}章剧情梗概没有收到可保存的结构化内容，文件仍未写入；细纲和正文草稿不能越过梗概门禁。`
+            : undefined
+          const currentVolumeOutlinePlan = artifact.data.volumeChapterPlans?.find((plan) => (
+            plan.chapterSequence === input.chapterSequence && hasPlanningContent(plan.outlineBody, false)
+          ))
+          const missingOutlineNotice = isExplicitChapterOutlineWriteRequest(input.userMessage)
+            && hasPlanningContent(input.synopsisMarkdown, true)
+            && !hasPlanningContent(input.outlineMarkdown, false)
+            && !hasPlanningContent(artifact.data.outlineBody ?? "", false)
+            && currentVolumeOutlinePlan === undefined
+            ? `系统状态：模型未返回第${String(input.chapterSequence)}章的有效结构化细纲，细纲文件仍未写入；正文草稿不能越过细纲门禁。`
+            : undefined
+          const hasCurrentChapterDraftProposal = artifact.data.chapterDraftProposal !== undefined
+            && artifact.data.chapterDraftProposal.body.trim().length > 0
+            || (rawDraftProposals?.some((proposal) => (
+              proposal.chapterSequence === input.chapterSequence && proposal.body.trim().length > 0
+            )) ?? false)
+          const missingDraftNotice = draftProposalRequired
+            && !hasCurrentChapterDraftProposal
+            && latestToolDraft === undefined
+            ? `系统状态：模型未返回第${String(input.chapterSequence)}章的有效结构化草稿提案，正文没有写入草稿版本。请重试「按细纲写正文」。`
+            : undefined
+          const allowedDraftProposals = rawDraftProposals?.filter((proposal) => (
+            indexedSequences.has(proposal.chapterSequence) || proposal.chapterSequence <= nextDraftSequence
+          ))
+          const focusDraftAllowed = !focusDraftRequested
+            || indexedSequences.has(input.chapterSequence)
+            || input.chapterSequence <= nextDraftSequence
+          const hasAllowedDraft = (focusDraftRequested && focusDraftAllowed)
+            || (allowedDraftProposals !== undefined && allowedDraftProposals.length > 0)
+          const hasDraftIntent = focusDraftRequested || (rawDraftProposals?.length ?? 0) > 0
+          const gateNotice = hasDraftIntent && deferredDraftSequences.length > 0 && !hasAllowedDraft
+            ? `系统状态：草稿提案${[...new Set(deferredDraftSequences)].sort((a, b) => a - b).map((sequence) => `第${String(sequence)}章`).join("、")}未通过章节顺序门禁，当前焦点第${String(input.chapterSequence)}章没有生成或保存正文草稿。`
+            : undefined
+        const finalAssistantMessage = missingSynopsisNotice !== undefined
+            ? missingSynopsisNotice
+          : missingOutlineNotice !== undefined
+            ? missingOutlineNotice
+            : [artifact.data.assistantMessage, gateNotice, missingDraftNotice]
+                .filter((part): part is string => part !== undefined)
+                .join("\n\n")
+          synopsisConversationStreamHub.setContent(input.projectId, finalAssistantMessage, this.dependencies.now())
           synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
             ...(accumulatedReasoning.length === 0 ? {} : { thinking: accumulatedReasoning }),
-            content: artifact.data.assistantMessage,
+            content: finalAssistantMessage,
           })
           return finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, {
-            content: artifact.data.assistantMessage,
+            content: finalAssistantMessage,
+            availableProseStylePaths,
             ...(accumulatedReasoning.length === 0 ? {} : { reasoningContent: accumulatedReasoning }),
             ...(artifact.data.chapterTitle === undefined ? {} : { chapterTitle: artifact.data.chapterTitle }),
             ...(artifact.data.titleAlignTarget === undefined
@@ -2821,9 +3280,15 @@ export class SynopsisConversationService {
                     ops: artifact.data.bodyEdits.ops,
                   },
                 }),
-            ...mapArtifactChapterDraftProposal(artifact.data.chapterDraftProposal),
-            ...mapArtifactChapterDraftProposals(artifact.data.chapterDraftProposals),
+            ...mapArtifactChapterDraftProposal(focusDraftAllowed ? artifact.data.chapterDraftProposal : undefined),
+            ...mapArtifactChapterDraftProposals(allowedDraftProposals),
             ...mapArtifactVolumeChapterPlans(artifact.data.volumeChapterPlans),
+            ...(latestToolDraft === undefined ? {} : { appendedDraft: {
+              revisionTaskId: latestToolDraft.revisionTaskId,
+              chapterId: latestToolDraft.chapterId,
+              draftVersionId: latestToolDraft.draftVersionId,
+              draftLabel: latestToolDraft.draftLabel,
+            } }),
             ...mapArtifactFocusChange(artifact.data.focusChange),
             ...(artifact.data.continueTurn === true ? { continueTurn: true } : {}),
             ...(artifact.data.choices === undefined ? {} : { choices: artifact.data.choices }),
@@ -2852,11 +3317,14 @@ export class SynopsisConversationService {
         const fallback = finalizeDiscussReturn(
           input.projectId,
           latestBudgetAdvisory,
-          buildSynopsisDiscussFallbackReturn({
-            projectId: input.projectId,
-            accumulatedReasoning,
-            streamedContent: synopsisConversationStreamHub.peek(input.projectId).content,
-          }),
+          {
+            ...buildSynopsisDiscussFallbackReturn({
+              projectId: input.projectId,
+              accumulatedReasoning,
+              streamedContent: synopsisConversationStreamHub.peek(input.projectId).content,
+            }),
+            availableProseStylePaths,
+          },
         )
         synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
           ...(fallback.reasoningContent === undefined ? {} : { thinking: fallback.reasoningContent }),
@@ -2865,7 +3333,8 @@ export class SynopsisConversationService {
         return fallback
       }
 
-      if (!discussTurnHasTodos(synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos)) {
+      if (input.workStyleGate === undefined
+        && !discussTurnHasTodos(synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos)) {
         repairHints.push(DISCUSS_TODO_REQUIRED_HINT)
         attempt += 1
         continue
@@ -4115,6 +4584,34 @@ function mapSynopsisPresentationWrites(
   }))
 }
 
+function buildWorkStyleGatePromptAppendix(input: Readonly<{
+  status: "awaiting_choice" | "style_selected"
+  selectedProseStylePath?: string
+}> | undefined): string | undefined {
+  if (input === undefined) return undefined
+  const sharedRules = [
+    "这是作品创作门禁，不是普通剧情讨论。必须逐份阅读本轮 readEvidence 中 ownerKind=workspace:prose_style_candidate 的真实规则正文，再结合用户构思判断适配度；禁止按文件名、题材关键词或固定排序猜选。",
+    "风格备选必须引用 readEvidence 中真实存在的完整路径；每条推荐说明适配点与需要规避的风险。不得声称已落盘，除非实际输出 presentationWrites。",
+    "风格门禁期间 Todo 不适用：不要创建、更新或结清 Todo，也不要调用 todo_write 或任何 toolRequest；工具列表为空是预期行为，直接按本阶段要求返回 artifact。已有 Todo 暂停处理，不得因此阻止门禁交付。",
+    "门禁未通过：禁止输出 synopsisBody、outlineBody、bodyEdits、chapterDraftProposal(s)、appendedDraft、volumeChapterPlans、arcPlan、focusChange 或 continueTurn；不得调用工作流工具。presentationWrites 是本阶段唯一允许的结构化写入，不是工具调用。",
+  ]
+  if (input.status === "awaiting_choice") {
+    return [
+      "【风格门禁阶段：AI评估并推荐，等待用户选择】",
+      ...sharedRules,
+      "先比较所有候选预定义笔风与用户构思的兼容程度，挑出最合适的 2–3 个供用户选择。assistantMessage 必须简要呈现你的评估依据、推荐顺序以及预定义规则是否需要适配。",
+      "choices 必须有 2–3 个 continue_discuss 选项；每个 label 都必须包含对应的精确预定义路径及推荐理由。不要写入作品风格文件或章节内容；用户选择后再进入下一阶段。",
+    ].join("\n")
+  }
+  return [
+    "【风格门禁阶段：审核用户所选预定义笔风】",
+    ...sharedRules,
+    `用户选择的笔风规则是：${input.selectedProseStylePath ?? "（缺失）"}。必须基于该路径对应的真实规则正文判断是否适用于本书。`,
+    `若适配，只返回 assistantMessage、finalSelfReview 与一个 presentationWrites 项，更新「${WORK_STYLE_RULE_PATH}」，将选定规则整合为符合 8 个必需章节的完整本书风格方案，并在语体笔风章节保留该精确路径；不允许同轮输出梗概、大纲或正文。`,
+    "若不适配或必须大幅违背预定义规则才能使用，不写作品风格文件；解释冲突并用 choices 给出新的 2–3 个真实候选路径供用户改选。",
+  ].join("\n")
+}
+
 function synopsisSearchLabel(read: import("@worldseed/contracts").ReadRequest): string {
   return isTemporalReadRequest(read) ? formatTemporalSearchLabel(read) : formatSynopsisSearchLabel(read)
 }
@@ -4257,6 +4754,7 @@ function finalizeDiscussReturn(
       mode: "create" | "update"
     }>[]
     arcPlanMarkdown?: string
+    availableProseStylePaths?: readonly string[]
   }>,
 ): Readonly<{
   content: string
@@ -4305,6 +4803,7 @@ function finalizeDiscussReturn(
     mode: "create" | "update"
   }>[]
   arcPlanMarkdown?: string
+  availableProseStylePaths?: readonly string[]
   budgetAdvisory?: SynopsisConversationBudgetAdvisory
 }> {
   const budgetAdvisory = latest ?? peekSynopsisModelBudgetAdvisory(projectId)
@@ -4386,6 +4885,36 @@ function mapArtifactVolumeChapterPlans(
   }
 }
 
+export function partitionVolumeChapterPlansBySequence(
+  plans: readonly VolumeChapterPlan[],
+  currentSequence: number,
+  allowsWholeVolumePlanning: boolean,
+): Readonly<{ allowed: readonly VolumeChapterPlan[]; deferred: readonly VolumeChapterPlan[] }> {
+  if (allowsWholeVolumePlanning) return { allowed: plans, deferred: [] }
+  return {
+    allowed: plans.filter((plan) => plan.chapterSequence === currentSequence),
+    deferred: plans.filter((plan) => plan.chapterSequence !== currentSequence),
+  }
+}
+
+export function isExplicitWholeVolumePlanningRequest(message: string): boolean {
+  const planningPhrase = /卷规划|整卷规划|规划全卷/
+  return planningPhrase.test(message)
+    && !/(?:不|别|无需|不要|禁止|取消|不是).{0,6}(?:卷规划|整卷规划|规划全卷)/.test(message)
+}
+
+function isExplicitChapterDraftRequest(message: string): boolean {
+  return /按细纲写正文|(?:生成|写|改|修订|续写).{0,8}正文草稿|(?:开始|继续)写正文|修订正文|改写正文/u.test(message)
+}
+
+function isExplicitChapterSynopsisWriteRequest(message: string): boolean {
+  return /(?:先)?完成(?:本章|第一章)?(?:剧情)?梗概|(?:写|生成|重写|补写|更新|整理).{0,12}(?:剧情梗概|本章梗概|梗概)|(?:剧情梗概|本章梗概|梗概).{0,8}(?:写入|落盘|生成)/u.test(message)
+}
+
+function isExplicitChapterOutlineWriteRequest(message: string): boolean {
+  return /(?:用这份梗概写细纲|(?:写|生成|重写|补写|更新|整理).{0,12}(?:剧情细纲|本章细纲|细纲)|(?:剧情细纲|本章细纲|细纲).{0,8}(?:写入|落盘|生成))/u.test(message)
+}
+
 function mapArtifactFocusChange(
   change: Readonly<{
     chapterSequence: number
@@ -4413,13 +4942,28 @@ function withPromoteDraftChoice(
 
 export function filterDiscussChoices(
   choices: SynopsisConversationChoice[] | undefined,
-  input: Readonly<{ focusLocked: boolean; appliedFocusSequence?: number }>,
+  input: Readonly<{
+    focusLocked: boolean
+    appliedFocusSequence?: number
+    synopsisReady?: boolean
+    synopsisConfirmed?: boolean
+    outlineReady?: boolean
+  }>,
 ): SynopsisConversationChoice[] | undefined {
   if (choices === undefined) return undefined
   const filtered = choices.filter((choice) => {
-    if (input.focusLocked && (choice.action === "set_focus" || choice.action === "start_turn")) {
+    if (
+      choice.action === "start_turn"
+      && (
+        input.focusLocked
+        || input.synopsisReady === false
+        || input.synopsisConfirmed === false
+        || input.outlineReady === false
+      )
+    ) {
       return false
     }
+    if (choice.action === "confirm_synopsis" && input.synopsisReady === false) return false
     // Drop redundant confirm buttons once focus already moved this turn.
     if (
       choice.action === "set_focus"
@@ -4444,6 +4988,13 @@ function stripHeadingFromDraftBody(heading: string, body: string): string {
 function normalizeDiscussDraftHeading(proposed: string, fallback: string): string {
   const trimmed = proposed.trim().replace(/^#+\s*/u, "")
   return trimmed.length === 0 ? fallback : trimmed
+}
+
+function hasPlanningContent(markdown: string, synopsis: boolean): boolean {
+  if (markdown.trim().length === 0) return false
+  if (synopsis && isSynopsisPlaceholderDocument(markdown)) return false
+  const body = markdown.replace(/^\uFEFF?\s*(?:#|##)\s+[^\n]*\n?/u, "").trim()
+  return body.length > 0
 }
 
 /** User clicked confirm_synopsis or typed an equivalent confirmation. */

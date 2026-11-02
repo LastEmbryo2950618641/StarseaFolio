@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import type { DeductionGoal } from "@worldseed/contracts"
-import { AlertTriangle, BookOpenText, ChevronDown, ChevronRight, FileText, Link2, Library } from "lucide-react"
+import type { ChapterRevisionReadResult, ChapterWorkflowGate, DeductionGoal, RevisionDraftVersion } from "@worldseed/contracts"
+import { AlertTriangle, ArrowLeft, BookOpenText, ChevronDown, ChevronRight, FileText, Info, Link2, Library, ScrollText } from "lucide-react"
 
 import { invokeBackend } from "../../api/client.js"
 import {
@@ -30,13 +30,32 @@ export type ChapterBrowseDetailRailProps = Readonly<{
   workspaceRootRef: string
   chapter: DiscussFocusChapterOption | undefined
   volume?: ChapterBrowseVolumeSelection
+  backLabel?: string
+  unpublishedDrafts?: readonly ChapterRevisionReadResult[]
+  draftCandidateVersionId?: string
+  onSelectDraftCandidate?(revisionTaskId: string, versionId: string): void
   onOpenBody(path: string): void
+  onBack?(): void
 }>
 
+type ChapterDetailTab = "info" | "synopsis" | "outline" | "draft" | "body"
+
+const CHAPTER_DETAIL_TABS: ReadonlyArray<Readonly<{ id: ChapterDetailTab; label: string; testId: string }>> = [
+  { id: "info", label: "章节信息", testId: "chapter-detail-tab-info" },
+  { id: "synopsis", label: "剧情梗概", testId: "chapter-detail-tab-synopsis" },
+  { id: "outline", label: "剧情细纲", testId: "chapter-detail-tab-outline" },
+  { id: "draft", label: "草稿", testId: "chapter-detail-tab-draft" },
+  { id: "body", label: "正文", testId: "chapter-detail-tab-body" },
+]
+
 export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): React.JSX.Element {
-  const [synopsisMarkdown, setSynopsisMarkdown] = useState<string>()
+  const [workflowGate, setWorkflowGate] = useState<ChapterWorkflowGate>()
+  const [activeTab, setActiveTab] = useState<ChapterDetailTab>("info")
   const [volumeSynopsis, setVolumeSynopsis] = useState<string>()
   const [synopsisLoading, setSynopsisLoading] = useState(false)
+  const [draftVersions, setDraftVersions] = useState<readonly RevisionDraftVersion[]>([])
+  const [draftLoading, setDraftLoading] = useState(false)
+  const [localDraftCandidateVersionId, setLocalDraftCandidateVersionId] = useState<string>()
   const [expandedChapters, setExpandedChapters] = useState<ReadonlySet<number>>(() => new Set())
   const goals = useDeductionGoals({
     projectId: props.projectId,
@@ -57,11 +76,23 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
   const bodyPath = resolveDiscussFocusOpenPath(props.chapter, "chapter_body")
   const hasBody = props.chapter?.bodyPath !== undefined
   const volumeMode = props.chapter === undefined && props.volume !== undefined
+  const draftRevision = useMemo(() => {
+    if (props.chapter === undefined) return undefined
+    return [...(props.unpublishedDrafts ?? [])]
+      .filter((revision) => revision.chapterSequence === props.chapter?.sequence && revision.status !== "completed" && revision.status !== "retired")
+      .sort((left, right) => right.updatedAtMs - left.updatedAtMs)[0]
+  }, [props.chapter, props.unpublishedDrafts])
 
   const volumeFolderKey = props.volume?.folderName
   useEffect(() => {
     setExpandedChapters(new Set())
   }, [volumeFolderKey])
+  useEffect(() => {
+    setActiveTab("info")
+  }, [props.chapter?.sequence])
+  useEffect(() => {
+    setLocalDraftCandidateVersionId(undefined)
+  }, [draftRevision?.revisionTaskId, props.chapter?.sequence, props.projectId])
   useEffect(() => {
     if (!volumeMode || volumeHookReport === undefined) return
     setExpandedChapters((current) => {
@@ -76,30 +107,29 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
 
   useEffect(() => {
     let cancelled = false
-    const synopsisPath = props.chapter?.synopsisPath
-    if (synopsisPath === undefined) {
-      setSynopsisMarkdown(undefined)
-      setSynopsisLoading(false)
+    const chapterSequence = props.chapter?.sequence
+    if (chapterSequence === undefined) {
+      setWorkflowGate(undefined)
       return
     }
-    setSynopsisLoading(true)
-    void (async () => {
-      try {
-        const result = await invokeBackend<{ content: string }>("workspace.read", {
-          workspaceRootRef: props.workspaceRootRef,
-          path: synopsisPath,
-        })
-        if (!cancelled) setSynopsisMarkdown(result.content)
-      } catch {
-        if (!cancelled) setSynopsisMarkdown(undefined)
-      } finally {
-        if (!cancelled) setSynopsisLoading(false)
-      }
-    })()
+    const refresh = (): void => {
+      void invokeBackend<ChapterWorkflowGate>("chapter.workflowGate.get", {
+        projectId: props.projectId,
+        workspaceRootRef: props.workspaceRootRef,
+        chapterSequence,
+      }).then((gate) => {
+        if (!cancelled) setWorkflowGate(gate)
+      }).catch(() => {
+        if (!cancelled) setWorkflowGate(undefined)
+      })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 2_000)
     return () => {
       cancelled = true
+      window.clearInterval(timer)
     }
-  }, [props.chapter?.synopsisPath, props.workspaceRootRef])
+  }, [props.chapter?.sequence, props.projectId, props.workspaceRootRef])
 
   useEffect(() => {
     let cancelled = false
@@ -111,7 +141,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
     setSynopsisLoading(true)
     void (async () => {
       try {
-        const assembled = await assembleVolumeSynopsis(props.workspaceRootRef, chapters)
+        const assembled = await assembleVolumeSynopsis(props.projectId, props.workspaceRootRef, chapters)
         if (!cancelled) setVolumeSynopsis(assembled)
       } catch {
         if (!cancelled) setVolumeSynopsis(undefined)
@@ -122,13 +152,50 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
     return () => {
       cancelled = true
     }
-  }, [volumeMode, props.volume, props.workspaceRootRef])
+  }, [volumeMode, props.projectId, props.volume, props.workspaceRootRef])
+
+  useEffect(() => {
+    let cancelled = false
+    const revisionTaskId = draftRevision?.revisionTaskId
+    const publishedBodyPath = props.chapter?.bodyPath
+    if (revisionTaskId === undefined && publishedBodyPath === undefined) {
+      setDraftVersions([])
+      setDraftLoading(false)
+      return
+    }
+    setDraftVersions([])
+    setDraftLoading(true)
+    let inFlight = false
+    const refresh = (): void => {
+      if (inFlight) return
+      inFlight = true
+      void loadChapterDraftHistory({
+        projectId: props.projectId,
+        workspaceRootRef: props.workspaceRootRef,
+        ...(revisionTaskId === undefined ? {} : { revisionTaskId }),
+        ...(publishedBodyPath === undefined ? {} : { bodyPath: publishedBodyPath }),
+      }).then((versions) => {
+        if (!cancelled) setDraftVersions(versions)
+      }).catch(() => {
+        if (!cancelled) setDraftVersions([])
+      }).finally(() => {
+        inFlight = false
+        if (!cancelled) setDraftLoading(false)
+      })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 2_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [draftRevision?.revisionTaskId, props.chapter?.bodyPath, props.projectId, props.workspaceRootRef])
 
   if (props.chapter === undefined && props.volume === undefined) {
     return <aside className="chapter-browse-rail" data-testid="chapter-browse-detail-rail">
       <div className="chapter-browse-rail-empty">
         <BookOpenText size={18} aria-hidden="true" />
-        <p>点击左侧卷标题查看本卷梗概，或点击章节卡片查看本章梗概与预留钩子。</p>
+        <p>点击左侧卷标题查看本卷剧情梗概，或点击章节卡片查看本章剧情梗概与预留钩子。</p>
       </div>
     </aside>
   }
@@ -138,6 +205,15 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
     const report = volumeHookReport
     return <aside className="chapter-browse-rail" data-testid="chapter-browse-detail-rail" data-mode="volume">
       <header className="chapter-browse-rail-header">
+        {props.onBack === undefined ? null : <button
+          type="button"
+          className="chapter-browse-back"
+          data-testid="chapter-browse-back"
+          onClick={props.onBack}
+        >
+          <ArrowLeft size={14} aria-hidden="true" />
+          {props.backLabel ?? "返回正文章节"}
+        </button>}
         <h3>{props.volume.folderName}</h3>
         <span className="chapter-browse-volume-meta">{String(props.volume.chapters.length)} 章</span>
       </header>
@@ -186,10 +262,10 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       <section className="chapter-browse-section" data-testid="chapter-browse-volume-synopsis">
         <h4>
           <Library size={13} aria-hidden="true" />
-          本卷梗概
+          本卷剧情梗概
         </h4>
         {synopsisLoading
-          ? <p className="chapter-browse-muted">正在汇总本卷章节梗概…</p>
+          ? <p className="chapter-browse-muted">正在汇总本卷章节剧情梗概…</p>
           : synopsisText.length > 0
             ? <pre className="chapter-browse-markdown">{synopsisText}</pre>
             : <p className="chapter-browse-muted">本卷各章尚无剧情梗概可汇总。</p>}
@@ -197,6 +273,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
     </aside>
   }
 
+  const synopsisMarkdown = workflowGate?.synopsis.markdown
   const synopsisText = synopsisMarkdown?.trim() ?? ""
   const synopsisPreview = synopsisText.length > 0
     ? stripLeadingHeadingKeepBody(synopsisMarkdown ?? "")
@@ -204,6 +281,15 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
 
   return <aside className="chapter-browse-rail" data-testid="chapter-browse-detail-rail" data-mode="chapter">
     <header className="chapter-browse-rail-header">
+      {props.onBack === undefined ? null : <button
+        type="button"
+        className="chapter-browse-back"
+        data-testid="chapter-browse-back"
+        onClick={props.onBack}
+      >
+        <ArrowLeft size={14} aria-hidden="true" />
+        {props.backLabel ?? "返回正文章节"}
+      </button>}
       <h3>{props.chapter!.label}</h3>
       <button
         type="button"
@@ -219,51 +305,245 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       </button>
     </header>
 
-    <section className="chapter-browse-section" data-testid="chapter-browse-synopsis">
-      <h4>
-        <BookOpenText size={13} aria-hidden="true" />
-        剧情梗概
-      </h4>
-      {synopsisLoading
-        ? <p className="chapter-browse-muted">正在加载梗概…</p>
-        : synopsisPreview.length > 0
-          ? <pre className="chapter-browse-markdown">{synopsisPreview}</pre>
-          : <p className="chapter-browse-muted">本章尚无剧情梗概。</p>}
-    </section>
+    <div className="chapter-rail-tabs" data-testid="chapter-detail-tabs" role="tablist" aria-label="章节详情">
+      {CHAPTER_DETAIL_TABS.map((tab) => {
+        const selected = activeTab === tab.id
+        return <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          id={`${tab.testId}-button`}
+          className={selected ? "active" : ""}
+          aria-selected={selected}
+          aria-controls="chapter-detail-panel"
+          data-testid={tab.testId}
+          onClick={() => setActiveTab(tab.id)}
+        >
+          {tab.id === "info" ? <Info size={12} aria-hidden="true" />
+            : tab.id === "synopsis" ? <BookOpenText size={12} aria-hidden="true" />
+              : tab.id === "outline" ? <ScrollText size={12} aria-hidden="true" />
+                  : tab.id === "draft" ? <FileText size={12} aria-hidden="true" />
+                : <FileText size={12} aria-hidden="true" />}
+          {tab.label}
+        </button>
+      })}
+    </div>
 
-    <section className="chapter-browse-section" data-testid="chapter-browse-hooks">
-      <h4>
-        <Link2 size={13} aria-hidden="true" />
-        本章剧情钩子
-      </h4>
-      {hooks.length === 0
-        ? <p className="chapter-browse-muted">本章尚未预留剧情钩子（伏笔 / 高潮目标）。</p>
-        : <ul className="chapter-browse-hook-list">
-            {hooks.map((hook) => {
-              const incomplete = isHookScheduleIncomplete(hook)
-              return <li
-                key={hook.goalId}
-                className={`chapter-browse-hook-item${incomplete ? " is-incomplete" : ""}`}
-                data-testid={incomplete ? "chapter-browse-hook-incomplete" : undefined}
-              >
-                <div className="chapter-browse-hook-meta">
-                  <span className="chapter-browse-hook-kind">
-                    {narrativeKindLabel(hook.narrativeKind)}
-                    {hook.narrativeKind === "general" ? null : `·${scaleLabel(hook.scale)}`}
-                  </span>
-                  {formatHookWindow(hook)}
-                  {incomplete
-                    ? <span className="chapter-browse-hook-incomplete" title="起势章与兑现章须同时填写">
-                        时限不完整
+    <div className="chapter-browse-tab-panel" id="chapter-detail-panel" role="tabpanel" aria-labelledby={`chapter-detail-tab-${activeTab}-button`} data-testid="chapter-detail-panel">
+      {activeTab === "info" ? <>
+        {workflowGate === undefined
+          ? <p className="chapter-browse-muted chapter-browse-panel-loading">正在读取章节信息…</p>
+          : <section
+              className="chapter-browse-section chapter-workflow-gate"
+              data-testid="chapter-workflow-gate"
+              data-ready={workflowGate.readyForDraft}
+            >
+              <h4><Info size={13} aria-hidden="true" /> 章节信息</h4>
+              <p className="chapter-browse-muted">
+                {workflowGate.readyForDraft
+                  ? "剧情梗概已确认，剧情细纲和人物准备已完成，可进入草稿。"
+                  : workflowGate.blockedReasons.join("；")}
+              </p>
+              <ChapterWorkflowStageList workflowGate={workflowGate} />
+              <p className="chapter-browse-muted">剧情梗概 → 剧情细纲/人物准备 → 草稿 → 审核 → 图治理 → 正文</p>
+            </section>}
+        <section className="chapter-browse-section" data-testid="chapter-browse-hooks">
+          <h4><Link2 size={13} aria-hidden="true" />本章剧情钩子</h4>
+          {hooks.length === 0
+            ? <p className="chapter-browse-muted">本章尚未预留剧情钩子（伏笔 / 高潮目标）。</p>
+            : <ul className="chapter-browse-hook-list">
+                {hooks.map((hook) => {
+                  const incomplete = isHookScheduleIncomplete(hook)
+                  return <li
+                    key={hook.goalId}
+                    className={`chapter-browse-hook-item${incomplete ? " is-incomplete" : ""}`}
+                    data-testid={incomplete ? "chapter-browse-hook-incomplete" : undefined}
+                  >
+                    <div className="chapter-browse-hook-meta">
+                      <span className="chapter-browse-hook-kind">
+                        {narrativeKindLabel(hook.narrativeKind)}
+                        {hook.narrativeKind === "general" ? null : `·${scaleLabel(hook.scale)}`}
                       </span>
-                    : null}
-                </div>
-                <p>{hook.content}</p>
-              </li>
-            })}
-          </ul>}
-    </section>
+                      {formatHookWindow(hook)}
+                      {incomplete
+                        ? <span className="chapter-browse-hook-incomplete" title="起势章与兑现章须同时填写">时限不完整</span>
+                        : null}
+                    </div>
+                    <p>{hook.content}</p>
+                  </li>
+                })}
+              </ul>}
+        </section>
+      </> : activeTab === "synopsis"
+        ? <section className="chapter-browse-section" data-testid="chapter-browse-synopsis">
+            <h4><BookOpenText size={13} aria-hidden="true" />剧情梗概</h4>
+            {synopsisPreview.length > 0
+              ? <pre className="chapter-browse-markdown">{synopsisPreview}</pre>
+              : <p className="chapter-browse-muted">本章尚无剧情梗概。</p>}
+          </section>
+        : activeTab === "outline"
+          ? <section className="chapter-browse-section" data-testid="chapter-browse-outline">
+              <h4><ScrollText size={13} aria-hidden="true" />剧情细纲</h4>
+              {workflowGate?.outline.markdown.trim()
+                ? <pre className="chapter-browse-markdown">{stripLeadingHeadingKeepBody(workflowGate.outline.markdown)}</pre>
+                : <p className="chapter-browse-muted">本章尚无剧情细纲。</p>}
+            </section>
+          : activeTab === "draft"
+            ? <ChapterDraftDetailPanel
+                revisionTaskId={draftRevision?.revisionTaskId}
+                versions={draftVersions}
+                loading={draftLoading}
+                selectedVersionId={localDraftCandidateVersionId ?? props.draftCandidateVersionId}
+                onSelectVersion={(versionId) => {
+                  setLocalDraftCandidateVersionId(versionId)
+                  const selected = draftVersions.find((version) => version.versionId === versionId)
+                  if (draftRevision !== undefined && selected?.revisionTaskId === draftRevision.revisionTaskId && !selected.isCurrentOfficial) {
+                    props.onSelectDraftCandidate?.(draftRevision.revisionTaskId, versionId)
+                  }
+                }}
+              />
+          : <section className="chapter-browse-section" data-testid="chapter-browse-body">
+              <h4><FileText size={13} aria-hidden="true" />正文</h4>
+              {workflowGate?.body.markdown.trim()
+                ? <pre className="chapter-browse-markdown">{workflowGate.body.markdown.trim()}</pre>
+                : <p className="chapter-browse-muted">本章尚未发布正文。</p>}
+            </section>}
+    </div>
   </aside>
+}
+
+export async function loadChapterDraftHistory(input: Readonly<{
+  projectId: string
+  workspaceRootRef: string
+  revisionTaskId?: string
+  bodyPath?: string
+}>): Promise<readonly RevisionDraftVersion[]> {
+  const scope = { projectId: input.projectId, workspaceRootRef: input.workspaceRootRef }
+  let revisionTaskId = input.revisionTaskId
+  // Completed publication tasks disappear from the unpublished queue, but retain their draft history.
+  if (revisionTaskId === undefined && input.bodyPath !== undefined) {
+    const resolved = await invokeBackend<{ activeRevision?: { revisionTaskId: string } }>("chapter.resolveByPath", {
+      ...scope, publishPath: input.bodyPath,
+    })
+    revisionTaskId = resolved.activeRevision?.revisionTaskId
+  }
+  if (revisionTaskId === undefined) return []
+  const result = await invokeBackend<{ versions: readonly RevisionDraftVersion[] }>("chapter.revision.draftVersion.list", {
+    ...scope, revisionTaskId, includeChapterHistory: true,
+  })
+  return result.versions
+}
+
+export function ChapterDraftDetailPanel(props: Readonly<{
+  revisionTaskId: string | undefined
+  versions: readonly RevisionDraftVersion[]
+  loading: boolean
+  selectedVersionId: string | undefined
+  onSelectVersion(versionId: string): void
+}>): React.JSX.Element {
+  const versions = props.versions.filter((version) => version.source !== "baseline")
+    .map((version, index) => ({ ...version, label: `v${String(index + 1)}` }))
+  const candidate = versions.find((version) => version.versionId === props.selectedVersionId)
+    ?? versions.find((version) => version.isLatest)
+    ?? versions.at(-1)
+  const isPublicationCandidate = candidate !== undefined
+    && candidate.revisionTaskId === props.revisionTaskId && !candidate.isCurrentOfficial
+  return <section className="chapter-browse-section chapter-draft-detail" data-testid="chapter-browse-draft">
+    <h4><FileText size={13} aria-hidden="true" />草稿</h4>
+    {props.loading
+      ? <p className="chapter-browse-muted">正在读取草稿版本…</p>
+      : versions.length === 0
+        ? <p className="chapter-browse-muted">本章暂无可选草稿。</p>
+        : <>
+            <label className="chapter-draft-detail-select-label" htmlFor="chapter-draft-detail-select">选择草稿版本</label>
+            <select
+              id="chapter-draft-detail-select"
+              className="chapter-draft-detail-select"
+              data-testid="chapter-draft-detail-select"
+              value={candidate?.versionId ?? ""}
+              onChange={(event) => { props.onSelectVersion(event.target.value) }}
+            >
+              {versions.map((version) => (
+                <option key={version.versionId} value={version.versionId}>
+                  {draftDetailVersionLabel(version, isPublicationCandidate && version.versionId === candidate?.versionId)}
+                </option>
+              ))}
+            </select>
+            {candidate === undefined
+              ? null
+              : <>
+                  <p className="chapter-draft-detail-candidate" data-testid="chapter-draft-detail-candidate">
+                    {isPublicationCandidate ? "正文候选" : "历史草稿"}：{draftDetailVersionLabel(candidate, isPublicationCandidate)}
+                  </p>
+                  <pre className="chapter-browse-markdown chapter-draft-detail-body">{candidate.body}</pre>
+                  <p className="chapter-browse-muted">{isPublicationCandidate
+                    ? "对讨论 Agent 说“可以”后，将对这个正文候选执行图修订并覆盖正式正文。"
+                    : "发布后草稿版本仍会保留。切换历史版本仅用于查看，不会更改当前正文。"}</p>
+                </>}
+          </>}
+  </section>
+}
+
+function draftDetailVersionLabel(version: RevisionDraftVersion, isPublicationCandidate: boolean): string {
+  const source = version.source === "agent" ? "讨论agent"
+    : version.source === "workflow" ? "正文推演"
+      : version.source === "manual" ? "人工"
+        : version.source === "rollback" ? "回退" : "系统"
+  return `${version.label} · ${source}${version.isCurrentOfficial ? " · 已发布为当前正文" : isPublicationCandidate ? " · 正文候选" : ""}`
+}
+
+export function ChapterWorkflowStageList(props: Readonly<{ workflowGate: ChapterWorkflowGate }>): React.JSX.Element {
+  const { workflowGate } = props
+  return <ul className="chapter-workflow-stage-list" data-testid="chapter-workflow-stage-list">
+    <WorkflowStage
+      label="剧情梗概"
+      state={workflowGate.synopsis.contentState}
+      ready={workflowGate.synopsis.ready && workflowGate.synopsis.confirmed}
+      writeCount={workflowGate.synopsis.writeCount}
+    />
+    <WorkflowStage
+      label="剧情细纲"
+      state={workflowGate.outline.contentState}
+      ready={workflowGate.outline.ready}
+      writeCount={workflowGate.outline.writeCount}
+    />
+    <WorkflowStage label="草稿" state={workflowGate.draft.contentState} ready={workflowGate.draft.contentState !== "empty"} />
+    <WorkflowStage
+      label="正文"
+      ready={workflowGate.body.markdown.trim().length > 0}
+      statusLabel={workflowGate.body.markdown.trim().length > 0 ? "已写入" : "未完成"}
+      writeCount={workflowGate.body.writeCount}
+    />
+  </ul>
+}
+
+function WorkflowStage(props: Readonly<{
+  label: string
+  state?: ChapterWorkflowGate["synopsis"]["contentState"]
+  ready: boolean
+  statusLabel?: string
+  writeCount?: number
+}>): React.JSX.Element {
+  const stateLabel = props.statusLabel ?? (props.state === "ai_written"
+    ? "AI 已写入"
+    : props.state === "manual_modified" ? "人工已修改" : "未完成")
+  const confirmationLabel = props.label === "剧情梗概" && props.state !== undefined && props.state !== "empty"
+    ? (props.ready ? " · 已确认" : " · 待确认")
+    : ""
+  const synopsisPendingConfirmation = props.label === "剧情梗概" && props.state !== undefined && !props.ready
+  const writeStatus = props.writeCount === undefined || synopsisPendingConfirmation
+    ? ""
+    : ` · ${formatArtifactWriteStatus(props.writeCount)}`
+  return <li data-state={props.state} data-ready={props.ready}>
+    <span>{props.label}</span>
+    <span data-written={props.writeCount !== undefined && props.writeCount > 0}>{stateLabel}{confirmationLabel}{writeStatus}</span>
+  </li>
+}
+
+export function formatArtifactWriteStatus(count: number): string {
+  return count === 0
+    ? "未写入"
+    : count === 1 ? "首次写入" : `已更新 ${String(count - 1)} 次`
 }
 
 export function listChapterHooks(
@@ -345,6 +625,7 @@ function VolumeChapterHookRow(props: Readonly<{
 }
 
 export async function assembleVolumeSynopsis(
+  projectId: string,
   workspaceRootRef: string,
   chapters: readonly DiscussFocusChapterOption[],
 ): Promise<string> {
@@ -353,8 +634,9 @@ export async function assembleVolumeSynopsis(
     if (chapter.synopsisPath === undefined) continue
     try {
       const result = await invokeBackend<{ content: string }>("workspace.read", {
+        projectId,
         workspaceRootRef,
-        path: chapter.synopsisPath,
+        relativePath: chapter.synopsisPath,
       })
       const body = stripLeadingHeadingKeepBody(result.content)
       if (body.length === 0) continue
@@ -367,8 +649,8 @@ export async function assembleVolumeSynopsis(
 }
 
 function formatHookWindow(goal: Readonly<{
-  plantChapterSequence?: number
-  payoffChapterSequence?: number
+  plantChapterSequence?: number | undefined
+  payoffChapterSequence?: number | undefined
 }>): React.JSX.Element | null {
   const plant = goal.plantChapterSequence
   const payoff = goal.payoffChapterSequence

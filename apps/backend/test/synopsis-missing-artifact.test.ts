@@ -262,6 +262,9 @@ describe("synopsis discuss missing artifact recovery", () => {
         async list() {
           return { goals: [], progress: [], proposals: [] }
         },
+        async auditHookSchedules() {
+          return { incomplete: [], complete: [], warnings: [] }
+        },
         async createProposalsFromArtifact() {
           return []
         },

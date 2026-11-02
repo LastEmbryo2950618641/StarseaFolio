@@ -260,6 +260,7 @@ export const chapterStartDraftPayloadSchema = projectSettingsReadPayloadSchema.e
 })
 export const chapterReviewRevisionPayloadSchema = projectSettingsReadPayloadSchema.extend({
   revisionTaskId: idSchema,
+  draftVersionId: idSchema.optional(),
   model: modelSelectionSchema.optional(),
   maxModelCalls: z.number().int().positive().optional(),
   deadlineMs: z.number().int().positive().optional(),
@@ -440,12 +441,16 @@ export const chapterSynopsisGetPayloadSchema = projectSettingsReadPayloadSchema.
     })
   }
 })
+export const chapterWorkflowGateGetPayloadSchema = projectSettingsReadPayloadSchema.extend({
+  chapterSequence: z.number().int().positive(),
+})
 export type SynopsisConversationStartPayload = z.infer<typeof synopsisConversationStartPayloadSchema>
 export type SynopsisConversationListPayload = z.infer<typeof synopsisConversationListPayloadSchema>
 export type SynopsisConversationSendPayload = z.infer<typeof synopsisConversationSendPayloadSchema>
 export type SynopsisResolveTurnInputPayload = z.infer<typeof synopsisResolveTurnInputPayloadSchema>
 export type SynopsisBeginTurnPayload = z.infer<typeof synopsisBeginTurnPayloadSchema>
 export type ChapterSynopsisGetPayload = z.infer<typeof chapterSynopsisGetPayloadSchema>
+export type ChapterWorkflowGateGetPayload = z.infer<typeof chapterWorkflowGateGetPayloadSchema>
 
 export const deductionGoalsListPayloadSchema = projectSettingsReadPayloadSchema
 export const deductionGoalsCreatePayloadSchema = projectSettingsReadPayloadSchema.extend({
@@ -742,6 +747,7 @@ export const backendPayloadSchemas = {
   "synopsis.staging.promote.approve": synopsisStagingPromoteApprovePayloadSchema,
   "synopsis.staging.promote.reject": synopsisStagingPromoteRejectPayloadSchema,
   "chapter.synopsis.get": chapterSynopsisGetPayloadSchema,
+  "chapter.workflowGate.get": chapterWorkflowGateGetPayloadSchema,
   "deduction.goals.list": deductionGoalsListPayloadSchema,
   "deduction.goals.create": deductionGoalsCreatePayloadSchema,
   "deduction.goals.update": deductionGoalsUpdatePayloadSchema,

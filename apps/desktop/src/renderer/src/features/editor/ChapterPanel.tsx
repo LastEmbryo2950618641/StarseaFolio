@@ -20,6 +20,7 @@ export type ChapterPanelCardSize = "large" | "medium" | "small" | "tile"
 export type ChapterPanelStage = "empty" | "synopsis" | "outline" | "draft" | "body"
 
 export type ChapterPanelProps = Readonly<{
+  projectId: string
   chapters: readonly DiscussFocusChapterOption[]
   chapterSummaries: readonly ChapterSummary[]
   unpublishedDrafts: readonly ChapterRevisionReadResult[]
@@ -132,31 +133,27 @@ export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
         const draft = draftBySequence.get(chapter.sequence)
         const updatedAtMs = draft?.updatedAtMs ?? summary?.createdAtMs
         let synopsisPreview = ""
-        let wordCount: number | undefined
+        let synopsisMarkdown: string | undefined
         try {
           if (chapter.synopsisPath !== undefined) {
             const result = await invokeBackend<{ content: string }>("workspace.read", {
+              projectId: props.projectId,
               workspaceRootRef: props.workspaceRootRef,
-              path: chapter.synopsisPath,
+              relativePath: chapter.synopsisPath,
             })
-            synopsisPreview = extractSynopsisPreview(result.content)
+            synopsisMarkdown = result.content
+            synopsisPreview = extractSynopsisPreview(synopsisMarkdown)
           }
         } catch {
           synopsisPreview = ""
         }
-        try {
-          if (chapter.bodyPath !== undefined) {
-            const result = await invokeBackend<{ content: string }>("workspace.read", {
-              workspaceRootRef: props.workspaceRootRef,
-              path: chapter.bodyPath,
-            })
-            wordCount = countChapterCharacters(stripLeadingHeading(result.content))
-          } else if (draft?.proposedBody !== undefined) {
-            wordCount = countChapterCharacters(draft.proposedBody)
-          }
-        } catch {
-          wordCount = undefined
-        }
+        const wordCount = await loadChapterWordCount({
+          projectId: props.projectId,
+          chapter,
+          workspaceRootRef: props.workspaceRootRef,
+          ...(draft?.proposedBody === undefined ? {} : { draftBody: draft.proposedBody }),
+          ...(synopsisMarkdown === undefined ? {} : { synopsisMarkdown }),
+        })
         return [chapter.sequence, { synopsisPreview, wordCount, updatedAtMs }] as const
       }))
       if (cancelled) return
@@ -165,7 +162,7 @@ export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [draftBySequence, props.chapters, props.workspaceRootRef, summaryBySequence])
+  }, [draftBySequence, props.chapters, props.projectId, props.workspaceRootRef, summaryBySequence])
 
   return <aside className={`chapter-panel size-${cardSize}`} data-testid="chapter-panel" data-card-size={cardSize}>
     <header className="chapter-panel-header">
@@ -344,6 +341,34 @@ export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
   </aside>
 }
 
+export async function loadChapterWordCount(input: Readonly<{
+  projectId: string
+  chapter: DiscussFocusChapterOption
+  workspaceRootRef: string
+  draftBody?: string
+  synopsisMarkdown?: string
+}>): Promise<number | undefined> {
+  const contentSources: Array<{ path?: string; content?: string }> = [
+    ...(input.chapter.bodyPath === undefined ? [] : [{ path: input.chapter.bodyPath }]),
+    ...(input.draftBody === undefined ? [] : [{ content: input.draftBody }]),
+    ...(input.chapter.outlinePath === undefined ? [] : [{ path: input.chapter.outlinePath }]),
+    ...(input.synopsisMarkdown === undefined ? [] : [{ content: input.synopsisMarkdown }]),
+  ]
+  for (const source of contentSources) {
+    try {
+      const content = source.content ?? (await invokeBackend<{ content: string }>("workspace.read", {
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        relativePath: source.path!,
+      })).content
+      return countChapterCharacters(stripLeadingHeading(content))
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}
+
 export type ChapterCupState = Readonly<{
   from: ChapterPanelStage
   to: ChapterPanelStage
@@ -382,13 +407,17 @@ export function nextCardSize(current: ChapterPanelCardSize): ChapterPanelCardSiz
 
 function loadCardSize(): ChapterPanelCardSize {
   try {
-    if (typeof window === "undefined") return "medium"
+    if (typeof window === "undefined") return "small"
     const raw = window.localStorage.getItem(CARD_SIZE_STORAGE_KEY)
-    if (raw === "large" || raw === "medium" || raw === "small" || raw === "tile") return raw
+    if (raw === "large") {
+      window.localStorage.setItem(CARD_SIZE_STORAGE_KEY, "small")
+      return "small"
+    }
+    if (raw === "medium" || raw === "small" || raw === "tile") return raw
   } catch {
     // ignore storage failures
   }
-  return "medium"
+  return "small"
 }
 
 function stripLeadingHeading(content: string): string {

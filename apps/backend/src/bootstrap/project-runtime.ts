@@ -35,7 +35,8 @@ import {
   type PromptResourcePort,
 } from "../application/index.js"
 import type { InternalProjectStore, WorkspacePort, InternalStorePort } from "../application/workspace/index.js"
-import { PROJECT_MANIFEST_VERSION, digest } from "../core/index.js"
+import { PROJECT_MANIFEST_VERSION, digest, WORK_STYLE_RULE_PATH } from "../core/index.js"
+import { canProceedPastWorkStyleGate } from "../core/workspace/work-style-gate-state.js"
 import { NodeWorkspaceAdapter, NodeWorkspaceCatalogAdapter, NodeWorkspaceSnapshotAdapter } from "../infrastructure/filesystem/index.js"
 import { IsomorphicGitHistoryAdapter } from "../infrastructure/history-git/index.js"
 import {
@@ -82,6 +83,30 @@ export class ProjectRuntime {
     done: Promise<void>
     activity?: GraphRevisionTask["activity"]
   }>()
+
+  public async assertWorkStyleGateReady(): Promise<void> {
+    const conversation = new SqliteSynopsisConversationRepository(this.database)
+    let state = await conversation.findWorkStyleGateState(this.projectId)
+    if (state.status === "ready") {
+      let markdown: string | undefined
+      try {
+        markdown = await this.workspace.readMarkdown(this.workspaceRootRef, WORK_STYLE_RULE_PATH)
+      } catch {
+        markdown = undefined
+      }
+      const currentDigest = digest(markdown ?? "")
+      if (currentDigest !== state.styleDigest) {
+        state = await conversation.transitionWorkStyleGate({
+          projectId: this.projectId,
+          event: { type: "style_document_changed", currentDigest },
+          updatedAtMs: Date.now(),
+        })
+      }
+    }
+    if (!canProceedPastWorkStyleGate(state)) {
+      throw new Error("作品风格门禁尚未通过：请先选择笔风规则，并完成风格文档审核后再生成梗概、大纲或正文")
+    }
+  }
 
   public async listGraphRevisionTasks(): Promise<readonly GraphRevisionTask[]> {
     const rows = await this.database.selectFrom("chapter_revision_tasks as r")
@@ -133,6 +158,33 @@ export class ProjectRuntime {
   }
 
   public submitChapterRevision(input: Parameters<ChapterRevisionService["submit"]>[0]): Promise<ChapterRevision> {
+    // Keep the legacy API shape compatible while enforcing the same review gate.
+    // A direct request is converted into review -> reviewed submission before any graph job starts.
+    if (input.mode === "direct") {
+      return (async () => {
+        const repository = new SqliteChapterRevisionRepository(this.database)
+        const current = await repository.find(input.revisionTaskId)
+        if (current === undefined || current.projectId !== this.projectId) throw new Error("图修订任务不存在")
+        if (current.review === undefined || current.review.proposedSourceId !== current.proposedSourceId
+          || current.review.contentDigest !== current.contentDigest) {
+          if (input.model === undefined) throw new Error("正文发布前必须先完成当前草稿审核")
+          await this.createChapterRevisionService().review({
+            revisionTaskId: input.revisionTaskId,
+            workspaceRootRef: input.workspaceRootRef,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          }, input.model)
+        }
+        const reviewed = await new SqliteChapterRevisionRepository(this.database).find(input.revisionTaskId)
+        const reviewId = reviewed?.review?.reviewId
+        if (reviewId === undefined) throw new Error("当前草稿审核未生成结果，不能提交正文")
+        return this.submitChapterRevision({
+          ...input,
+          mode: "reviewed",
+          forced: false,
+          reviewId,
+        })
+      })()
+    }
     const active = this.revisionJobs.get(input.revisionTaskId)
     if (active !== undefined) return active.ready
     if (this.revisionJobs.size > 0) {
@@ -216,10 +268,14 @@ export class ProjectRuntime {
   public async retryGraphRevision(revisionTaskId: string, model: AIModelPort): Promise<ChapterRevision> {
     const revision = await new SqliteChapterRevisionRepository(this.database).find(revisionTaskId)
     if (revision === undefined || revision.projectId !== this.projectId || revision.decision !== "submit") throw new Error("没有可重试的图修订任务")
+    const review = revision.review ?? await this.createChapterRevisionService().review({ revisionTaskId, workspaceRootRef: this.workspaceRootRef }, model).then(async () => {
+      const refreshed = await new SqliteChapterRevisionRepository(this.database).find(revisionTaskId)
+      return refreshed?.review
+    })
+    if (review === undefined) throw new Error("当前草稿审核未生成结果，不能重试图治理")
     return this.submitChapterRevision({
       revisionTaskId, workspaceRootRef: this.workspaceRootRef, model,
-      mode: revision.submissionMode ?? "direct", forced: revision.submissionMode !== "reviewed",
-      ...(revision.review === undefined ? {} : { reviewId: revision.review.reviewId }),
+      mode: "reviewed", forced: false, reviewId: review.reviewId,
     })
   }
 
@@ -298,6 +354,7 @@ export class ProjectRuntime {
       internalStore: this.internalStorePort,
       workspace: this.workspace,
       appendDraft: async ({ projectId, workspaceRootRef, idempotencyKey, result }) => {
+        await this.assertWorkStyleGateReady()
         const existing = await this.database.selectFrom("revision_draft_versions")
           .select(["revision_task_id", "version_id"])
           .where("project_id", "=", projectId)
@@ -637,6 +694,11 @@ export class ProjectRuntime {
 
   public async saveMarkdown(relativePath: string, content: string): Promise<void> {
     await this.workspace.saveUserMarkdown(this.workspaceRootRef, relativePath, content)
+    await this.createChapterSynopsisService().recordPlanningArtifactManualEdit({
+      projectId: this.projectId,
+      relativePath,
+      markdown: content,
+    })
     await this.createSettingsLineageService().recordUpsert({
       relativePath,
       markdown: content,
@@ -647,6 +709,10 @@ export class ProjectRuntime {
 
   public async deleteMarkdown(relativePath: string): Promise<void> {
     await this.workspace.removeUserMarkdown(this.workspaceRootRef, relativePath)
+    await this.createChapterSynopsisService().recordPlanningArtifactDeleted({
+      projectId: this.projectId,
+      relativePath,
+    })
   }
 
   public async deleteEmptyVolumeDirectory(relativePath: string): Promise<void> {
@@ -704,6 +770,7 @@ export class ProjectRuntime {
       commit: new SqliteScopeCommitRepository(this.database),
       revisions: new SqliteChapterRevisionRepository(this.database),
       draftVersions: new SqliteRevisionDraftVersionRepository(this.database),
+      chapterSynopsis: this.createChapterSynopsisService(),
       chapterIndex,
       recordLineageSnapshot: async (input) => {
         const existing = await this.database.selectFrom("chapter_lineage_snapshots").select("id")
@@ -815,6 +882,7 @@ export class ProjectRuntime {
   public createSynopsisConversationService(): SynopsisConversationService {
     return new SynopsisConversationService({
       executeWorkflowTool: async (input) => {
+        await this.assertWorkStyleGateReady()
         const chapters = this.createChapterResolveService()
         if (await chapters.isGraphSyncBlocking(input.projectId)) {
           throw new Error("图修订尚未完成，请完成或取消后再调用正文推演工具")
@@ -827,6 +895,19 @@ export class ProjectRuntime {
           const only = sequences[0]!
           if (only > await chapters.nextChapterSequence(input.projectId)) {
             throw new Error("前一章尚未发布为正文，不能处理下一章")
+          }
+        }
+        const chapterSynopsis = this.createChapterSynopsisService()
+        for (const chapterSequence of sequences) {
+          const workflowGate = await chapterSynopsis.getWorkflowGate({
+            projectId: input.projectId,
+            workspaceRootRef: input.workspaceRootRef,
+            chapterSequence,
+          })
+          if (!workflowGate.readyForDraft) {
+            throw new Error(
+              `${workflowGate.blockedReasons.join("；")}。必须先完成剧情梗概、确认梗概并完成人物准备与剧情细纲，再开始正文推演工具`,
+            )
           }
         }
         await this.ensureWritableHistoryBranch(Date.now())
@@ -903,12 +984,20 @@ export class ProjectRuntime {
         if (revision === undefined) throw new Error("未找到当前章节的草稿")
         const version = await revisions.readDraftVersion(input.draftVersionId)
         if (version.revisionTaskId !== revision.revisionTaskId) throw new Error("草稿版本不属于指定修订")
+        const reviewed = await revisions.review({
+          revisionTaskId: input.revisionTaskId,
+          draftVersionId: input.draftVersionId,
+          workspaceRootRef: input.workspaceRootRef,
+        }, input.model)
+        const reviewId = reviewed.review?.reviewId
+        if (reviewId === undefined) throw new Error("当前草稿审核未生成结果，不能进入图治理")
         const submitted = await this.submitChapterRevision({
           revisionTaskId: input.revisionTaskId,
           draftVersionId: input.draftVersionId,
           workspaceRootRef: input.workspaceRootRef,
-          mode: "direct",
-          forced: true,
+          mode: "reviewed",
+          forced: false,
+          reviewId,
           model: input.model,
         })
         if (submitted.status === "completed") {

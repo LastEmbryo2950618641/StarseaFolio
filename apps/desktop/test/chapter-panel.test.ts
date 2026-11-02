@@ -6,10 +6,12 @@ import type { DeductionGoal } from "@worldseed/contracts"
 import {
   ChapterPanel,
   extractSynopsisPreview,
+  loadChapterWordCount,
   nextCardSize,
   resolveChapterCupState,
   resolveChapterPanelStage,
 } from "../src/renderer/src/features/editor/ChapterPanel.js"
+import { invokeBackend } from "../src/renderer/src/api/client.js"
 import { isHookScheduleIncomplete, listChapterHooks } from "../src/renderer/src/features/editor/ChapterBrowseDetailRail.js"
 import { validateHookScheduleTaxonomy } from "../src/renderer/src/features/editor/CreationDeskGoalsPopover.js"
 import { EditorArea } from "../src/renderer/src/features/editor/EditorArea.js"
@@ -349,8 +351,29 @@ describe("resolveChapterCupState", () => {
 })
 
 describe("ChapterPanel", () => {
+  it("reads the latest planning artifact with the workspace relativePath contract", async () => {
+    vi.mocked(invokeBackend).mockResolvedValueOnce({ content: "# 第一章 细纲\n\n甲乙丙丁" })
+    const wordCount = await loadChapterWordCount({
+      projectId: "project-1",
+      chapter: {
+        sequence: 1,
+        label: "第一章",
+        outlinePath: "章节正文/第一卷/第一章 [剧情细纲].md",
+        synopsisPath: "章节正文/第一卷/第一章 [剧情梗概].md",
+      },
+      workspaceRootRef: "demo",
+    })
+    expect(wordCount).toBe(4)
+    expect(invokeBackend).toHaveBeenCalledWith("workspace.read", {
+      projectId: "project-1",
+      workspaceRootRef: "demo",
+      relativePath: "章节正文/第一卷/第一章 [剧情细纲].md",
+    })
+  })
+
   it("renders chapter cards with size toggle in a grid", () => {
     const html = renderToStaticMarkup(React.createElement(ChapterPanel, {
+      projectId: "project-1",
       chapters: [{
         sequence: 1,
         label: "第一章 天道在我头顶碎了",
@@ -371,13 +394,14 @@ describe("ChapterPanel", () => {
     expect(html).toContain("第一章 天道在我头顶碎了")
     expect(html).toContain("第一卷 开局即仇敌")
     expect(html).toContain("chapter-panel-card-index")
-    expect(html).toContain("暂无章节梗概")
+    expect(html).toContain('data-card-size="small"')
     expect(html).toContain("is-active")
     expect(html).toContain('data-stage="body"')
   })
 
   it("shows stop control and status while batch is running", () => {
     const html = renderToStaticMarkup(React.createElement(ChapterPanel, {
+      projectId: "project-1",
       chapters: [{
         sequence: 1,
         label: "第一章 天道在我头顶碎了",
@@ -404,6 +428,7 @@ describe("ChapterPanel", () => {
 
   it("groups chapters under volume headers", () => {
     const html = renderToStaticMarkup(React.createElement(ChapterPanel, {
+      projectId: "project-1",
       chapters: [
         {
           sequence: 1,

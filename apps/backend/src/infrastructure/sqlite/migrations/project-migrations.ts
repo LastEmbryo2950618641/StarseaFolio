@@ -1258,4 +1258,69 @@ export const projectMigrations = Object.freeze([
   defineSqlMigration<ProjectDatabase>(52, "052_synopsis_message_error", [
     "ALTER TABLE synopsis_conversation_messages ADD COLUMN error_text TEXT",
   ]),
+  defineSqlMigration<ProjectDatabase>(53, "053_chapter_artifact_content_states", [
+    "ALTER TABLE synopsis_conversation_sessions ADD COLUMN synopsis_content_state TEXT NOT NULL DEFAULT 'empty' CHECK (synopsis_content_state IN ('empty', 'ai_written', 'manual_modified'))",
+    "ALTER TABLE synopsis_conversation_sessions ADD COLUMN outline_content_state TEXT NOT NULL DEFAULT 'empty' CHECK (outline_content_state IN ('empty', 'ai_written', 'manual_modified'))",
+    "ALTER TABLE synopsis_conversation_sessions ADD COLUMN draft_content_state TEXT NOT NULL DEFAULT 'empty' CHECK (draft_content_state IN ('empty', 'ai_written', 'manual_modified'))",
+    "ALTER TABLE synopsis_conversation_sessions ADD COLUMN draft_version_id TEXT",
+    "ALTER TABLE synopsis_conversation_sessions ADD COLUMN last_draft_digest TEXT",
+    `UPDATE synopsis_conversation_sessions
+      SET synopsis_content_state = CASE WHEN last_agent_digest IS NULL THEN 'empty' ELSE 'ai_written' END,
+          outline_content_state = CASE WHEN last_outline_agent_digest IS NULL THEN 'empty' ELSE 'ai_written' END`,
+    `CREATE TABLE chapter_artifact_states (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      chapter_sequence INTEGER NOT NULL CHECK (chapter_sequence > 0),
+      synopsis_content_state TEXT NOT NULL CHECK (synopsis_content_state IN ('empty', 'ai_written', 'manual_modified')),
+      outline_content_state TEXT NOT NULL CHECK (outline_content_state IN ('empty', 'ai_written', 'manual_modified')),
+      draft_content_state TEXT NOT NULL CHECK (draft_content_state IN ('empty', 'ai_written', 'manual_modified')),
+      synopsis_digest TEXT,
+      outline_digest TEXT,
+      draft_version_id TEXT,
+      draft_digest TEXT,
+      updated_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (project_id, chapter_sequence)
+    )`,
+    `INSERT INTO chapter_artifact_states (
+      project_id, chapter_sequence, synopsis_content_state, outline_content_state,
+      draft_content_state, synopsis_digest, outline_digest, draft_version_id, draft_digest, updated_at_ms
+    ) SELECT project_id, chapter_sequence, synopsis_content_state, outline_content_state,
+      'empty', last_agent_digest, last_outline_agent_digest, NULL, NULL, updated_at_ms
+      FROM synopsis_conversation_sessions`,
+  ]),
+  defineSqlMigration<ProjectDatabase>(54, "054_chapter_artifact_write_counts", [
+    "ALTER TABLE chapter_artifact_states ADD COLUMN synopsis_write_count INTEGER NOT NULL DEFAULT 0 CHECK (synopsis_write_count >= 0)",
+    "ALTER TABLE chapter_artifact_states ADD COLUMN outline_write_count INTEGER NOT NULL DEFAULT 0 CHECK (outline_write_count >= 0)",
+    "ALTER TABLE chapter_artifact_states ADD COLUMN body_write_count INTEGER NOT NULL DEFAULT 0 CHECK (body_write_count >= 0)",
+    "ALTER TABLE chapter_artifact_states ADD COLUMN body_digest TEXT",
+    "UPDATE chapter_artifact_states SET synopsis_write_count = CASE WHEN synopsis_content_state = 'empty' THEN 0 ELSE 1 END, outline_write_count = CASE WHEN outline_content_state = 'empty' THEN 0 ELSE 1 END",
+  ]),
+  defineSqlMigration<ProjectDatabase>(55, "055_legacy_revision_draft_versions", [
+    `CREATE TABLE legacy_revision_draft_migrations (
+      revision_task_id TEXT PRIMARY KEY REFERENCES chapter_revision_tasks(id) ON DELETE CASCADE
+    )`,
+    `INSERT INTO legacy_revision_draft_migrations (revision_task_id)
+      SELECT revision.id
+      FROM chapter_revision_tasks AS revision
+      WHERE revision.status NOT IN ('completed', 'retired')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM revision_draft_versions AS version
+          WHERE version.revision_task_id = revision.id
+            AND version.source <> 'baseline'
+        )`,
+  ]),
+  defineSqlMigration<ProjectDatabase>(56, "056_persist_work_style_gate_state", [
+    `CREATE TABLE work_style_gate_states (
+      project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK (status IN ('awaiting_choice', 'style_selected', 'ready')),
+      selected_prose_style_path TEXT,
+      style_digest TEXT,
+      updated_at_ms INTEGER NOT NULL,
+      CHECK (
+        (status = 'awaiting_choice' AND selected_prose_style_path IS NULL AND style_digest IS NULL)
+        OR (status = 'style_selected' AND selected_prose_style_path IS NOT NULL AND style_digest IS NULL)
+        OR (status = 'ready' AND selected_prose_style_path IS NOT NULL AND style_digest IS NOT NULL)
+      )
+    )`,
+  ]),
 ])

@@ -3,11 +3,12 @@ import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { defaultProjectSettings } from "@worldseed/config"
-import type { RuntimeMetricsSnapshot } from "@worldseed/contracts"
+import type { ChapterWorkflowGate, RuntimeMetricsSnapshot } from "@worldseed/contracts"
 
 import { invokeBackend } from "../src/renderer/src/api/client.js"
 import { EditorArea } from "../src/renderer/src/features/editor/EditorArea.js"
 import { ChapterWorkspaceRail } from "../src/renderer/src/features/editor/ChapterWorkspaceRail.js"
+import { ChapterBrowseDetailRail, ChapterWorkflowStageList, formatArtifactWriteStatus } from "../src/renderer/src/features/editor/ChapterBrowseDetailRail.js"
 import { SynopsisConversationComposer } from "../src/renderer/src/features/editor/SynopsisConversationComposer.js"
 import { ChapterWorkspaceToolbar } from "../src/renderer/src/features/editor/ChapterWorkspaceToolbar.js"
 import { ChapterDraftVersionsPrototype } from "../src/renderer/src/features/editor/ChapterDraftVersionsPrototype.js"
@@ -15,7 +16,6 @@ import { CreationDeskProgressReview } from "../src/renderer/src/features/editor/
 import { ProcessPanel, RightRail } from "../src/renderer/src/features/status/RightRail.js"
 import { DeductionTasksPanel } from "../src/renderer/src/features/status/DeductionTasksPanel.js"
 import { RightPanelViewport } from "../src/renderer/src/features/status/RightPanelViewport.js"
-import { useWorkbenchStore } from "../src/renderer/src/state/workbench-store.js"
 import { GraphRevisionTasksPanel, StageRecordPanel } from "../src/renderer/src/features/status/GraphRevisionTasksPanel.js"
 import { HistoryPanel } from "../src/renderer/src/features/status/HistoryPanel.js"
 import { TaskCheckpointDialog, resolveCheckpointPauseReason, isCheckpointResumeAlreadyProgressed } from "../src/renderer/src/features/status/TaskCheckpointPrototype.js"
@@ -164,6 +164,91 @@ describe("renderer workbench UI contract", () => {
     vi.clearAllMocks()
   })
 
+  it("shows chapter information, synopsis, outline, and body as selectable detail tabs", () => {
+    const html = renderToStaticMarkup(React.createElement(ChapterBrowseDetailRail, {
+      projectId: "project-1",
+      workspaceRootRef: "workspace",
+      chapter: { sequence: 1, label: "第一章 测试" },
+      onOpenBody: vi.fn(),
+    }))
+
+    expect(html).toContain('role="tablist"')
+    expect(html).toContain('data-testid="chapter-detail-tab-info"')
+    expect(html).toContain('data-testid="chapter-detail-tab-synopsis"')
+    expect(html).toContain('data-testid="chapter-detail-tab-outline"')
+    expect(html).toContain('data-testid="chapter-detail-tab-body"')
+    expect(html).toContain('aria-selected="true"')
+    expect(html).toContain("章节信息")
+    expect(html).toContain("剧情梗概")
+    expect(html).toContain("剧情细纲")
+    expect(html).not.toContain("大纲/人物准备")
+    expect(html).not.toContain("梗概已确认，细纲")
+    expect(html).not.toContain(">梗概</button>")
+    expect(html).not.toContain(">大纲</button>")
+    expect(html).not.toContain('data-testid="chapter-browse-synopsis"')
+    expect(html).not.toContain('data-testid="chapter-browse-outline"')
+    expect(html).not.toContain('data-testid="chapter-browse-body"')
+  })
+
+  it("renders volume details in the chapter sidebar with a chapter-list back action", () => {
+    const html = renderToStaticMarkup(React.createElement(ChapterBrowseDetailRail, {
+      projectId: "project-1",
+      workspaceRootRef: "workspace",
+      chapter: undefined,
+      volume: {
+        folderName: "第一卷 待命名",
+        chapters: [{ sequence: 1, label: "第一章 待命名", volumeFolderName: "第一卷 待命名" }],
+      },
+      backLabel: "返回章节列表",
+      onBack: vi.fn(),
+      onOpenBody: vi.fn(),
+    }))
+
+    expect(html).toContain('data-mode="volume"')
+    expect(html).toContain("第一卷 待命名")
+    expect(html).toContain('data-testid="chapter-browse-volume-hooks"')
+    expect(html).toContain('data-testid="chapter-browse-volume-synopsis"')
+    expect(html).toContain('data-testid="chapter-browse-back"')
+    expect(html).toContain("返回章节列表")
+  })
+
+  it("combines workflow status and write history into one row per chapter stage", () => {
+    const workflowGate: ChapterWorkflowGate = {
+      chapterSequence: 1,
+      synopsis: {
+        ready: true,
+        confirmed: false,
+        contentState: "ai_written",
+        markdown: "梗概",
+        writeCount: 1,
+      },
+      outline: {
+        ready: true,
+        contentState: "manual_modified",
+        markdown: "细纲",
+        writeCount: 3,
+      },
+      draft: { contentState: "empty" },
+      body: { markdown: "", writeCount: 0 },
+      readyForDraft: false,
+      blockedReasons: ["剧情梗概必须先确认"],
+    }
+
+    const html = renderToStaticMarkup(React.createElement(ChapterWorkflowStageList, { workflowGate }))
+
+    expect(html).toContain('data-testid="chapter-workflow-stage-list"')
+    expect(html).not.toContain("chapter-artifact-write-counts")
+    expect(html.match(/<li/g)).toHaveLength(4)
+    expect(html).toContain("AI 已写入 · 待确认")
+    expect(html).not.toContain("AI 已写入 · 待确认 · 首次写入")
+    expect(html).toContain("人工已修改 · 已更新 2 次")
+    expect(html).toContain("草稿")
+    expect(html).toContain("正文")
+    expect(html).toContain("未完成 · 未写入")
+    expect(formatArtifactWriteStatus(1)).toBe("首次写入")
+    expect(formatArtifactWriteStatus(3)).toBe("已更新 2 次")
+  })
+
   it("edits actual unpublished drafts at an intended body path without an official version", () => {
     const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({
       selectedPath: "章节正文/第三章 尚未发布.md",
@@ -225,11 +310,11 @@ describe("renderer workbench UI contract", () => {
     expect(html).toContain("空草稿")
   })
 
-  it("renames a legacy start_turn choice without changing its action", () => {
+  it("hides a legacy start_turn choice when strict chapter workflow is active", () => {
     const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({
       synopsisMessages: [{ messageId: "message-1", sessionId: "session-1", role: "assistant", content: "梗概已准备好", createdAtMs: 1, choices: [{ label: "开始推演", action: "start_turn" }] }],
     })))
-    expect(html).toContain("调用正文推演工具")
+    expect(html).not.toContain("调用正文推演工具")
     expect(html).not.toContain("开始推演")
   })
 
@@ -298,6 +383,16 @@ describe("renderer workbench UI contract", () => {
     expect(html).toContain("agent-stream-block editing")
     expect(html).not.toMatch(/agent-stream-activity[^>]*\sopen/)
     expect(html).not.toMatch(/agent-stream-block (?:thinking|searching|running|editing|resulting)[^>]*\sopen/)
+  })
+
+  it("keeps the thinking and tools panel collapsed while a response is streaming", () => {
+    const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({
+      synopsisBusy: true,
+    })))
+
+    expect(html).toContain("深度思考中…")
+    expect(html).toMatch(/<details class="agent-stream-activity is-live" data-testid="agent-stream-activity">/)
+    expect(html).not.toMatch(/agent-stream-activity[^>]*\sopen/)
   })
 
   it("renders a searchable chapter focus bar on the creation desk", () => {
@@ -537,7 +632,6 @@ describe("renderer workbench UI contract", () => {
       revisionStage: "idle",
       draftChanged: true,
       onReview: vi.fn(),
-      onDirectSubmit: vi.fn(),
       onReviewedSubmit: vi.fn(),
       onSelectVersion: vi.fn(),
       onEnterDiff: vi.fn(),
@@ -548,52 +642,50 @@ describe("renderer workbench UI contract", () => {
 
     expect(html).toContain("data-testid=\"chapter-revision-actions\"")
     expect(html).toContain("aria-label=\"审核修订\"")
-    expect(html).toContain("aria-label=\"直接提交\"")
+    expect(html).not.toContain("aria-label=\"直接提交\"")
     expect(html).not.toContain("放弃修订")
   })
 
-  it("renders chapter workspace rail with conversation only", () => {
+  it("renders only synopsis and outline tabs in the chapter workspace rail", () => {
     const html = renderToStaticMarkup(React.createElement(ChapterWorkspaceRail, {
-      conversation: React.createElement("div", { "data-testid": "chapter-conversation" }, "Agent 对话"),
+      synopsisMarkdown: "梗概正文。",
+      outlineMarkdown: "细纲正文。",
     }))
 
     expect(html).toContain("data-testid=\"chapter-workspace-rail\"")
     expect(html).toContain("data-testid=\"chapter-rail-tabs\"")
     expect(html).toContain("剧情细纲")
     expect(html).toContain("剧情梗概")
-    expect(html).toContain("Agent 对话")
     expect(html).toContain("aria-selected=\"true\"")
-    expect(html).toContain("data-testid=\"chapter-rail-tab-conversation\"")
+    expect(html).toContain("data-testid=\"chapter-rail-tab-outline\"")
+    expect(html).toContain("data-testid=\"chapter-rail-tab-synopsis\"")
+    expect(html).not.toContain("Agent 对话")
+    expect(html).not.toContain("data-testid=\"chapter-rail-tab-conversation\"")
     expect(html).not.toContain("章节修订")
     expect(html).not.toContain("data-testid=\"chapter-revision-actions\"")
     expect(html).not.toContain("data-testid=\"chapter-reading-toolbar\"")
     expect(html).not.toContain("data-testid=\"chapter-workspace-related-strip\"")
-    expect(html).toContain("data-testid=\"chapter-conversation\"")
-    expect(html).not.toContain("data-testid=\"chapter-synopsis-panel\"")
-    expect(html).not.toContain("data-testid=\"chapter-outline-panel\"")
+    expect(html).toContain("data-testid=\"chapter-outline-panel\"")
+    expect(html).not.toContain("data-testid=\"chapter-conversation\"")
   })
 
-  it("switches the chapter rail between outline, synopsis, and conversation", () => {
+  it("switches the chapter rail between outline and synopsis", () => {
     const synopsisHtml = renderToStaticMarkup(React.createElement(ChapterWorkspaceRail, {
-      conversation: React.createElement("div", { "data-testid": "chapter-conversation" }, "Agent 对话"),
       activeTab: "synopsis",
       synopsisMarkdown: "雨夜来信的梗概。",
       outlineMarkdown: "细纲段落。",
     }))
     expect(synopsisHtml).toContain("data-testid=\"chapter-synopsis-panel\"")
     expect(synopsisHtml).toContain("雨夜来信的梗概。")
-    expect(synopsisHtml).not.toContain("data-testid=\"chapter-conversation\"")
     expect(synopsisHtml).not.toContain("细纲段落。")
 
     const outlineHtml = renderToStaticMarkup(React.createElement(ChapterWorkspaceRail, {
-      conversation: React.createElement("div", { "data-testid": "chapter-conversation" }, "Agent 对话"),
       activeTab: "outline",
       synopsisMarkdown: "雨夜来信的梗概。",
       outlineMarkdown: "细纲段落。",
     }))
     expect(outlineHtml).toContain("data-testid=\"chapter-outline-panel\"")
     expect(outlineHtml).toContain("细纲段落。")
-    expect(outlineHtml).not.toContain("data-testid=\"chapter-conversation\"")
     expect(outlineHtml).not.toContain("雨夜来信的梗概。")
   })
 
@@ -707,7 +799,7 @@ describe("renderer workbench UI contract", () => {
     expect(html).not.toContain("data-testid=\"chapter-workspace-toolbar\"")
   })
 
-  it("disables review and direct submit when draft matches committed body", () => {
+  it("disables review when draft matches committed body", () => {
     const html = renderToStaticMarkup(React.createElement(ChapterWorkspaceToolbar, {
       preferences: { fontFamily: "serif", fontSize: 16, lineHeight: "relaxed" },
       paneLabel: "草稿",
@@ -720,13 +812,11 @@ describe("renderer workbench UI contract", () => {
       busy: false,
       error: undefined,
       onReview: vi.fn(),
-      onDirectSubmit: vi.fn(),
       onReviewedSubmit: vi.fn(),
     }))
 
     expect(html).toContain("修改草稿后可审核或提交")
     expect(html).toMatch(/revision-secondary-command"[^>]*disabled/)
-    expect(html).toMatch(/revision-primary-command"[^>]*disabled/)
   })
 
   it("shows blocked revision hint in the default chapter toolbar", () => {
@@ -742,7 +832,6 @@ describe("renderer workbench UI contract", () => {
       busy: false,
       error: undefined,
       onReview: vi.fn(),
-      onDirectSubmit: vi.fn(),
       onReviewedSubmit: vi.fn(),
     }))
 
@@ -1042,16 +1131,27 @@ describe("renderer workbench UI contract", () => {
 })
 
 describe("right rail process UI contract", () => {
-  it("shows a deduction task list panel instead of the bare process monitor", () => {
-    useWorkbenchStore.setState({ rightTab: "process" })
+  it("defaults to an ordered chapter list and hides the history entry", () => {
     const html = renderToStaticMarkup(React.createElement(RightRail, {
       graphSlice: undefined,
       task: { status: "running", lastPhase: "draft" },
-      focusedChapterSequence: 3,
+      chapters: [
+        { sequence: 1, label: "第一章 来信", bodyPath: "章节正文/第一章 来信.md" },
+        { sequence: 2, label: "第二章 雨停", bodyPath: "章节正文/第二章 雨停.md" },
+      ],
+      chapterSummaries: [
+        { chapterId: "chapter-1", sourceId: "source-1", heading: "第一章 来信", publishPath: "章节正文/第一章 来信.md", digest: "digest-1", sequence: 1, createdAtMs: 1 },
+        { chapterId: "chapter-2", sourceId: "source-2", heading: "第二章 雨停", publishPath: "章节正文/第二章 雨停.md", digest: "digest-2", sequence: 2, createdAtMs: 2 },
+      ],
     }))
-    expect(html).toContain("data-testid=\"deduction-tasks-panel\"")
+    expect(html).toContain("data-testid=\"chapter-panel\"")
+    expect(html).toContain("data-testid=\"chapter-panel-card-1\"")
+    expect(html).toContain("data-testid=\"chapter-panel-card-2\"")
+    expect(html).toContain('aria-label="正文章节"')
     expect(html).toContain("正文推演任务")
     expect(html).toContain("图治理任务")
+    expect(html).not.toContain('aria-label="历史"')
+    expect(html).not.toContain("data-testid=\"deduction-tasks-panel\"")
     expect(html).not.toContain('class="process-panel"')
     expect(html).not.toContain("data-testid=\"tool-monitor-split\"")
     expect(html).not.toContain("data-testid=\"graph-revision-panel\"")
@@ -1066,17 +1166,15 @@ describe("right rail process UI contract", () => {
     expect(html).not.toContain('class="phase-list"')
   })
 
-  it("switches process and graph-revision panels instead of stacking them", () => {
-    useWorkbenchStore.setState({ rightTab: "process" })
-    const processHtml = renderToStaticMarkup(React.createElement(RightRail, {
+  it("keeps the default chapter panel separate from graph-revision panels", () => {
+    const defaultHtml = renderToStaticMarkup(React.createElement(RightRail, {
       graphSlice: undefined,
       task: { status: "idle" },
     }))
-    expect(processHtml).toContain("aria-label=\"正文推演任务\"")
-    expect(processHtml).toContain("aria-label=\"图治理任务\"")
-    expect(processHtml).toContain("data-testid=\"deduction-tasks-panel\"")
-    expect(processHtml).not.toContain("data-testid=\"graph-revision-panel\"")
-    expect(processHtml).not.toContain("data-testid=\"tool-monitor-split\"")
+    expect(defaultHtml).toContain("data-testid=\"chapter-panel\"")
+    expect(defaultHtml).not.toContain("data-testid=\"deduction-tasks-panel\"")
+    expect(defaultHtml).not.toContain("data-testid=\"graph-revision-panel\"")
+    expect(defaultHtml).not.toContain("data-testid=\"tool-monitor-split\"")
 
     const graphHtml = renderToStaticMarkup(React.createElement(GraphRevisionTasksPanel, {
       project: undefined,
@@ -1209,10 +1307,9 @@ describe("right rail process UI contract", () => {
     expect(html).toContain("压缩次数")
   })
 
-  it("shows task token summary under world-summary", () => {
+  it("hides the bottom world status summary", () => {
     const html = renderToStaticMarkup(React.createElement(RightRail, {
       graphSlice: undefined,
-      contextWindowTokens: 128_000,
       task: {
         handle: { taskId: "task-tokens", status: "completed" },
         status: "completed",
@@ -1248,12 +1345,9 @@ describe("right rail process UI contract", () => {
         ],
       },
     }))
-    expect(html).toContain("推演 KV 命中率")
-    expect(html).toContain("57%")
-    expect(html).toContain("推演总 Token")
-    expect(html).toContain("4.0k")
-    expect(html).toContain("推演上下文 / 最大上下文")
-    expect(html).toContain("2.0k / 128.0k")
+    expect(html).not.toContain("data-testid=\"world-summary\"")
+    expect(html).not.toContain("推演 KV 命中率")
+    expect(html).not.toContain("当前章节锚点")
   })
 
   it("shows an explicit model-in-flight state before a phase result returns", () => {

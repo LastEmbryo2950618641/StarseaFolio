@@ -192,6 +192,8 @@ describe("prompt contracts", () => {
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("人称指称")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("表现输出/笔风规则/")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("时代科技生活")
+    expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("开书风格门禁例外")
+    expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("不调用或更新 Todo")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).not.toContain("presentationWrites 给出完整 Markdown、`relativePath`（仅 `表现输出/描写规则/*.md`")
     expect(readResource(PLOT_SYNOPSIS_GUIDE_RESOURCE)).toContain("表现输出/本作品描写/")
     expect(readResource(PLOT_SYNOPSIS_GUIDE_RESOURCE)).toContain("作品风格.md")

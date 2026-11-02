@@ -11,6 +11,7 @@ import {
   graphSpacetimeSettlementArtifactSchema,
   graphStructurePlanArtifactSchema,
   ruleAssemblyArtifactSchema,
+  responseReviewArtifactSchema,
   semanticReviewArtifactSchema,
   type GraphGovernanceArtifact,
 } from "./phase-schemas/artifacts.js"
@@ -49,6 +50,15 @@ export function assertPhaseReferenceContract(
     return
   }
 
+  if (phase === "response_review") {
+    const review = responseReviewArtifactSchema.parse(artifact)
+    assertReadableEvidenceReferences(
+      review.queryGrounding?.constraints.flatMap((constraint) => constraint.evidenceRefs) ?? [],
+      visibility.readableEvidenceIds,
+    )
+    return
+  }
+
   if (phase === "dependency_audit") {
     const dependency = dependencyAuditArtifactSchema.parse(artifact)
     assertReadableEvidenceReferences(
@@ -57,7 +67,10 @@ export function assertPhaseReferenceContract(
     )
     assertReadableGraphReferences(
       dependency.temporalClaims.flatMap((claim) => [...claim.referenceRefs, ...claim.timelineRefs]),
-      visibility.readableGraphIds,
+      new Set([
+        ...visibility.readableGraphIds,
+        ...(visibility.declaredLocalGraphRefs ?? []),
+      ]),
     )
     return
   }

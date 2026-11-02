@@ -62,7 +62,6 @@ export class SqliteRetrievalRepository implements RetrievalRepository {
       .where("owner_kind", "=", "source")
       .where("owner_id", "=", projection.ownerId)
       .where("owner_revision_id", "=", projection.ownerRevisionId)
-      .where(visibleRetrievalProjection({ projectId: projection.projectId }))
       .executeTakeFirst()
     if (existing !== undefined) return
     await this.insertProjection(projection, "committed")
@@ -83,9 +82,6 @@ export class SqliteRetrievalRepository implements RetrievalRepository {
         .onRef("retrieval_projections.owner_id", "=", "source_units.id")
         .on("retrieval_projections.owner_kind", "=", "source")
         .on("retrieval_projections.visibility", "=", "committed"))
-      .leftJoin("active_scope_refs", (join) => join
-        .onRef("active_scope_refs.scope_id", "=", "retrieval_projections.scope_id")
-        .onRef("active_scope_refs.project_id", "=", "retrieval_projections.project_id"))
       .select([
         "source_units.id as source_unit_id",
         "source_units.source_id",
@@ -96,7 +92,7 @@ export class SqliteRetrievalRepository implements RetrievalRepository {
       ])
       .where("source_units.project_id", "=", projectId)
       .where("document_versions.visibility", "=", "committed")
-      .where("active_scope_refs.scope_id", "is", null)
+      .where("retrieval_projections.id", "is", null)
       .orderBy("document_versions.created_at")
       .orderBy("source_units.sequence_no")
       .execute()

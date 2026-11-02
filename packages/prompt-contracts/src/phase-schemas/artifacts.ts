@@ -213,7 +213,20 @@ export const responseReviewArtifactSchema = z.object({
   evidenceClosed: z.boolean(),
   leaksUnobservedInformation: z.boolean(),
   requiresWorkflowUpgrade: z.boolean(),
-  upgradeReason: z.string().min(1).optional(),
+  upgradeReason: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.string().min(1).optional(),
+  ),
+  queryGrounding: z.object({
+    answerDisposition: z.enum(["supported", "abstained", "unsupported"]),
+    constraints: z.array(z.object({
+      condition: z.string().min(1),
+      kind: z.enum(["fact", "format"]).default("fact"),
+      status: z.enum(["supported", "unknown", "contradicted"]),
+      evidenceRefs: z.array(evidenceReferenceSchema),
+      reason: z.string().min(1),
+    })).min(1),
+  }).optional(),
 })
 
 const sceneSpacetimeBindingSchema = z.object({

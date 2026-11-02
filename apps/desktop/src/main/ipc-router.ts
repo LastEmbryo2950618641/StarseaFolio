@@ -47,7 +47,7 @@ import {
   startUpdateInstallerDownload,
 } from "./app-update-download.js"
 import { allocateUniqueBookPath } from "./book-path.js"
-import { readBookCoverDataUrl, setBookCoverFromPath } from "./book-cover.js"
+import { readBookCoverDataUrl, readImageFileDataUrl, setBookCoverFromDataUrl } from "./book-cover.js"
 
 const MODEL_CREDENTIAL_PAYLOAD_SCHEMAS = {
   "turn.start": turnStartPayloadSchema,
@@ -246,13 +246,19 @@ export function registerIpcRouter(
     })
     return result.canceled ? undefined : result.filePaths[0]
   })
+  ipcMain.handle("worldseed:image-file:read", async (_event, input: unknown) => {
+    if (input === null || typeof input !== "object") throw new Error("无效的图片参数")
+    const sourcePath = (input as { sourcePath?: unknown }).sourcePath
+    if (typeof sourcePath !== "string" || sourcePath.trim().length === 0) throw new Error("图片路径不能为空")
+    return readImageFileDataUrl(sourcePath.trim())
+  })
   ipcMain.handle("worldseed:book-cover:get", async (_event, input: unknown) => {
     const workspaceRootRef = parseWorkspaceRootPayload(input)
     return (await readBookCoverDataUrl(workspaceRootRef)) ?? null
   })
   ipcMain.handle("worldseed:book-cover:set", async (_event, input: unknown) => {
     const payload = parseBookCoverSetPayload(input)
-    return setBookCoverFromPath(payload.workspaceRootRef, payload.sourcePath)
+    return setBookCoverFromDataUrl(payload.workspaceRootRef, payload.dataUrl)
   })
 }
 
@@ -278,6 +284,7 @@ export function unregisterIpcRouter(): void {
   ipcMain.removeHandler("worldseed:select-directory")
   ipcMain.removeHandler("worldseed:select-markdown-files")
   ipcMain.removeHandler("worldseed:select-image-file")
+  ipcMain.removeHandler("worldseed:image-file:read")
   ipcMain.removeHandler("worldseed:book-cover:get")
   ipcMain.removeHandler("worldseed:book-cover:set")
 }
@@ -391,14 +398,14 @@ function parseWorkspaceRootPayload(input: unknown): string {
   return workspaceRootRef.trim()
 }
 
-function parseBookCoverSetPayload(input: unknown): Readonly<{ workspaceRootRef: string; sourcePath: string }> {
+function parseBookCoverSetPayload(input: unknown): Readonly<{ workspaceRootRef: string; dataUrl: string }> {
   if (input === null || typeof input !== "object") throw new Error("无效的封面参数")
-  const record = input as { workspaceRootRef?: unknown; sourcePath?: unknown }
+  const record = input as { workspaceRootRef?: unknown; dataUrl?: unknown }
   const workspaceRootRef = typeof record.workspaceRootRef === "string" ? record.workspaceRootRef.trim() : ""
-  const sourcePath = typeof record.sourcePath === "string" ? record.sourcePath.trim() : ""
+  const dataUrl = typeof record.dataUrl === "string" ? record.dataUrl.trim() : ""
   if (workspaceRootRef.length === 0) throw new Error("工作区路径不能为空")
-  if (sourcePath.length === 0) throw new Error("图片路径不能为空")
-  return { workspaceRootRef, sourcePath }
+  if (dataUrl.length === 0) throw new Error("裁剪图片不能为空")
+  return { workspaceRootRef, dataUrl }
 }
 
 async function readModelProfiles(backend: BackendProcess, vault: FileCredentialVault): Promise<DesktopModelProfiles> {

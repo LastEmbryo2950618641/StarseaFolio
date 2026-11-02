@@ -44,6 +44,11 @@ export type WorkspaceLockKind = "platform_readonly" | "immutable_scaffold" | "ch
 export class WorkspacePolicyError extends Error {}
 
 const BASE_RULES_PREFIX = "世界推演规则/基础规则"
+const BOOK_COVER_PATH_PATTERN = /^\.worldseed\/cover\.(?:png|jpg|jpeg|webp|gif|bmp)$/iu
+
+function isBookCoverInventoryEntry(path: string, kind: WorkspaceInventoryEntry["kind"]): boolean {
+  return path === ".worldseed" ? kind === "directory" : kind === "file" && BOOK_COVER_PATH_PATTERN.test(path)
+}
 
 export function normalizeWorkspacePath(path: string): string {
   if (path.includes("\0")) {
@@ -247,7 +252,8 @@ export function validateWorkspaceInventory(entries: readonly WorkspaceInventoryE
       normalizedEntries.set(path, { ...entry, path })
 
       const topLevel = path.split("/")[0]
-      if (topLevel === undefined || !fixedTopLevelDirectories.includes(topLevel as typeof fixedTopLevelDirectories[number])) {
+      const isBookCoverEntry = isBookCoverInventoryEntry(path, entry.kind)
+      if (topLevel === undefined || (!fixedTopLevelDirectories.includes(topLevel as typeof fixedTopLevelDirectories[number]) && !isBookCoverEntry)) {
         issues.push({
           code: "unexpected_root_entry",
           path,
@@ -255,7 +261,7 @@ export function validateWorkspaceInventory(entries: readonly WorkspaceInventoryE
         })
       }
 
-      if (entry.kind === "file" && !path.endsWith(".md")) {
+      if (entry.kind === "file" && !path.endsWith(".md") && !isBookCoverEntry) {
         issues.push({ code: "invalid_file_type", path, message: "Only .md files are allowed" })
       }
 

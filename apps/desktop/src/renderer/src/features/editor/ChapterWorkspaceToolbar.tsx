@@ -1,4 +1,4 @@
-import { Check, RotateCcw, Send, ShieldCheck } from "lucide-react"
+import { Check, RotateCcw, ShieldCheck } from "lucide-react"
 
 import type { ChapterReadingPreferences } from "./chapter-reading-preferences.js"
 import { ChapterReadingToolbar } from "./ChapterReadingToolbar.js"
@@ -16,7 +16,6 @@ type Props = Readonly<{
   busy: boolean
   error: string | undefined
   onReview(): void
-  onDirectSubmit(): void
   onReviewedSubmit(): void
 }>
 
@@ -38,13 +37,6 @@ export function ChapterWorkspaceToolbar(props: Props): React.JSX.Element {
               onClick={props.onReview}
             >
               <ShieldCheck size={14} />{reviewing ? "审核中…" : "审核修订"}
-            </button>
-            <button
-              className="revision-primary-command"
-              disabled={!props.changed || reviewing || props.busy}
-              onClick={props.onDirectSubmit}
-            >
-              <Send size={14} />直接提交
             </button>
             {props.stage === "reviewed"
               ? <button className="revision-reviewed-submit" disabled={props.busy} onClick={props.onReviewedSubmit}>

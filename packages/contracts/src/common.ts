@@ -26,6 +26,9 @@ export const taskStatusValues = [
 export const taskStatusSchema = z.enum(taskStatusValues)
 export type TaskStatus = z.infer<typeof taskStatusSchema>
 
+export const chapterArtifactContentStateSchema = z.enum(["empty", "ai_written", "manual_modified"])
+export type ChapterArtifactContentState = z.infer<typeof chapterArtifactContentStateSchema>
+
 export const aiPhaseValues = [
   "interpret",
   "rule_assembly",

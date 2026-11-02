@@ -159,6 +159,10 @@ export type RevisionDraftVersionRow = {
   created_at_ms: Timestamp
 }
 
+export type LegacyRevisionDraftMigrationRow = {
+  revision_task_id: string
+}
+
 export type ChapterRevisionTaskRow = {
   id: string
   project_id: string
@@ -294,12 +298,42 @@ export type SynopsisConversationSessionRow = {
   turn_bootstrap_input: string | null
   synopsis_confirmed_at_ms: number | null
   last_outline_agent_digest: string | null
+  synopsis_content_state: "empty" | "ai_written" | "manual_modified"
+  outline_content_state: "empty" | "ai_written" | "manual_modified"
+  draft_content_state: "empty" | "ai_written" | "manual_modified"
+  draft_version_id: string | null
+  last_draft_digest: string | null
   last_context_synopsis_digest: string | null
   last_context_outline_digest: string | null
   last_context_bootstrap_digest: string | null
   focus_kind: "plot_synopsis" | "plot_outline" | "chapter_body"
   status: "active" | "completed"
   created_at_ms: Timestamp
+  updated_at_ms: Timestamp
+}
+
+export type ChapterArtifactStateRow = {
+  project_id: string
+  chapter_sequence: number
+  synopsis_content_state: "empty" | "ai_written" | "manual_modified"
+  outline_content_state: "empty" | "ai_written" | "manual_modified"
+  draft_content_state: "empty" | "ai_written" | "manual_modified"
+  synopsis_digest: string | null
+  outline_digest: string | null
+  draft_version_id: string | null
+  draft_digest: string | null
+  synopsis_write_count: number
+  outline_write_count: number
+  body_write_count: number
+  body_digest: string | null
+  updated_at_ms: Timestamp
+}
+
+export type WorkStyleGateStateRow = {
+  project_id: string
+  status: "awaiting_choice" | "style_selected" | "ready"
+  selected_prose_style_path: string | null
+  style_digest: string | null
   updated_at_ms: Timestamp
 }
 
@@ -921,7 +955,10 @@ export type ProjectDatabase = {
   chapter_lineage_snapshots: ChapterLineageSnapshotRow
   revision_conversation_messages: RevisionConversationMessageRow
   revision_draft_versions: RevisionDraftVersionRow
+  legacy_revision_draft_migrations: LegacyRevisionDraftMigrationRow
   synopsis_conversation_sessions: SynopsisConversationSessionRow
+  chapter_artifact_states: ChapterArtifactStateRow
+  work_style_gate_states: WorkStyleGateStateRow
   synopsis_conversation_messages: SynopsisConversationMessageRow
   synopsis_discuss_context_messages: SynopsisDiscussContextMessageRow
   synopsis_discuss_usage: SynopsisDiscussUsageRow

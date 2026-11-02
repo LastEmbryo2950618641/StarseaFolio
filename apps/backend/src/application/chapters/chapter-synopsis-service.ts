@@ -1,5 +1,6 @@
 import type { ChapterSynopsis, ProjectId } from "@worldseed/contracts"
 
+import type { ChapterArtifactContentState } from "@worldseed/contracts"
 import type { WorkspacePort } from "../workspace/index.js"
 import type { SqliteChapterSynopsisRepository } from "../../infrastructure/sqlite/repositories/sqlite-chapter-synopsis-repository.js"
 import type { SqliteSynopsisConversationRepository } from "../../infrastructure/sqlite/repositories/sqlite-synopsis-conversation-repository.js"
@@ -16,8 +17,10 @@ import {
   parseOutlineMarkdownPath,
   parseSynopsisMarkdownPath,
   parseSynopsisTitleFromLabel,
+  isOutlinePlaceholderDocument,
 } from "../../core/chapters/synopsis-path.js"
 import { runtimeLog } from "../../infrastructure/diagnostics/index.js"
+import { digest } from "../../core/identity/digest.js"
 
 export type ChapterSynopsisServiceDependencies = Readonly<{
   synopsis: SqliteChapterSynopsisRepository
@@ -39,6 +42,16 @@ export type PlanningChapterHeading = Readonly<{
   sourcePath: string
 }>
 
+export type ChapterWorkflowGate = Readonly<{
+  chapterSequence: number
+  synopsis: Readonly<{ ready: boolean; confirmed: boolean; contentState: ChapterArtifactContentState; path?: string; markdown: string; writeCount: number }>
+  outline: Readonly<{ ready: boolean; contentState: ChapterArtifactContentState; path?: string; markdown: string; writeCount: number }>
+  draft: Readonly<{ contentState: ChapterArtifactContentState; versionId?: string }>
+  body: Readonly<{ path?: string; markdown: string; writeCount: number }>
+  readyForDraft: boolean
+  blockedReasons: readonly string[]
+}>
+
 /** Injected into synopsisDiscuss when body vs planning titles diverge for the same sequence. */
 export type TitleAlignmentIssue = Readonly<{
   chapterSequence: number
@@ -52,6 +65,246 @@ export type TitleAlignmentIssue = Readonly<{
 
 export class ChapterSynopsisService {
   public constructor(private readonly dependencies: ChapterSynopsisServiceDependencies) {}
+
+  /** The planning chain is a backend prerequisite shared by every draft caller. */
+  public async getWorkflowGate(input: Readonly<{
+    projectId: ProjectId
+    workspaceRootRef: string
+    chapterSequence: number
+  }>): Promise<ChapterWorkflowGate> {
+    const planning = await this.listPlanningFilesForSequence(input.workspaceRootRef, input.chapterSequence)
+    const synopsis = planning.find((entry) => entry.kind === "synopsis")
+    const outline = planning.find((entry) => entry.kind === "outline")
+    const synopsisMarkdown = synopsis === undefined ? "" : await this.readPlanningFile(input.workspaceRootRef, synopsis.path)
+    const outlineMarkdown = outline === undefined ? "" : await this.readPlanningFile(input.workspaceRootRef, outline.path)
+    const bodyFile = await this.findBodyForSequence(input.workspaceRootRef, input.chapterSequence)
+    const bodyMarkdown = bodyFile === undefined ? "" : await this.readPlanningFile(input.workspaceRootRef, bodyFile.path)
+    const session = await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
+    const storedState = await this.dependencies.conversation.findChapterArtifactState(input.projectId, input.chapterSequence)
+    let synopsisContentState = storedState?.synopsisContentState
+      ?? session?.synopsisContentState
+      ?? (session?.lastAgentDigest === undefined ? "empty" : "ai_written")
+    let outlineContentState = storedState?.outlineContentState
+      ?? session?.outlineContentState
+      ?? (session?.lastOutlineAgentDigest === undefined ? "empty" : "ai_written")
+    if (storedState === undefined) {
+      synopsisContentState = hasPlanningContent(synopsisMarkdown, true) ? "manual_modified" : "empty"
+      outlineContentState = hasPlanningContent(outlineMarkdown, false) ? "manual_modified" : "empty"
+      await this.dependencies.conversation.updateChapterArtifactState({
+        projectId: input.projectId,
+        chapterSequence: input.chapterSequence,
+        synopsisContentState,
+        outlineContentState,
+        synopsisDigest: digest(synopsisMarkdown),
+        outlineDigest: digest(outlineMarkdown),
+        bodyDigest: digest(bodyMarkdown),
+        synopsisHasContent: hasPlanningContent(synopsisMarkdown, true),
+        outlineHasContent: hasPlanningContent(outlineMarkdown, false),
+        bodyHasContent: bodyMarkdown.trim().length > 0,
+        updatedAtMs: this.dependencies.now(),
+      })
+    }
+    if (storedState !== undefined && storedState.synopsisDigest !== digest(synopsisMarkdown)) {
+      synopsisContentState = hasPlanningContent(synopsisMarkdown, true) ? "manual_modified" : "empty"
+      await this.dependencies.conversation.updateChapterArtifactState({
+        projectId: input.projectId,
+        chapterSequence: input.chapterSequence,
+        synopsisContentState,
+        synopsisDigest: digest(synopsisMarkdown),
+        synopsisHasContent: hasPlanningContent(synopsisMarkdown, true),
+        updatedAtMs: this.dependencies.now(),
+      })
+      if (session !== undefined) {
+        await this.dependencies.conversation.updateSession({
+          sessionId: session.sessionId,
+          synopsisContentState,
+          synopsisConfirmedAtMs: null,
+          updatedAtMs: this.dependencies.now(),
+        })
+      }
+    }
+    if (storedState !== undefined && storedState.outlineDigest !== digest(outlineMarkdown)) {
+      outlineContentState = hasPlanningContent(outlineMarkdown, false) ? "manual_modified" : "empty"
+      await this.dependencies.conversation.updateChapterArtifactState({
+        projectId: input.projectId,
+        chapterSequence: input.chapterSequence,
+        outlineContentState,
+        outlineDigest: digest(outlineMarkdown),
+        outlineHasContent: hasPlanningContent(outlineMarkdown, false),
+        updatedAtMs: this.dependencies.now(),
+      })
+      if (session !== undefined) {
+        await this.dependencies.conversation.updateSession({
+          sessionId: session.sessionId,
+          outlineContentState,
+          updatedAtMs: this.dependencies.now(),
+        })
+      }
+    }
+    if (storedState !== undefined && storedState.bodyDigest !== digest(bodyMarkdown)) {
+      await this.dependencies.conversation.updateChapterArtifactState({
+        projectId: input.projectId,
+        chapterSequence: input.chapterSequence,
+        bodyDigest: digest(bodyMarkdown),
+        bodyHasContent: bodyMarkdown.trim().length > 0,
+        updatedAtMs: this.dependencies.now(),
+      })
+    }
+    const draftContentState = storedState?.draftContentState ?? session?.draftContentState ?? "empty"
+    const synopsisReady = synopsisContentState !== "empty" && hasPlanningContent(synopsisMarkdown, true)
+    const outlineReady = outlineContentState !== "empty" && hasPlanningContent(outlineMarkdown, false)
+    const synopsisConfirmed = synopsisReady && session?.synopsisConfirmedAtMs !== undefined
+    const draftVersionId = storedState?.draftVersionId ?? session?.draftVersionId
+    const blockedReasons: string[] = []
+    if (!synopsisReady) blockedReasons.push("本章必须先完成剧情梗概")
+    if (!synopsisConfirmed) blockedReasons.push("剧情梗概必须先确认")
+    if (!outlineReady) blockedReasons.push("本章必须先完成剧情细纲和人物准备")
+    return {
+      chapterSequence: input.chapterSequence,
+      synopsis: {
+        ready: synopsisReady,
+        confirmed: synopsisConfirmed,
+        contentState: synopsisContentState,
+        ...(synopsis?.path === undefined ? {} : { path: synopsis.path }),
+        markdown: synopsisMarkdown,
+        writeCount: countAfterContentChange(storedState?.synopsisDigest, digest(synopsisMarkdown), storedState?.synopsisWriteCount ?? 0, hasPlanningContent(synopsisMarkdown, true)),
+      },
+      outline: {
+        ready: outlineReady,
+        contentState: outlineContentState,
+        ...(outline?.path === undefined ? {} : { path: outline.path }),
+        markdown: outlineMarkdown,
+        writeCount: countAfterContentChange(storedState?.outlineDigest, digest(outlineMarkdown), storedState?.outlineWriteCount ?? 0, hasPlanningContent(outlineMarkdown, false)),
+      },
+      draft: {
+        contentState: draftContentState,
+        ...(draftVersionId === undefined ? {} : { versionId: draftVersionId }),
+      },
+      body: {
+        ...(bodyFile === undefined ? {} : { path: bodyFile.path }),
+        markdown: bodyMarkdown,
+        writeCount: countAfterContentChange(storedState?.bodyDigest, digest(bodyMarkdown), storedState?.bodyWriteCount ?? 0, bodyMarkdown.trim().length > 0),
+      },
+      readyForDraft: blockedReasons.length === 0,
+      blockedReasons,
+    }
+  }
+
+  /** Record a user save for planning files; file presence alone never advances workflow state. */
+  public async recordPlanningArtifactManualEdit(input: Readonly<{
+    projectId: ProjectId
+    relativePath: string
+    markdown: string
+  }>): Promise<void> {
+    const parsedSynopsis = parseSynopsisMarkdownPath(input.relativePath)
+    const parsedOutline = parseOutlineMarkdownPath(input.relativePath)
+    const kind = parsedSynopsis === undefined && parsedOutline === undefined
+      ? undefined
+      : parsedSynopsis !== undefined ? "synopsis" : "outline"
+    if (kind === undefined) return
+    const chapterSequence = (parsedSynopsis ?? parsedOutline)?.sequence
+    if (chapterSequence === undefined) return
+    await this.recordPlanningArtifactState({
+      projectId: input.projectId,
+      chapterSequence,
+      kind,
+      state: hasPlanningContent(input.markdown, kind === "synopsis") ? "manual_modified" : "empty",
+      markdown: input.markdown,
+    })
+  }
+
+  public async recordPlanningArtifactDeleted(input: Readonly<{
+    projectId: ProjectId
+    relativePath: string
+  }>): Promise<void> {
+    const synopsis = parseSynopsisMarkdownPath(input.relativePath)
+    const outline = parseOutlineMarkdownPath(input.relativePath)
+    const kind = synopsis === undefined && outline === undefined
+      ? undefined
+      : synopsis !== undefined ? "synopsis" : "outline"
+    const chapterSequence = (synopsis ?? outline)?.sequence
+    if (kind === undefined || chapterSequence === undefined) return
+    const session = await this.dependencies.conversation.findBySequence(input.projectId, chapterSequence)
+    const nowMs = this.dependencies.now()
+    await this.dependencies.conversation.updateChapterArtifactState({
+      projectId: input.projectId,
+      chapterSequence,
+      ...(kind === "synopsis"
+        ? { synopsisContentState: "empty" as const, synopsisDigest: null }
+        : { outlineContentState: "empty" as const, outlineDigest: null }),
+      updatedAtMs: nowMs,
+    })
+    if (session === undefined) return
+    await this.dependencies.conversation.updateSession({
+      sessionId: session.sessionId,
+      ...(kind === "synopsis"
+        ? { synopsisContentState: "empty" as const, lastAgentDigest: null, synopsisConfirmedAtMs: null }
+        : { outlineContentState: "empty" as const, lastOutlineAgentDigest: null }),
+      updatedAtMs: nowMs,
+    })
+  }
+
+  public async recordPlanningArtifactState(input: Readonly<{
+    projectId: ProjectId
+    chapterSequence: number
+    kind: "synopsis" | "outline"
+    state: ChapterArtifactContentState
+    markdown: string
+  }>): Promise<void> {
+    const session = await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
+    const nowMs = this.dependencies.now()
+    const stateUpdate = input.kind === "synopsis"
+      ? { synopsisContentState: input.state, synopsisDigest: digest(input.markdown) }
+      : { outlineContentState: input.state, outlineDigest: digest(input.markdown) }
+    await this.dependencies.conversation.updateChapterArtifactState({
+      projectId: input.projectId,
+      chapterSequence: input.chapterSequence,
+      ...stateUpdate,
+      ...(input.kind === "synopsis"
+        ? { synopsisHasContent: hasPlanningContent(input.markdown, true) }
+        : { outlineHasContent: hasPlanningContent(input.markdown, false) }),
+      updatedAtMs: nowMs,
+    })
+    if (session === undefined) return
+    await this.dependencies.conversation.updateSession({
+      sessionId: session.sessionId,
+      ...(input.kind === "synopsis"
+        ? { synopsisContentState: input.state, lastAgentDigest: input.state === "ai_written" ? digest(input.markdown) : null }
+        : { outlineContentState: input.state, lastOutlineAgentDigest: input.state === "ai_written" ? digest(input.markdown) : null }),
+      ...(input.kind === "synopsis" ? { synopsisConfirmedAtMs: null } : {}),
+      updatedAtMs: nowMs,
+    })
+  }
+
+  public async recordDraftVersionState(input: Readonly<{
+    projectId: ProjectId
+    chapterSequence: number
+    versionId: string
+    body: string
+    source: "agent" | "manual" | "workflow" | "rollback"
+  }>): Promise<void> {
+    const session = await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
+    const draftContentState = input.body.trim().length === 0
+      ? "empty"
+      : input.source === "manual" || input.source === "rollback" ? "manual_modified" : "ai_written"
+    const nowMs = this.dependencies.now()
+    await this.dependencies.conversation.updateChapterArtifactState({
+      projectId: input.projectId,
+      chapterSequence: input.chapterSequence,
+      draftContentState,
+      draftVersionId: input.versionId,
+      draftDigest: digest(input.body),
+      updatedAtMs: nowMs,
+    })
+    if (session === undefined) return
+    await this.dependencies.conversation.updateSession({
+      sessionId: session.sessionId,
+      draftContentState,
+      draftVersionId: input.versionId,
+      lastDraftDigest: digest(input.body),
+      updatedAtMs: nowMs,
+    })
+  }
 
   public async get(input: Readonly<{
     projectId: ProjectId
@@ -442,6 +695,18 @@ export class ChapterSynopsisService {
       clearedOutlinePath = outline.path
     }
 
+    await this.dependencies.conversation.updateChapterArtifactState({
+      projectId: input.projectId,
+      chapterSequence: input.chapterSequence,
+      ...(input.targetStage === "synopsis"
+        ? { outlineContentState: "empty" as const, outlineDigest: null }
+        : {}),
+      draftContentState: "empty",
+      draftVersionId: null,
+      draftDigest: null,
+      updatedAtMs: this.dependencies.now(),
+    })
+
     if (body !== undefined) {
       archivedBodyPath = body.path
       retiredBodyPath = await this.dependencies.workspace.archivePublishedChapter(
@@ -461,6 +726,12 @@ export class ChapterSynopsisService {
         focusKind,
         ...(synopsis?.path === undefined ? {} : { synopsisPath: synopsis.path }),
         ...(input.targetStage === "synopsis" ? { synopsisConfirmedAtMs: null } : {}),
+        ...(input.targetStage === "synopsis"
+          ? { outlineContentState: "empty" as const, lastOutlineAgentDigest: null }
+          : {}),
+        draftContentState: "empty",
+        draftVersionId: null,
+        lastDraftDigest: null,
         updatedAtMs: this.dependencies.now(),
       })
     }
@@ -557,4 +828,24 @@ export class ChapterSynopsisService {
       return ""
     }
   }
+}
+
+function hasPlanningContent(markdown: string, synopsis: boolean): boolean {
+  if (markdown.trim().length === 0) return false
+  if (synopsis && isSynopsisPlaceholderDocument(markdown)) return false
+  if (!synopsis && isOutlinePlaceholderDocument(markdown)) return false
+  const body = markdown
+    .replace(/^\uFEFF?\s*(?:#|##)\s+[^\n]*\n?/u, "")
+    .replace(/^[-*_\s]+$/gmu, "")
+    .trim()
+  return body.length > 0
+}
+
+function countAfterContentChange(
+  previousDigest: string | undefined,
+  nextDigest: string,
+  previousCount: number,
+  hasContent: boolean,
+): number {
+  return hasContent && previousDigest !== nextDigest ? previousCount + 1 : previousCount
 }

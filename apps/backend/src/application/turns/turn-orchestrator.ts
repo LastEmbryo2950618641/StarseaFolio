@@ -39,6 +39,7 @@ import {
   internalDraftArtifactSchema,
   parsePhaseArtifact,
   ruleAssemblyArtifactSchema,
+  responseReviewArtifactSchema,
   semanticReviewArtifactSchema,
   settlementReviewArtifactSchema,
   type EmergencePlanningArtifact,
@@ -6087,29 +6088,36 @@ function errorMessage(error: unknown): string {
 
 function queryReviewDecision(result: Pick<PhaseResultEnvelope, "outcome" | "artifact" | "reason" | "selfReview">): Readonly<{
   requiresRevision: boolean
-  review: Readonly<{
-    evidenceClosed: boolean
-    leaksUnobservedInformation: boolean
-    requiresWorkflowUpgrade: boolean
-  }>
+  review: ReturnType<typeof responseReviewArtifactSchema.parse>
   feedback: NonNullable<TurnPhaseInput["revisionFeedback"]>
 }> {
-  const review = parsePhaseArtifact("response_review", result.artifact) as {
-    evidenceClosed: boolean
-    leaksUnobservedInformation: boolean
-    requiresWorkflowUpgrade: boolean
-  }
+  const review = responseReviewArtifactSchema.parse(result.artifact)
+  const grounding = review.queryGrounding
+  const groundingRequiresRevision = grounding === undefined
+    || grounding.answerDisposition === "unsupported"
+    || (grounding.answerDisposition === "supported" && grounding.constraints.some((constraint) => (
+      constraint.kind === "fact"
+      && (
+      constraint.status !== "supported" || constraint.evidenceRefs.length === 0
+      )
+    )))
+    || (grounding.answerDisposition === "abstained" && grounding.constraints.every((constraint) => (
+      constraint.status === "supported"
+    )))
   return {
     requiresRevision: result.outcome === "revise"
       || !review.evidenceClosed
       || review.leaksUnobservedInformation
-      || review.requiresWorkflowUpgrade,
+      || review.requiresWorkflowUpgrade
+      || groundingRequiresRevision,
     review,
     feedback: {
       phase: "response_review",
       outcome: result.outcome,
       artifact: review,
-      reason: result.reason,
+      reason: groundingRequiresRevision
+        ? `${result.reason}\nQuery grounding failed: preserve every original question condition, cite read evidence for each supported condition, or explicitly state that the answer is unknown. An abstention must identify an unresolved condition.`
+        : result.reason,
       selfReview: result.selfReview,
     },
   }

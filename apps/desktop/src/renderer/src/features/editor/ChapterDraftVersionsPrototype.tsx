@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Check, ChevronDown, FilePlus2, GitCompareArrows, History, PencilLine, RotateCcw, Send, ShieldCheck } from "lucide-react"
+import { Check, ChevronDown, FilePlus2, GitCompareArrows, History, PencilLine, RotateCcw, ShieldCheck } from "lucide-react"
 
 import { UiTooltip } from "../../components/UiTooltip.js"
 import {
@@ -24,7 +24,6 @@ type Props = Readonly<{
   revisionStage: RevisionStage
   draftChanged: boolean
   onReview(): void
-  onDirectSubmit(): void
   onReviewedSubmit(): void
   onSelectVersion(versionId: string): void
   onEnterDiff(): void
@@ -195,17 +194,6 @@ export function ChapterDraftVersionsPrototype(props: Props): React.JSX.Element {
                   {reviewing
                     ? <RotateCcw className="revision-spin" size={13} aria-hidden="true" />
                     : <ShieldCheck size={13} aria-hidden="true" />}
-                </button>
-              </UiTooltip>
-              <UiTooltip label="直接提交">
-                <button
-                  type="button"
-                  className="chapter-draft-version-icon-btn primary"
-                  aria-label="直接提交"
-                  disabled={!props.draftChanged || reviewing || props.busy}
-                  onClick={props.onDirectSubmit}
-                >
-                  <Send size={13} aria-hidden="true" />
                 </button>
               </UiTooltip>
               {props.revisionStage === "reviewed"

@@ -35,11 +35,11 @@ export type DiffLine = Readonly<{
 export function fromPersistedDraftVersions(
   versions: readonly RevisionDraftVersion[],
 ): PrototypeDraftVersion[] {
-  return versions.map((version, index) => ({
+  return versions.map((version) => ({
     versionId: version.versionId,
     parentVersionId: version.parentVersionId ?? undefined,
     source: version.source,
-    label: displayPersistedDraftLabel(version, index),
+    label: displayPersistedDraftLabel(version),
     heading: version.heading,
     body: version.body,
     messageId: version.messageId ?? undefined,
@@ -134,7 +134,6 @@ export function presentDraftAxis(versions: readonly PrototypeDraftVersion[]): Pr
 
 function displayPersistedDraftLabel(
   version: RevisionDraftVersion,
-  index: number,
 ): string {
   if (isCoveringDraft(version)) {
     return `${version.label}${draftSourceTag(version.source)} · 已覆盖正文`

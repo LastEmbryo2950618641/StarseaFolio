@@ -7,6 +7,7 @@ import {
   turnDeductionGoalBundleSchema,
 } from "./deduction-goals.js"
 import { idSchema } from "./ids.js"
+import { chapterArtifactContentStateSchema } from "./common.js"
 
 export const chapterSynopsisSourceSchema = z.enum([
   "synopsis_file",
@@ -99,6 +100,11 @@ export const synopsisConversationSessionSchema = z.object({
   lastAgentDigest: z.string().min(1).optional(),
   /** Digest of last Agent-written outline markdown; used to detect user hand-edits. */
   lastOutlineAgentDigest: z.string().min(1).optional(),
+  synopsisContentState: chapterArtifactContentStateSchema,
+  outlineContentState: chapterArtifactContentStateSchema,
+  draftContentState: chapterArtifactContentStateSchema,
+  draftVersionId: idSchema.optional(),
+  lastDraftDigest: z.string().min(1).optional(),
   turnBootstrapInput: z.string().optional(),
   synopsisConfirmedAtMs: z.number().int().nonnegative().optional(),
   focusKind: discussFocusKindSchema.default("plot_synopsis"),
@@ -301,3 +307,34 @@ export const chapterSynopsisSchema = z.object({
   linkedAtMs: z.number().int().nonnegative(),
 })
 export type ChapterSynopsis = z.infer<typeof chapterSynopsisSchema>
+
+export const chapterWorkflowGateSchema = z.object({
+  chapterSequence: z.number().int().positive(),
+  synopsis: z.object({
+    ready: z.boolean(),
+    confirmed: z.boolean(),
+    contentState: chapterArtifactContentStateSchema,
+    path: z.string().min(1).optional(),
+    markdown: z.string(),
+    writeCount: z.number().int().nonnegative(),
+  }),
+  outline: z.object({
+    ready: z.boolean(),
+    contentState: chapterArtifactContentStateSchema,
+    path: z.string().min(1).optional(),
+    markdown: z.string(),
+    writeCount: z.number().int().nonnegative(),
+  }),
+  draft: z.object({
+    contentState: chapterArtifactContentStateSchema,
+    versionId: idSchema.optional(),
+  }),
+  body: z.object({
+    path: z.string().min(1).optional(),
+    markdown: z.string(),
+    writeCount: z.number().int().nonnegative(),
+  }),
+  readyForDraft: z.boolean(),
+  blockedReasons: z.array(z.string().min(1)),
+})
+export type ChapterWorkflowGate = z.infer<typeof chapterWorkflowGateSchema>

@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react"
-import { Activity, AlertCircle, Check, Circle, GitBranch, History, Network, Orbit, X } from "lucide-react"
-import { aiPhaseValues, type ChapterReviewRevisionPayload, type HistoryOverview, type ProjectSettings, type ResettableRuntimeMetricId } from "@worldseed/contracts"
+import { Activity, AlertCircle, BookOpen, Check, Circle, GitBranch, Network, Orbit, X } from "lucide-react"
+import { aiPhaseValues, type ChapterReviewRevisionPayload, type ChapterRevisionReadResult, type ChapterSummary, type ProjectSettings, type ResettableRuntimeMetricId } from "@worldseed/contracts"
 
 import type { GraphSlice, OpenProject, PhaseRunSnapshot, TaskSnapshot } from "../../api/client.js"
 import type { SynopsisConversationStreamSnapshot } from "@worldseed/contracts"
 import { UiTooltip, uiTooltipRich } from "../../components/UiTooltip.js"
 import { useWorkbenchStore, type RightTab } from "../../state/workbench-store.js"
 import { WorldGraph } from "./WorldGraph.js"
-import { HistoryPanel } from "./HistoryPanel.js"
 import { DeductionTasksPanel } from "./DeductionTasksPanel.js"
 import { GraphRevisionTasksPanel } from "./GraphRevisionTasksPanel.js"
 import { PhaseIoDetails, PhaseIoPending } from "./phase-io-details.js"
 import { RuntimeMonitor, TaskCheckpointDialog } from "./TaskCheckpointPrototype.js"
+import { ChapterListPanel } from "./ChapterListPanel.js"
+import type { DiscussFocusChapterOption } from "../editor/synopsis-path.js"
 
 type Props = Readonly<{
   task: TaskSnapshot | undefined
@@ -21,17 +22,15 @@ type Props = Readonly<{
   revisionModel?: ChapterReviewRevisionPayload["model"]
   graphSlice: GraphSlice | undefined
   graphSettings?: ProjectSettings["graph"] | undefined
-  historyRetentionLimit?: number | null | undefined
-  history?: HistoryOverview | undefined
-  historyLoading?: boolean | undefined
-  /** Active model profile context window for 当前上下文/最大上下文. */
-  contextWindowTokens?: number | undefined
-  onOpenProjectSettings?(): void
+  chapters?: readonly DiscussFocusChapterOption[] | undefined
+  chapterSummaries?: readonly ChapterSummary[] | undefined
+  unpublishedDrafts?: readonly ChapterRevisionReadResult[] | undefined
+  draftCandidateVersionId?: string | undefined
+  selectedChapterPath?: string | undefined
+  onOpenChapter?(path: string): void
+  onSelectDraftCandidate?(revisionTaskId: string, versionId: string): void
   onResumeTask?(mode: "continue" | "retry_phase"): Promise<void>
   onResetTaskMetrics?(metricIds: readonly ResettableRuntimeMetricId[]): Promise<void>
-  onSaveHistory?(): Promise<void>
-  onRestoreHistory?(entryId: string): Promise<void>
-  onContinueFromHistory?(entryId: string): Promise<void>
   onReturnPreviousRound?(): Promise<void>
   onRefreshTask?(): Promise<void>
   onRefreshWorkspace?(): Promise<void>
@@ -89,22 +88,19 @@ const draftWorkflowPhases = ["interpret", "rule_assembly", "source_retrieval", "
 
 export function RightRail({
   task,
-  focusedChapterSequence,
-  executionPhases,
   project,
   revisionModel,
   graphSlice,
   graphSettings,
-  historyRetentionLimit = null,
-  history,
-  historyLoading,
-  contextWindowTokens,
-  onOpenProjectSettings,
+  chapters = [],
+  chapterSummaries = [],
+  unpublishedDrafts = [],
+  draftCandidateVersionId,
+  selectedChapterPath,
+  onOpenChapter,
+  onSelectDraftCandidate,
   onResumeTask,
   onResetTaskMetrics,
-  onSaveHistory,
-  onRestoreHistory,
-  onContinueFromHistory,
   onReturnPreviousRound,
   onRefreshTask,
   onRefreshWorkspace,
@@ -113,16 +109,15 @@ export function RightRail({
   const [dismissedCheckpointKey, setDismissedCheckpointKey] = useState<string>()
   const tab = useWorkbenchStore((state) => state.rightTab)
   const setTab = useWorkbenchStore((state) => state.setRightTab)
-  const tokenSummary = summarizeTaskTokenMetrics(task)
+  const visibleTab: RightTab = tab === "history" ? "chapters" : tab
   const checkpointKey = checkpointDecisionKey(task)
-  const openCheckpoint = (): void => {
-    setDismissedCheckpointKey(undefined)
-    setCheckpointOpen(true)
-  }
   const closeCheckpoint = (): void => {
     setCheckpointOpen(false)
     if (checkpointKey !== undefined) setDismissedCheckpointKey(checkpointKey)
   }
+  useEffect(() => {
+    if (tab === "history") setTab("chapters")
+  }, [setTab, tab])
   useEffect(() => {
     const status = task?.status
     if (status === "awaiting_user_decision" || status === "waiting_for_review" || status === "paused") {
@@ -141,14 +136,25 @@ export function RightRail({
   }, [task?.status, checkpointKey, dismissedCheckpointKey])
   return <><aside className="right-rail">
     <div className="right-tabs" role="tablist" aria-label="右侧面板">
-      <Tab id="process" tab={tab} onChange={setTab} icon={<Activity size={15} />} label="正文推演任务" />
-      <Tab id="graph" tab={tab} onChange={setTab} icon={<Network size={15} />} label="世界图" />
-      <Tab id="evolution" tab={tab} onChange={setTab} icon={<Orbit size={15} />} label="自洽演化" />
-      <Tab id="history" tab={tab} onChange={setTab} icon={<History size={15} />} label="历史" />
-      <Tab id="graph-revisions" tab={tab} onChange={setTab} icon={<GitBranch size={15} />} label="图治理任务" />
+      <Tab id="chapters" tab={visibleTab} onChange={setTab} icon={<BookOpen size={15} />} label="正文章节" />
+      <Tab id="process" tab={visibleTab} onChange={setTab} icon={<Activity size={15} />} label="正文推演任务" />
+      <Tab id="graph" tab={visibleTab} onChange={setTab} icon={<Network size={15} />} label="世界图" />
+      <Tab id="evolution" tab={visibleTab} onChange={setTab} icon={<Orbit size={15} />} label="自洽演化" />
+      <Tab id="graph-revisions" tab={visibleTab} onChange={setTab} icon={<GitBranch size={15} />} label="图治理任务" />
     </div>
     <div className="right-content">
-      {tab === "process" ? <DeductionTasksPanel
+      {visibleTab === "chapters" ? <ChapterListPanel
+        projectId={project?.projectId ?? ""}
+        workspaceRootRef={project?.workspaceRootRef ?? ""}
+        chapters={chapters}
+        chapterSummaries={chapterSummaries}
+        unpublishedDrafts={unpublishedDrafts}
+        {...(draftCandidateVersionId === undefined ? {} : { draftCandidateVersionId })}
+        {...(onSelectDraftCandidate === undefined ? {} : { onSelectDraftCandidate })}
+        {...(selectedChapterPath === undefined ? {} : { selectedPath: selectedChapterPath })}
+        onOpenBody={onOpenChapter ?? (() => undefined)}
+      /> : null}
+      {visibleTab === "process" ? <DeductionTasksPanel
         key={project?.projectId}
         project={project}
         onResetMetrics={onResetTaskMetrics}
@@ -157,7 +163,7 @@ export function RightRail({
           await onRefreshWorkspace?.()
         }}
       /> : null}
-      {tab === "graph-revisions" ? <GraphRevisionTasksPanel
+      {visibleTab === "graph-revisions" ? <GraphRevisionTasksPanel
         key={project?.projectId}
         project={project}
         model={revisionModel}
@@ -165,31 +171,8 @@ export function RightRail({
         onResetMetrics={onResetTaskMetrics}
         onChanged={onRefreshWorkspace}
       /> : null}
-      {tab === "graph" ? <WorldGraph slice={graphSlice} settings={graphSettings} /> : null}
-      {tab === "evolution" ? <EvolutionPanel /> : null}
-      {tab === "history" ? <HistoryPanel
-        entries={history?.entries ?? []}
-        branches={history?.branches ?? []}
-        {...(history?.activeBranchId === undefined ? {} : { activeBranchId: history.activeBranchId })}
-        {...(history?.selectedEntryId === undefined ? {} : { selectedEntryId: history.selectedEntryId })}
-        retentionLimit={historyRetentionLimit}
-        taskRunning={task?.status === "running"}
-        {...(historyLoading === undefined ? {} : { loading: historyLoading })}
-        onOpenSettings={onOpenProjectSettings ?? (() => undefined)}
-        onOpenCheckpoint={openCheckpoint}
-        onSave={onSaveHistory ?? (() => Promise.reject(new Error("历史保存接口尚未连接")))}
-        onRestore={onRestoreHistory ?? (() => Promise.reject(new Error("历史恢复接口尚未连接")))}
-        onContinueFrom={onContinueFromHistory ?? (() => Promise.reject(new Error("历史分叉接口尚未连接")))}
-        onReturnPreviousRound={onReturnPreviousRound ?? (() => Promise.reject(new Error("返回上一轮接口尚未连接")))}
-      /> : null}
-    </div>
-    <div className="world-summary" data-testid="world-summary">
-      <span>世界时间 <strong>当前章节锚点</strong></span>
-      <span>图局部 <strong>{graphSlice === undefined ? "未读取" : `${String(graphSlice.nodes.length)} 节点 / ${String(graphSlice.links.length)} 连接`}</strong></span>
-      <span>任务状态 <strong>{task?.status ?? "未运行"}</strong></span>
-      <span>推演 KV 命中率 <strong>{tokenSummary.kvRate === undefined ? "—" : `${String(Math.round(tokenSummary.kvRate * 100))}%`}</strong></span>
-      <span>推演总 Token <strong>{tokenSummary.totalTokens === undefined ? "—" : formatCompactMetric(tokenSummary.totalTokens)}</strong></span>
-      <span>推演上下文 / 最大上下文 <strong>{formatContextWindow(tokenSummary.currentContextTokens, contextWindowTokens)}</strong></span>
+      {visibleTab === "graph" ? <WorldGraph slice={graphSlice} settings={graphSettings} /> : null}
+      {visibleTab === "evolution" ? <EvolutionPanel /> : null}
     </div>
   </aside>{checkpointOpen && task !== undefined ? <TaskCheckpointDialog
     task={task}
@@ -554,12 +537,6 @@ export function summarizeSynopsisUsageTokenMetrics(
     ...(totalTokens === 0 ? {} : { totalTokens }),
     ...(currentContextTokens === undefined ? {} : { currentContextTokens }),
   }
-}
-
-function formatContextWindow(current: number | undefined, maximum: number | undefined): string {
-  const left = current === undefined ? "—" : formatCompactMetric(current)
-  const right = maximum === undefined || maximum <= 0 ? "—" : formatCompactMetric(maximum)
-  return `${left} / ${right}`
 }
 
 function phaseElapsedMs(run: PhaseRunSnapshot): number | undefined {

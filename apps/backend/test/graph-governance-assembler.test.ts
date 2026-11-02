@@ -184,6 +184,31 @@ describe("staged graph governance", () => {
     ])
   })
 
+  it("resolves local retrieval owners to matching structure proposals", () => {
+    const governance = assembleGraphGovernanceArtifact({
+      structure,
+      spacetime: {
+        sceneSpacetimeBindings: [],
+        proposalSettlements: [],
+      },
+      retrieval: {
+        projections: [{
+          ownerRef: "local:scene",
+          exactKeys: ["场景"],
+          semanticText: "返回本轮新建的场景身份",
+        }],
+        sourceSettlements: [],
+      },
+      sourceUnitCount: 0,
+    })
+
+    expect(governance.retrievalProjections[0]).toMatchObject({
+      ownerKind: "node",
+      ownerMutationIndex: 0,
+    })
+    expect(governance.retrievalProjections[0]).not.toHaveProperty("ownerRef")
+  })
+
   it("applies a capacity rewrite only to its declared local proposal scope", () => {
     const rewritten = applyGraphCapacityRewrite(structure, {
       hotspotRefs: ["local:scene"],

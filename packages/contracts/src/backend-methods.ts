@@ -75,6 +75,7 @@ export const backendMethodValues = [
   "synopsis.staging.promote.approve",
   "synopsis.staging.promote.reject",
   "chapter.synopsis.get",
+  "chapter.workflowGate.get",
   "deduction.goals.list",
   "deduction.goals.create",
   "deduction.goals.update",

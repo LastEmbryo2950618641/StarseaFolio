@@ -1,11 +1,9 @@
 import { useState } from "react"
-import { BookOpenText, MessageSquare, ScrollText } from "lucide-react"
-import type { ReactNode } from "react"
+import { BookOpenText, ScrollText } from "lucide-react"
 
-export type ChapterRailTab = "outline" | "synopsis" | "conversation"
+export type ChapterRailTab = "outline" | "synopsis"
 
 type Props = Readonly<{
-  conversation: ReactNode
   synopsisMarkdown?: string
   outlineMarkdown?: string
   synopsisPath?: string
@@ -21,11 +19,10 @@ const TABS: ReadonlyArray<Readonly<{
 }>> = [
   { id: "outline", label: "剧情细纲", testId: "chapter-rail-tab-outline" },
   { id: "synopsis", label: "剧情梗概", testId: "chapter-rail-tab-synopsis" },
-  { id: "conversation", label: "Agent 对话", testId: "chapter-rail-tab-conversation" },
 ]
 
 export function ChapterWorkspaceRail(props: Props): React.JSX.Element {
-  const [uncontrolledTab, setUncontrolledTab] = useState<ChapterRailTab>("conversation")
+  const [uncontrolledTab, setUncontrolledTab] = useState<ChapterRailTab>("outline")
   const tab = props.activeTab ?? uncontrolledTab
   const setTab = (next: ChapterRailTab): void => {
     if (props.activeTab === undefined) setUncontrolledTab(next)
@@ -46,21 +43,17 @@ export function ChapterWorkspaceRail(props: Props): React.JSX.Element {
         >
           {item.id === "outline"
             ? <ScrollText size={12} aria-hidden="true" />
-            : item.id === "synopsis"
-              ? <BookOpenText size={12} aria-hidden="true" />
-              : <MessageSquare size={12} aria-hidden="true" />}
+            : <BookOpenText size={12} aria-hidden="true" />}
           {item.label}
         </button>
       })}
     </div>
-    {tab === "conversation"
-      ? props.conversation
-      : <ChapterRailDocumentPane
-          kind={tab}
-          markdown={tab === "outline" ? props.outlineMarkdown : props.synopsisMarkdown}
-          filePath={tab === "outline" ? props.outlinePath : props.synopsisPath}
-          {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
-        />}
+    <ChapterRailDocumentPane
+      kind={tab}
+      markdown={tab === "outline" ? props.outlineMarkdown : props.synopsisMarkdown}
+      filePath={tab === "outline" ? props.outlinePath : props.synopsisPath}
+      {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
+    />
   </aside>
 }
 

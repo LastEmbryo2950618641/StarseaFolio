@@ -3,6 +3,7 @@ import { createPortal } from "react-dom"
 import { Library } from "lucide-react"
 
 import {
+  getBookCover,
   invokeBackend,
   type OpenProject,
 } from "../../api/client.js"
@@ -23,6 +24,7 @@ export type ProjectRailItem = Readonly<{
 
 type Props = Readonly<{
   activeProjectId?: string | undefined
+  coverByProjectId?: Readonly<Record<string, string>>
   updateAvailable?: boolean
   onOpen(project: OpenProject): void
   /** Leave current book and return to the all-books launcher. */
@@ -49,9 +51,10 @@ function projectIconSrc(item: ProjectRailItem): string {
 }
 
 export function ProjectRail(props: Props): React.JSX.Element {
-  const { activeProjectId, onOpen, onBrowseAllBooks, updateAvailable = false, onUpdateClick } = props
+  const { activeProjectId, coverByProjectId = {}, onOpen, onBrowseAllBooks, updateAvailable = false, onUpdateClick } = props
   const workDirectoryState = useWorkDirectory()
   const [projects, setProjects] = useState<readonly ProjectRailItem[]>([])
+  const [loadedCoverByProjectId, setLoadedCoverByProjectId] = useState<Readonly<Record<string, string>>>({})
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -67,6 +70,19 @@ export function ProjectRail(props: Props): React.JSX.Element {
       setProjects(sorted)
       setNowMs(Date.now())
       setError(undefined)
+      const covers = await Promise.all(sorted.map(async (project) => {
+        try {
+          const cover = await getBookCover(project.workspaceRootRef)
+          return cover === undefined ? undefined : ([project.projectId, cover] as const)
+        } catch {
+          return undefined
+        }
+      }))
+      const next: Record<string, string> = {}
+      for (const entry of covers) {
+        if (entry !== undefined) next[entry[0]] = entry[1]
+      }
+      setLoadedCoverByProjectId(next)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -133,7 +149,7 @@ export function ProjectRail(props: Props): React.JSX.Element {
                   >
                     <span className="project-rail-pill" aria-hidden="true" />
                     <span className="project-rail-icon project-rail-icon--image">
-                      <img src={projectIconSrc(item)} alt="" draggable={false} />
+                      <img src={coverByProjectId[item.projectId] ?? loadedCoverByProjectId[item.projectId] ?? projectIconSrc(item)} alt="" draggable={false} />
                     </span>
                   </button>
                 </UiTooltip>

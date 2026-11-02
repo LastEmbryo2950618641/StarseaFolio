@@ -15,6 +15,7 @@ import type {
 
 import { UiTooltip } from "../../components/UiTooltip.js"
 import { listModelCatalog } from "../../api/client.js"
+import bookIdeaPrompts from "./book-idea-prompts.json" with { type: "json" }
 import {
   catalogSignature,
   hasValidBaseUrl,
@@ -369,7 +370,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                 <h2>{isRail ? "修订这一章" : "剧情梗概讨论"}</h2>
                 <p>{isRail
                   ? "本章草稿讨论"
-                  : "描述下一章想怎么写，Agent 会与你讨论并更新 `[剧情梗概].md`。"}</p>
+                  : "在对话框输入你对本书小小的构思，你的智能助手--结衣会帮助你的。"}</p>
                 {props.session === undefined && !isRail
                   ? <span className="creation-desk-empty-hint">发送首条消息后将创建占位文件</span>
                   : null}
@@ -471,62 +472,70 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                       <span>{props.session.synopsisPath}</span>
                     </div>
                   : null}
-              <div className="creation-desk-settings">
-                <Settings2 size={13} aria-hidden="true" />
-                <label>
-                  <span>描写</span>
-                  <select value={props.descriptionRule} onChange={(event) => { props.onDescriptionRuleChange(event.target.value); }}>
-                    <option value="">自动</option>
-                    {props.descriptionRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>笔风</span>
-                  <select value={props.proseRule} onChange={(event) => { props.onProseRuleChange(event.target.value); }}>
-                    <option value="">默认</option>
-                    {props.proseRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
-                  </select>
-                </label>
-                <label className={`creation-desk-word-count${props.wordCountValid ? "" : " invalid"}`}>
-                  <UiTooltip label="正文主体字数范围，标题不计入">
-                    <span>字数</span>
-                  </UiTooltip>
-                  <input aria-label="正文最少字数" type="number" min="1" step="100" value={props.minimumWordCount} onChange={(event) => { props.onMinimumWordCountChange(event.target.value); }} />
-                  <span>—</span>
-                  <input aria-label="正文最多字数" type="number" min="1" step="100" value={props.maximumWordCount} onChange={(event) => { props.onMaximumWordCountChange(event.target.value); }} />
-                </label>
-                <label>
-                  <UiTooltip label="管情节节奏，不管设定发散。压而不决：加压与过程选择，禁止不可逆定局。">
-                    <span>边界节奏</span>
-                  </UiTooltip>
-                  <select
-                    aria-label="边界节奏"
-                    value={props.boundaryPace}
-                    onChange={(event) => {
-                      props.onBoundaryPaceChange(event.target.value as ChapterNarrativeIntent["boundaryPace"])
-                    }}
-                  >
-                    <option value="advance_allowed">可推进（仍贴梗概）</option>
-                    <option value="hold_without_resolution">压而不决</option>
-                  </select>
-                </label>
-                <label>
-                  <UiTooltip label="本章因果描写重心；细调可在对话里说明。">
-                    <span>因果焦点</span>
-                  </UiTooltip>
-                  <select
-                    aria-label="因果焦点"
-                    value={props.causalityFocus}
-                    onChange={(event) => {
-                      props.onCausalityFocusChange(event.target.value as ChapterNarrativeIntent["causalityFocus"])
-                    }}
-                  >
-                    <option value="auto">自动</option>
-                    <option value="buildup">蓄势</option>
-                    <option value="action">行动</option>
-                    <option value="payoff">落点</option>
-                  </select>
-                </label>
+              <div className="creation-desk-settings-heading">
+                <details className="creation-desk-writing-settings">
+                  <summary>
+                    <Settings2 size={13} aria-hidden="true" />
+                    写作设置
+                    <ChevronDown size={13} aria-hidden="true" />
+                  </summary>
+                <div className="creation-desk-settings">
+                  <label>
+                    <span>描写</span>
+                    <select value={props.descriptionRule} onChange={(event) => { props.onDescriptionRuleChange(event.target.value); }}>
+                      <option value="">自动</option>
+                      {props.descriptionRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>笔风</span>
+                    <select value={props.proseRule} onChange={(event) => { props.onProseRuleChange(event.target.value); }}>
+                      <option value="">默认</option>
+                      {props.proseRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
+                    </select>
+                  </label>
+                  <label className={`creation-desk-word-count${props.wordCountValid ? "" : " invalid"}`}>
+                    <UiTooltip label="正文主体字数范围，标题不计入">
+                      <span>字数</span>
+                    </UiTooltip>
+                    <input aria-label="正文最少字数" type="number" min="1" step="100" value={props.minimumWordCount} onChange={(event) => { props.onMinimumWordCountChange(event.target.value); }} />
+                    <span>—</span>
+                    <input aria-label="正文最多字数" type="number" min="1" step="100" value={props.maximumWordCount} onChange={(event) => { props.onMaximumWordCountChange(event.target.value); }} />
+                  </label>
+                  <label>
+                    <UiTooltip label="管情节节奏，不管设定发散。压而不决：加压与过程选择，禁止不可逆定局。">
+                      <span>边界节奏</span>
+                    </UiTooltip>
+                    <select
+                      aria-label="边界节奏"
+                      value={props.boundaryPace}
+                      onChange={(event) => {
+                        props.onBoundaryPaceChange(event.target.value as ChapterNarrativeIntent["boundaryPace"])
+                      }}
+                    >
+                      <option value="advance_allowed">可推进（仍贴梗概）</option>
+                      <option value="hold_without_resolution">压而不决</option>
+                    </select>
+                  </label>
+                  <label>
+                    <UiTooltip label="本章因果描写重心；细调可在对话里说明。">
+                      <span>因果焦点</span>
+                    </UiTooltip>
+                    <select
+                      aria-label="因果焦点"
+                      value={props.causalityFocus}
+                      onChange={(event) => {
+                        props.onCausalityFocusChange(event.target.value as ChapterNarrativeIntent["causalityFocus"])
+                      }}
+                    >
+                      <option value="auto">自动</option>
+                      <option value="buildup">蓄势</option>
+                      <option value="action">行动</option>
+                      <option value="payoff">落点</option>
+                    </select>
+                  </label>
+                </div>
+                </details>
                 <UiTooltip label={batchProceed
                   ? "已开启：一章写完自动下一章，梗概/细纲/正文不逐步停等确认"
                   : "已关闭：梗概→细纲→正文每一步停下等你确认后再继续"}>
@@ -636,10 +645,19 @@ type ComposerInputProps = Readonly<{
 /** Owns draft text so keystrokes do not re-render the markdown message thread. */
 function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element {
   const [draft, setDraft] = useState("")
+  const [ideaPromptIndex, setIdeaPromptIndex] = useState(0)
   const [catalogModels, setCatalogModels] = useState<readonly string[]>([])
   const [catalogStatus, setCatalogStatus] = useState<"idle" | "loading" | "ready" | "error">("idle")
   const [contextUsageOpen, setContextUsageOpen] = useState(false)
   const loadedCatalogSigRef = useRef("")
+
+  useEffect(() => {
+    if (bookIdeaPrompts.length < 2) return
+    const timer = window.setInterval(() => {
+      setIdeaPromptIndex((index) => (index + 1) % bookIdeaPrompts.length)
+    }, 4_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (props.draftRestore === undefined) return
@@ -765,7 +783,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
     <textarea
       value={draft}
       disabled={props.busy || props.running}
-      placeholder="告诉 Agent 下一章想怎么推进…"
+      placeholder={bookIdeaPrompts[ideaPromptIndex] ?? bookIdeaPrompts[0]}
       rows={isMinimal ? 1 : props.compact === true ? 2 : 3}
       onChange={(event) => { setDraft(event.target.value); }}
       onKeyDown={(event) => {
@@ -1081,19 +1099,11 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
   })()
   const processSummary = summarizeAgentProcess(processSegments)
   const processActive = processSummary.active
-  const [activityOpen, setActivityOpen] = useState(streaming)
-  useEffect(() => {
-    if (streaming) setActivityOpen(true)
-  }, [streaming])
   return <div className="agent-structured-body">
     {processSegments.length > 0
       ? <details
           className={`agent-stream-activity${processActive && streaming ? " is-live" : ""}`}
           data-testid="agent-stream-activity"
-          open={activityOpen}
-          onToggle={(event) => {
-            setActivityOpen(event.currentTarget.open)
-          }}
         >
           <summary>
             <ChevronRight size={14} aria-hidden="true" />
@@ -1145,6 +1155,7 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
               </ul>}
         </details>
       }
+      if (segment.kind !== "final") return null
       const finalHeader = discussFinalOutputHeader(discussPhase, streaming)
       return <div
         key={`final-${String(index)}`}
@@ -1162,7 +1173,7 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
     })}
     {!hasAny && streaming
       ? <>
-          <details className="agent-stream-activity is-live" data-testid="agent-stream-activity" open>
+          <details className="agent-stream-activity is-live" data-testid="agent-stream-activity">
             <summary>
               <ChevronRight size={14} aria-hidden="true" />
               <span className="agent-stream-activity-title">思考与工具</span>

@@ -11,7 +11,7 @@
 1. 用一两句点破卖点题材与读者期待；
 2. `list`/`request_read` `表现输出/笔风规则/`（必要时读 2–3 份候选正文），从**已有文件名**里选主锚；
 3. 立刻用 `choices`（`continue_discuss`）给出 **2–3 套风格包**，每套对应**一个**可下拉的笔风文件；
-4. 先 `todo_write`：风格备选 → 风格落盘 → 卷大纲 →（按需）章大纲。
+4. 风格门禁期间不调用 `todo_write`（工具由宿主关闭）：推荐阶段直接返回 choices，用户选择后直接用 `presentationWrites` 落盘作品风格；风格门禁通过后，再为卷大纲 →（按需）章大纲创建 Todo。
 
 禁止：只在正文写 A/B/C 让用户打字；跳过 choices 直接落盘（用户明确「按你的来」除外）；风格未合格时交 `arcPlan` / `volumeChapterPlans` / `chapterDraftProposal(s)`。
 

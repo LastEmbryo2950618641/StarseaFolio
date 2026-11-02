@@ -43,6 +43,20 @@ export class SqliteRevisionDraftVersionRepository {
     }))
   }
 
+  public async isLegacyMigrationPending(revisionTaskId: string): Promise<boolean> {
+    const row = await this.database.selectFrom("legacy_revision_draft_migrations")
+      .select("revision_task_id")
+      .where("revision_task_id", "=", revisionTaskId)
+      .executeTakeFirst()
+    return row !== undefined
+  }
+
+  public async completeLegacyMigration(revisionTaskId: string): Promise<void> {
+    await this.database.deleteFrom("legacy_revision_draft_migrations")
+      .where("revision_task_id", "=", revisionTaskId)
+      .execute()
+  }
+
   public async find(versionId: string): Promise<RevisionDraftVersion | undefined> {
     const row = await this.database.selectFrom("revision_draft_versions").selectAll()
       .where("version_id", "=", versionId)

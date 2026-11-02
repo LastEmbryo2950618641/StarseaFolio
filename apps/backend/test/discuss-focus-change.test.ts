@@ -31,6 +31,21 @@ describe("discuss focusChange", () => {
     ])
   })
 
+  it("removes draft bypass choices when the synopsis has no content", () => {
+    expect(filterDiscussChoices([
+      { label: "跳过细纲，按梗概开推", action: "start_turn" },
+      { label: "用这份梗概写细纲", action: "confirm_synopsis" },
+      { label: "再修改梗概", action: "continue_discuss" },
+    ], {
+      focusLocked: false,
+      synopsisReady: false,
+      synopsisConfirmed: false,
+      outlineReady: false,
+    })).toEqual([
+      { label: "再修改梗概", action: "continue_discuss" },
+    ])
+  })
+
   it("prompts Auto/Accept to use focusChange instead of confirmation buttons", () => {
     expect(discussAgentModePromptAppendix("auto", { batchProceed: true })).toContain("focusChange")
     expect(discussAgentModePromptAppendix("accept_edits", { batchProceed: true })).toContain("换章用 focusChange")

@@ -7,6 +7,8 @@ describe("discuss agent mode appendix", () => {
     const auto = discussAgentModePromptAppendix("auto", { batchProceed: true })
     expect(auto).toContain("批量推进=开")
     expect(auto).toContain("titleAlignTarget")
+    expect(auto).toContain("作品风格未合格时，必须给用户 2–3 个可点击风格 choices")
+    expect(auto).toContain("不得自行选风格、自动续跑")
     expect(auto).not.toContain("批量推进=关")
   })
 
