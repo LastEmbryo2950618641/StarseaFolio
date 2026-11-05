@@ -9,9 +9,9 @@ import {
 } from "../../api/client.js"
 import { UiTooltip, uiTooltipRich } from "../../components/UiTooltip.js"
 import appBrandIcon from "../../assets/app-brand-icon.png"
-import projectDefaultIcon from "../../assets/project-default-icon.png"
 import { isUnderWorkDirectories } from "./book-path.js"
 import { BrowseAllBooksDialog } from "./BrowseAllBooksDialog.js"
+import { defaultBookCoverSrc } from "./default-book-cover.js"
 import { useWorkDirectory } from "./use-work-directory.js"
 
 export type ProjectRailItem = Readonly<{
@@ -47,7 +47,7 @@ function formatOpenedAgo(lastOpenedAtMs: number, nowMs: number): string {
 }
 
 function projectIconSrc(item: ProjectRailItem): string {
-  return item.iconUrl ?? projectDefaultIcon
+  return item.iconUrl ?? defaultBookCoverSrc(item.displayName)
 }
 
 export function ProjectRail(props: Props): React.JSX.Element {

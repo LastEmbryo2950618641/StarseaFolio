@@ -15,6 +15,12 @@ export const DISCUSS_TODO_INCOMPLETE_HINT = [
   "禁止清单未结清就停下来只写 assistantMessage。",
 ].join("")
 
+export const DISCUSS_TODO_NO_PROGRESS_HINT = [
+  "todo_write 已连续多次重复或只调整任务清单，没有推进实际工作。",
+  "不要再次提交相同清单；请直接返回当前阶段的最终 artifact 和可执行 choices。",
+  "未完成项应保留 pending/in_progress 并说明阻塞原因，不得虚报 completed 或 cancelled。",
+].join("")
+
 export const DISCUSS_TOOL_EXCLUSIVE_GATE_HINT = [
   "门禁：toolRequest 已与写入类字段同回，系统已自动只保留工具调用，写入/choices/focusChange 延后到工具结果之后。",
   "请按更新后的 Todo 继续：先完成当前工具，再交付写入。",

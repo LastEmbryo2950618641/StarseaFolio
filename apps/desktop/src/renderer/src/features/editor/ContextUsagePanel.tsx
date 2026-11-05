@@ -174,6 +174,7 @@ export function ContextUsagePanel(props: Props): React.JSX.Element | null {
         <p>对话/旧阶段占比高时，接近窗口阈值会机械移出；细节靠图与原文召回，不是 AI 摘要。</p>
         <p>证据占比高时少盲目读文件；叙事占比高属正常。勿清系统/表现规则前缀，否则破坏 KV 暖链。</p>
         <p>不建议假 completion「预热」：首包慢主要来自大 prompt 与供应商冷 KV，应保持同模型同链追加。</p>
+        <p>分类 token 数按消息估算占比缩放到供应商返回的真实总量；分类合计与总上下文一致。</p>
       </footer>
     </div>
   )

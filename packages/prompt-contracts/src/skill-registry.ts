@@ -137,21 +137,6 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     treeVisibility: "reference",
   },
   {
-    id: "genre-style-presets",
-    name: "题材笔风短预设",
-    summary: "奇幻/言情/悬疑等短风格条；补笔风下拉或冷启动备选时参考。",
-    injectPolicy: "onDemand",
-    defaultPhases: [],
-    primaryResource: "resources/vendor/ainovel-cli/assets/styles/default.md",
-    referenceResources: [
-      "resources/vendor/ainovel-cli/assets/styles/fantasy.md",
-      "resources/vendor/ainovel-cli/assets/styles/romance.md",
-      "resources/vendor/ainovel-cli/assets/styles/suspense.md",
-      "resources/vendor/ainovel-cli/assets/references/anti-ai-tone.md",
-    ],
-    treeVisibility: "reference",
-  },
-  {
     id: "discuss-workflow",
     name: "创作台讨论工作流",
     summary: "创作台 outcome/工具/门禁流程；讨论回合默认挂载。",

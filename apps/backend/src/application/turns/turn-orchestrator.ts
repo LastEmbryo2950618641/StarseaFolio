@@ -310,6 +310,8 @@ export type TurnOrchestratorInput = Readonly<{
   presentation?: Readonly<{
     descriptionRulePath?: string | undefined
     proseStyleRulePath?: string | undefined
+    novelMajorCategoryRulePath?: string | undefined
+    novelSubcategoryRulePath?: string | undefined
     minimumWordCount: number
     maximumWordCount: number
   }>
@@ -5237,9 +5239,19 @@ function resolveSelectedPresentationPaths(
     && !presentation.proseStyleRulePath.startsWith("表现输出/笔风规则/")) {
     throw new Error(`Prose style rule must be inside 表现输出/笔风规则: ${presentation.proseStyleRulePath}`)
   }
+  if (presentation.novelMajorCategoryRulePath !== undefined
+    && !presentation.novelMajorCategoryRulePath.startsWith("表现输出/小说大类规则/")) {
+    throw new Error(`Novel major category rule must be inside 表现输出/小说大类规则: ${presentation.novelMajorCategoryRulePath}`)
+  }
+  if (presentation.novelSubcategoryRulePath !== undefined
+    && !presentation.novelSubcategoryRulePath.startsWith("表现输出/小说次大类规则/")) {
+    throw new Error(`Novel subcategory rule must be inside 表现输出/小说次大类规则: ${presentation.novelSubcategoryRulePath}`)
+  }
   return [
     ...resolveDescriptionRulePaths(presentation.descriptionRulePath, catalogEntries),
     presentation.proseStyleRulePath ?? DEFAULT_PROSE_STYLE_RULE_PATH,
+    ...(presentation.novelMajorCategoryRulePath === undefined ? [] : [presentation.novelMajorCategoryRulePath]),
+    ...(presentation.novelSubcategoryRulePath === undefined ? [] : [presentation.novelSubcategoryRulePath]),
   ]
 }
 

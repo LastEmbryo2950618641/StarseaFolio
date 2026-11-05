@@ -42,6 +42,8 @@ export function chapterNarrativeIntentPhaseAppendix(
 export type ChapterPresentationBudget = Readonly<{
   descriptionRulePath?: string | undefined
   proseStyleRulePath?: string | undefined
+  novelMajorCategoryRulePath?: string | undefined
+  novelSubcategoryRulePath?: string | undefined
   minimumWordCount: number
   maximumWordCount: number
 }>
@@ -54,13 +56,24 @@ export function chapterPresentationPhaseAppendix(
   if (phase !== "synopsis_discuss" || presentation === undefined) return undefined
   const lines = [
     "## 创作台正文预算（本轮强制）",
-    "说明：下列字数来自用户在创作台勾选的**单章正文主体字数范围**（标题不计入）。",
+    "说明：下列字数是创作台当前的**单章正文主体字数范围**（标题不计入），是可调整的工作参数，不是固定门禁。",
+    "结合卷目标、当前情节容量与场景需要，若当前描写/笔风/字数/节奏/因果焦点设置不合适，可在 artifact.creationDeskSettings 中给出需要调整的字段；用户仍可随时在创作台手动修改。字数调整必须同时给出最小值和最大值。",
+    "描写与笔风只能选择本轮工作区实际存在的 `表现输出/描写规则/*.md`、`表现输出/笔风规则/*.md` 路径；只推荐/选择，不改写这些预设文件。",
     "规划弧大纲、估章数、判断是否超单章容量时，**必须**以此为准，不得改用自拟的「每章一两万字」之类默认。",
     "",
     `### 单章字数：${String(presentation.minimumWordCount)}–${String(presentation.maximumWordCount)} 字`,
     "- 弧大纲中的「节奏与字数」须引用此区间；",
     "- 若情节容量明显超出该区间，应建议拆章 / 先落大纲，而不是暗中提高单章字数。",
   ]
+  if (presentation.novelMajorCategoryRulePath !== undefined || presentation.novelSubcategoryRulePath !== undefined) {
+    lines.push(
+      "",
+      "### 小说定位规则（以对应 Markdown 正文为准）",
+      `- 小说大类规则：${presentation.novelMajorCategoryRulePath === undefined ? "未选择" : `\`${presentation.novelMajorCategoryRulePath}\``}`,
+      `- 小说次大类规则：${presentation.novelSubcategoryRulePath === undefined ? "未选择" : `\`${presentation.novelSubcategoryRulePath}\``}`,
+      "- 必须遵守本轮注入的所选规则文件正文；不要依据文件名自行臆测规则，也不要套用未选择平台的规则。",
+    )
+  }
   if (isAutoDescriptionSelection(presentation.descriptionRulePath)) {
     lines.push(
       "",
@@ -83,7 +96,7 @@ export function chapterPresentationPhaseAppendix(
     "",
     "### 表现规则协作",
     "- 可用 `request_read` + `sourceKinds: [\"rule\"]` 读取 `表现输出/描写规则/`、`表现输出/笔风规则/` 与 `表现输出/本作品描写/`（可先 `list` 再全文/片段）；",
-    "- 下拉选中的描写/笔风是用户预设，**禁止**用 `presentationWrites` 改写；",
+    "- 下拉选中的描写/笔风是可编辑预设；需要 AI 调整时用 `creationDeskSettings` 返回真实路径，**禁止**用 `presentationWrites` 改写预设文件；",
     "- 只把整部作品持续生效的呈现约束写入 `表现输出/本作品描写/*.md`（`mode: create|update`）；系统立即落盘；单文件不超过 4000 字、最多 8 个文件；",
     "- 单章氛围写梗概/细纲；与选中描写/笔风冲突时以下拉文件为准；不要放进 `stagingPromote`。",
   )

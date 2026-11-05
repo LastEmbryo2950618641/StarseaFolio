@@ -1,9 +1,13 @@
 import { useCallback, useState } from "react"
-import type { ChapterNarrativeIntent } from "@worldseed/contracts"
+import type { ChapterNarrativeIntent, CreationDeskSettingsUpdate } from "@worldseed/contracts"
+
+import { AUTO_DESCRIPTION_RULE_PATH } from "../workspace/workspace-locks.js"
 
 export type CreationDeskPresentationPreferences = Readonly<{
   descriptionRule: string
   proseRule: string
+  novelMajorCategoryRulePath: string
+  novelSubcategoryRulePath: string
   minimumWordCount: string
   maximumWordCount: string
   boundaryPace: ChapterNarrativeIntent["boundaryPace"]
@@ -18,10 +22,40 @@ const CAUSALITY_FOCUS_VALUES = ["auto", "buildup", "action", "payoff"] as const
 export const DEFAULT_CREATION_DESK_PRESENTATION: CreationDeskPresentationPreferences = {
   descriptionRule: "",
   proseRule: "",
+  novelMajorCategoryRulePath: "",
+  novelSubcategoryRulePath: "",
   minimumWordCount: "2000",
   maximumWordCount: "3000",
   boundaryPace: "advance_allowed",
   causalityFocus: "auto",
+}
+
+export function mapAiCreationDeskSettings(
+  update: CreationDeskSettingsUpdate,
+  rejectedRulePaths: readonly string[] = [],
+): Readonly<{
+  patch: Partial<CreationDeskPresentationPreferences>
+  rejectedRulePaths: readonly string[]
+}> {
+  return {
+    patch: {
+      ...(update.novelMajorCategoryRulePath === undefined ? {} : { novelMajorCategoryRulePath: update.novelMajorCategoryRulePath }),
+      ...(update.novelSubcategoryRulePath === undefined ? {} : { novelSubcategoryRulePath: update.novelSubcategoryRulePath }),
+      ...(update.descriptionRulePath === undefined
+        ? {}
+        : {
+            descriptionRule: update.descriptionRulePath === AUTO_DESCRIPTION_RULE_PATH
+              ? ""
+              : update.descriptionRulePath,
+          }),
+      ...(update.proseStyleRulePath === undefined ? {} : { proseRule: update.proseStyleRulePath }),
+      ...(update.minimumWordCount === undefined ? {} : { minimumWordCount: String(update.minimumWordCount) }),
+      ...(update.maximumWordCount === undefined ? {} : { maximumWordCount: String(update.maximumWordCount) }),
+      ...(update.boundaryPace === undefined ? {} : { boundaryPace: update.boundaryPace }),
+      ...(update.causalityFocus === undefined ? {} : { causalityFocus: update.causalityFocus }),
+    },
+    rejectedRulePaths: [...rejectedRulePaths],
+  }
 }
 
 /** Keep the saved path until the dropdown options have actually loaded. */
@@ -76,6 +110,8 @@ export function loadCreationDeskPresentationPreferences(
     return {
       descriptionRule: typeof parsed.descriptionRule === "string" ? parsed.descriptionRule : "",
       proseRule: typeof parsed.proseRule === "string" ? parsed.proseRule : "",
+      novelMajorCategoryRulePath: typeof parsed.novelMajorCategoryRulePath === "string" ? parsed.novelMajorCategoryRulePath : "",
+      novelSubcategoryRulePath: typeof parsed.novelSubcategoryRulePath === "string" ? parsed.novelSubcategoryRulePath : "",
       minimumWordCount: wordCountString(parsed.minimumWordCount)
         ?? DEFAULT_CREATION_DESK_PRESENTATION.minimumWordCount,
       maximumWordCount: wordCountString(parsed.maximumWordCount)

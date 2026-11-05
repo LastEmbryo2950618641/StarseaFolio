@@ -2,7 +2,12 @@ import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/pr
 import { dirname, join, relative } from "node:path"
 import { DESCRIPTION_RULES_DIR, PROSE_STYLE_RULES_DIR, digest } from "../../core/index.js"
 
-const directories = [DESCRIPTION_RULES_DIR, PROSE_STYLE_RULES_DIR]
+const directories = [
+  DESCRIPTION_RULES_DIR,
+  PROSE_STYLE_RULES_DIR,
+  "表现输出/小说大类规则",
+  "表现输出/小说次大类规则",
+]
 
 /** One writable library per application data directory; projects expose virtual paths. */
 export class SharedPresentationLibrary {

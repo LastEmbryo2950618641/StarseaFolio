@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 
 import { ProjectLauncher } from "../src/renderer/src/features/projects/ProjectLauncher.js"
+import { defaultBookCoverSrc } from "../src/renderer/src/features/projects/default-book-cover.js"
 import { RemoveWorkDirectoryDialog } from "../src/renderer/src/features/settings/RemoveWorkDirectoryDialog.js"
 import { WorkDirectorySettingsPanel } from "../src/renderer/src/features/settings/WorkDirectorySettingsPanel.js"
 import {
@@ -27,6 +28,16 @@ describe("ProjectLauncher", () => {
     expect(html).not.toContain("建立一个新世界")
     expect(html).not.toContain("创建并进入")
     expect(html).not.toContain("项目名称")
+  })
+
+  it("generates a deterministic non-placeholder cover for a book without a custom image", () => {
+    const first = defaultBookCoverSrc("万炉纪")
+    const second = defaultBookCoverSrc("万炉纪")
+
+    expect(first).toBe(second)
+    expect(first).toMatch(/^data:image\/svg\+xml;charset=utf-8,/u)
+    expect(decodeURIComponent(first)).toContain("万炉纪")
+    expect(defaultBookCoverSrc("另一部作品")).not.toBe(first)
   })
 })
 

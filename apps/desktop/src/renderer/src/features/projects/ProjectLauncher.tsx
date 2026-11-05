@@ -10,8 +10,8 @@ import {
   setBookCover,
   type OpenProject,
 } from "../../api/client.js"
-import projectDefaultIcon from "../../assets/project-default-icon.png"
 import { folderLabelFromPath, isUnderWorkDirectories } from "./book-path.js"
+import { defaultBookCoverSrc } from "./default-book-cover.js"
 import { DeleteBookDialog } from "./DeleteBookDialog.js"
 import { ImageCropDialog } from "./ImageCropDialog.js"
 import { type ProjectRailItem } from "./ProjectRail.js"
@@ -229,7 +229,7 @@ export function ProjectLauncher({ onOpen, onCoverChanged }: Props): React.JSX.El
         : null}
       <div className="launcher-book-grid" data-testid="launcher-book-grid">
         {projects.map((item) => {
-          const coverSrc = coverByProjectId[item.projectId] ?? item.iconUrl ?? projectDefaultIcon
+          const coverSrc = coverByProjectId[item.projectId] ?? defaultBookCoverSrc(item.displayName)
           return (
             <div
               key={item.projectId}

@@ -6,6 +6,7 @@ import {
   type ProjectId,
   type ProjectSettings,
   type ChapterNarrativeIntent,
+  type CreationDeskSettingsUpdate,
   type DiscussFocusKind,
   type SynopsisConversationListResult,
   type SynopsisConversationMessage,
@@ -66,6 +67,9 @@ import {
   assertWorkspaceMutationAllowed,
   assertWorkDescriptionWriteBatch,
   resolveDescriptionRulePaths,
+  listDescriptionRuleFiles,
+  NOVEL_MAJOR_CATEGORY_RULES_DIR,
+  NOVEL_SUBCATEGORY_RULES_DIR,
   listWorkDescriptionRuleFiles,
   assessWorkStyleMarkdown,
   WORK_STYLE_RULE_PATH,
@@ -126,6 +130,7 @@ import {
   alignTodosForToolExclusiveGate,
   discussChapterSequenceGateHint,
   DISCUSS_TODO_INCOMPLETE_HINT,
+  DISCUSS_TODO_NO_PROGRESS_HINT,
   DISCUSS_TODO_REQUIRED_HINT,
   DISCUSS_TOOL_EXCLUSIVE_GATE_HINT,
   discussArtifactRequiresTodos,
@@ -137,6 +142,12 @@ import {
   shouldRetryDeferredChapterDraft,
   settleToolGateTodos,
 } from "./synopsis-todo-gate.js"
+import {
+  advanceTodoNoProgressStreak,
+  shouldAllowDiscussBudgetGrace,
+  shouldIssueTodoLoopRepair,
+  shouldStopTodoWriteLoop,
+} from "./synopsis-discuss-guards.js"
 import { normalizeThinkingDisplayText } from "./synopsis-thinking-text.js"
 import { applySearchReplace } from "./markdown-search-replace.js"
 import {
@@ -521,6 +532,8 @@ export class SynopsisConversationService {
     presentation?: Readonly<{
       descriptionRulePath?: string | undefined
       proseStyleRulePath?: string | undefined
+      novelMajorCategoryRulePath?: string | undefined
+      novelSubcategoryRulePath?: string | undefined
       minimumWordCount: number
       maximumWordCount: number
     }>
@@ -573,6 +586,8 @@ export class SynopsisConversationService {
       })
     }
     let availableProseStylePaths: string[] = []
+    let availableNovelMajorCategoryRulePaths: string[] = []
+    let availableNovelSubcategoryRulePaths: string[] = []
     if (styleGateState.status !== "ready") {
       const catalog = await this.dependencies.catalog.createSnapshot({
         snapshotId: this.dependencies.createId(),
@@ -585,11 +600,23 @@ export class SynopsisConversationService {
           && entry.relativePath.startsWith("表现输出/笔风规则/")
           && entry.relativePath.endsWith(".md"))
         .map((entry) => entry.relativePath)
-      const selectedPath = resolveColdStartStyleSelectionPath(priorMessages, input.message, availableProseStylePaths)
-      if (selectedPath !== undefined) {
+      availableNovelMajorCategoryRulePaths = catalog.entries.filter((entry) => entry.entryKind === "file"
+        && entry.relativePath.startsWith(`${NOVEL_MAJOR_CATEGORY_RULES_DIR}/`) && entry.relativePath.endsWith(".md"))
+        .map((entry) => entry.relativePath)
+      availableNovelSubcategoryRulePaths = catalog.entries.filter((entry) => entry.entryKind === "file"
+        && entry.relativePath.startsWith(`${NOVEL_SUBCATEGORY_RULES_DIR}/`) && entry.relativePath.endsWith(".md"))
+        .map((entry) => entry.relativePath)
+      const selectedStyle = resolveColdStartStyleSelectionPath(
+        priorMessages,
+        input.message,
+        availableProseStylePaths,
+        availableNovelMajorCategoryRulePaths,
+        availableNovelSubcategoryRulePaths,
+      )
+      if (selectedStyle !== undefined) {
         styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
           projectId: input.projectId,
-          event: { type: "select_style", proseStylePath: selectedPath },
+          event: { type: "select_style", ...selectedStyle },
           updatedAtMs: this.dependencies.now(),
         })
       }
@@ -698,7 +725,11 @@ export class SynopsisConversationService {
               workStyleGate: {
                 status: styleGateState.status as "awaiting_choice" | "style_selected",
                 ...(styleGateState.status === "style_selected"
-                  ? { selectedProseStylePath: styleGateState.selectedProseStylePath }
+                  ? {
+                      selectedProseStylePath: styleGateState.selectedProseStylePath,
+                      novelMajorCategoryRulePath: styleGateState.novelMajorCategoryRulePath,
+                      novelSubcategoryRulePath: styleGateState.novelSubcategoryRulePath,
+                    }
                   : {}),
               },
             }
@@ -711,7 +742,16 @@ export class SynopsisConversationService {
         ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
       })
       const availableProseStylePaths = discussResult.availableProseStylePaths ?? []
-      const { availableProseStylePaths: _availableProseStylePaths, ...discussAssist } = discussResult
+      const availableDescriptionRulePaths = discussResult.availableDescriptionRulePaths ?? []
+      const availableNovelMajorCategoryRulePaths = discussResult.availableNovelMajorCategoryRulePaths ?? []
+      const availableNovelSubcategoryRulePaths = discussResult.availableNovelSubcategoryRulePaths ?? []
+      const {
+        availableProseStylePaths: _availableProseStylePaths,
+        availableDescriptionRulePaths: _availableDescriptionRulePaths,
+        availableNovelMajorCategoryRulePaths: _availableNovelMajorCategoryRulePaths,
+        availableNovelSubcategoryRulePaths: _availableNovelSubcategoryRulePaths,
+        ...discussAssist
+      } = discussResult
       let assist = discussAssist
       // Mark stream completed as soon as the visible reply is ready, so the UI can leave
       // the "Stop / streaming" state while we still persist files and messages.
@@ -941,12 +981,32 @@ export class SynopsisConversationService {
         assist,
         diskStyleMarkdown: styleDiskMarkdown,
         availableProseStylePaths,
+        availableNovelMajorCategoryRulePaths,
+        availableNovelSubcategoryRulePaths,
         gateReady: workStyleGateReadyAtStart && canProceedPastWorkStyleGate(styleGateState),
         styleChoicePending: styleGateState.status === "awaiting_choice",
       })
-      const coldStartStyleNeedsChoice = styleGated.blocked
+      let coldStartStyleNeedsChoice = styleGated.blocked
       assist = styleGated.assist
       if (styleGated.notices.length > 0) writeNotices.push(...styleGated.notices)
+      const requestedCreationDeskSettings = workStyleGateReadyAtStart
+        ? sanitizeCreationDeskSettings({
+            update: assist.creationDeskSettings,
+            availableDescriptionRulePaths,
+            availableProseStylePaths,
+            availableNovelMajorCategoryRulePaths,
+            availableNovelSubcategoryRulePaths,
+          })
+        : undefined
+      const rejectedCreationDeskRulePaths = workStyleGateReadyAtStart
+        ? getRejectedCreationDeskRulePaths({
+            update: assist.creationDeskSettings,
+            availableDescriptionRulePaths,
+            availableProseStylePaths,
+            availableNovelMajorCategoryRulePaths,
+            availableNovelSubcategoryRulePaths,
+          })
+        : []
 
       if (assist.volumeChapterPlans !== undefined && assist.volumeChapterPlans.length > 0) {
         const allowsWholeVolumePlanning = isExplicitWholeVolumePlanningRequest(input.message)
@@ -1412,40 +1472,26 @@ export class SynopsisConversationService {
             "confirm_synopsis", "confirm_arc_plan", "set_focus", "start_turn", "promote_draft_to_body",
           ].includes(choice.action))
         : workflowChoices
-      const persistedChoices = volumePlanningNeedsFirstWrite
-        ? planningChoices
+      const persistedChoices = coldStartStyleNeedsChoice
+        ? assist.choices ?? []
+        : volumePlanningNeedsFirstWrite
+        ? planningChoices ?? buildFallbackDiscussChoices({
+            volumePlanningNeedsFirstWrite,
+            volumeFolderName: nextVolume,
+          })
         : !synopsisReadyForOutline && workflowChoices === undefined
         ? [{ label: "先完成剧情梗概", action: "continue_discuss" as const }]
-        : workflowChoices
-      // 批量推进开启时：Todo 未清 / continueTurn / 自决 choices 都自动续跑。
-      // 关闭时：仅门禁延迟（如前章发布中）可续跑，流水线步骤必须等用户点确认。
+        : workflowChoices ?? buildFallbackDiscussChoices({
+            volumePlanningNeedsFirstWrite,
+            volumeFolderName: nextVolume,
+          })
       const todosStillOpen = !discussTodosAreSettled(
         synopsisConversationStreamHub.peek(input.projectId, session.sessionId).todos,
       )
       const offeredChoices = persistedChoices ?? []
       const waitingOnUser = (coldStartStyleNeedsChoice || !autonomous) && offeredChoices.length > 0
       const autoDecideChoices = autonomous && !coldStartStyleNeedsChoice
-        && !volumePlanningNeedsFirstWrite && offeredChoices.length > 0
-      const autoContinue = agentMode !== "plan" && !batchAutomation && !coldStartStyleNeedsChoice
-        && !volumePlanningNeedsFirstWrite
-        && (
-          gateDeferred
-          || (autonomous && (
-            draftAssist.continueTurn === true
-            || autoDecideChoices
-            || (todosStillOpen && !waitingOnUser)
-          ))
-        )
-        ? {
-            message: autoDecideChoices
-              ? [
-                  "继续（批量推进·自决）：上一轮列出的选项无需用户确认——",
-                  offeredChoices.slice(0, 6).map((choice) => `「${choice.label}」`).join("、"),
-                  "。按最合理的顺序自行决定并执行（可依次全部完成），在回复里简述取舍理由；不要再给待选按钮。",
-                ].join("").slice(0, 500)
-              : "继续：按 Todo 推进未完成的步骤（前一章图修订完成后写/发布下一章，不要停下来等确认）。",
-          }
-        : undefined
+        && (workflowChoices?.length ?? 0) > 0
 
       let assistantContent = volumePlanningNeedsFirstWrite && workStyleGateReadyAtStart
         ? buildVolumeFirstWriteGateReply(volumePlanningState, nextVolume)
@@ -1575,6 +1621,57 @@ export class SynopsisConversationService {
           })
         }
       }
+      if (canProceedPastWorkStyleGate(styleGateState)) {
+        coldStartStyleNeedsChoice = false
+      }
+      const creationDeskSettings = {
+        ...requestedCreationDeskSettings,
+        ...(!workStyleGateReadyAtStart && styleGateState.status === "ready"
+          ? {
+              proseStyleRulePath: styleGateState.selectedProseStylePath,
+              novelMajorCategoryRulePath: styleGateState.novelMajorCategoryRulePath,
+              novelSubcategoryRulePath: styleGateState.novelSubcategoryRulePath,
+            }
+          : {}),
+      }
+      if (Object.keys(creationDeskSettings).length > 0 && rejectedCreationDeskRulePaths.length === 0) {
+        assistantContent += "\n\n创作台写作设置已同步，可在「写作设置」中继续调整。"
+      } else if (Object.keys(creationDeskSettings).length > 0) {
+        assistantContent += `\n\n创作台写作设置已部分同步；未应用规则路径：${rejectedCreationDeskRulePaths.join("、")}。`
+      } else if (rejectedCreationDeskRulePaths.length > 0) {
+        assistantContent += `\n\n创作台规则未切换，以下路径不存在或不可用：${rejectedCreationDeskRulePaths.join("、")}。`
+      }
+      const styleSelectionCompleted = !workStyleGateReadyAtStart
+        && styleGateState.status === "ready"
+      const volumePlanningCompletedThisTurn = volumePlanningNeedsFirstWrite
+        && volumePlanningGateReady(volumePlanningState)
+      // Batch proceed continues only after the state machine confirms each gate transition.
+      const autoContinue = discussResult.autoContinueBlocked !== true
+        && agentMode !== "plan" && !batchAutomation && !coldStartStyleNeedsChoice
+        && (
+          gateDeferred
+          || (autonomous && (
+            styleSelectionCompleted
+            || volumePlanningCompletedThisTurn
+            || draftAssist.continueTurn === true
+            || autoDecideChoices
+            || (todosStillOpen && !waitingOnUser)
+          ))
+        )
+        ? {
+            message: autoDecideChoices
+              ? [
+                  "继续（批量推进·自决）：上一轮列出的选项无需用户确认——",
+                  offeredChoices.slice(0, 6).map((choice) => `「${choice.label}」`).join("、"),
+                  "。按最合理的顺序自行决定并执行（可依次全部完成），在回复里简述取舍理由；不要再给待选按钮。",
+                ].join("").slice(0, 500)
+              : styleSelectionCompleted
+                ? "继续：作品风格已由用户选定并通过审核，现在主动完成当前卷的章节数、预计总字数、卷梗概和卷大纲首次规划；写入后继续第一章梗概。"
+                : volumePlanningCompletedThisTurn
+                  ? "继续：当前卷首次规划已通过写入门禁，从第一章剧情梗概开始，严格按梗概、细纲、草稿、审核、图治理、正文顺序推进。"
+                  : "继续：按 Todo 推进未完成的步骤（前一章图修订完成后写/发布下一章，不要停下来等确认）。",
+          }
+        : undefined
       let workDisplayName: string | undefined
       if (
         assist.workDisplayName !== undefined
@@ -1710,6 +1807,8 @@ export class SynopsisConversationService {
         ...(budgetAdvisory === undefined ? {} : { budgetAdvisory }),
         ...(usage === undefined ? {} : { usage }),
         ...(workDisplayName === undefined ? {} : { workDisplayName }),
+        ...(Object.keys(creationDeskSettings).length === 0 ? {} : { creationDeskSettings }),
+        ...(rejectedCreationDeskRulePaths.length === 0 ? {} : { rejectedCreationDeskRulePaths }),
         ...(draftApply.appended === undefined ? {} : { appendedDraft: draftApply.appended }),
         ...(autoContinue === undefined ? {} : { autoContinue }),
       }
@@ -1827,6 +1926,8 @@ export class SynopsisConversationService {
     presentation?: Readonly<{
       descriptionRulePath?: string | undefined
       proseStyleRulePath?: string | undefined
+      novelMajorCategoryRulePath?: string | undefined
+      novelSubcategoryRulePath?: string | undefined
       minimumWordCount: number
       maximumWordCount: number
     }>
@@ -2162,6 +2263,8 @@ export class SynopsisConversationService {
     workStyleGate?: Readonly<{
       status: "awaiting_choice" | "style_selected"
       selectedProseStylePath?: string
+      novelMajorCategoryRulePath?: string
+      novelSubcategoryRulePath?: string
     }>
     /** Injected by ChapterPanel 批量推演. */
     batchAutomation?: boolean
@@ -2175,6 +2278,8 @@ export class SynopsisConversationService {
     presentation?: Readonly<{
       descriptionRulePath?: string | undefined
       proseStyleRulePath?: string | undefined
+      novelMajorCategoryRulePath?: string | undefined
+      novelSubcategoryRulePath?: string | undefined
       minimumWordCount: number
       maximumWordCount: number
     }>
@@ -2204,12 +2309,14 @@ export class SynopsisConversationService {
     chapterDraftProposals?: readonly ChapterDraftProposalEntry[]
     volumeChapterPlans?: readonly VolumeChapterPlan[]
     volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
+    creationDeskSettings?: CreationDeskSettingsUpdate
     appendedDraft?: NonNullable<SynopsisConversationSendResult["appendedDraft"]>
     focusChange?: Readonly<{
       chapterSequence: number
       focusKind?: DiscussFocusKind
     }>
     continueTurn?: boolean
+    autoContinueBlocked?: boolean
     choices?: SynopsisConversationSendResult["messages"][number]["choices"]
     goalProposals?: readonly Readonly<{ payload: GoalProposalPayload; reason?: string }>[]
     stagingDelta?: Readonly<{
@@ -2237,6 +2344,9 @@ export class SynopsisConversationService {
     arcPlanMarkdown?: string
     volumeSynopsisMarkdown?: string
     availableProseStylePaths?: readonly string[]
+    availableDescriptionRulePaths?: readonly string[]
+    availableNovelMajorCategoryRulePaths?: readonly string[]
+    availableNovelSubcategoryRulePaths?: readonly string[]
     budgetAdvisory?: SynopsisConversationBudgetAdvisory
     }>> {
     const basePhasePrompt = await this.dependencies.prompts.loadPhase("synopsis_discuss")
@@ -2274,10 +2384,7 @@ export class SynopsisConversationService {
     const deadlineAtMs = wallLimitMs === undefined ? Number.MAX_SAFE_INTEGER : nowMs + wallLimitMs
     const maxRetrievalRounds = settings?.execution.maxRetrievalRounds
       ?? defaultProjectSettings.execution.maxRetrievalRounds
-    const maxModelCalls = Math.max(
-      input.maxModelCalls ?? (maxRetrievalRounds + 3),
-      maxRetrievalRounds + 3,
-    )
+    const maxModelCalls = Math.max(1, input.maxModelCalls ?? (maxRetrievalRounds + 3))
     const catalog = await this.dependencies.catalog.createSnapshot({
       snapshotId: this.dependencies.createId(),
       projectId: input.projectId,
@@ -2289,15 +2396,35 @@ export class SynopsisConversationService {
         && entry.relativePath.startsWith("表现输出/笔风规则/")
         && entry.relativePath.endsWith(".md"))
       .map((entry) => entry.relativePath)
+    const availableDescriptionRulePaths = listDescriptionRuleFiles(catalog.entries)
+      .map((entry) => entry.relativePath)
+    const availableNovelMajorCategoryRulePaths = catalog.entries
+      .filter((entry) => entry.entryKind === "file" && entry.relativePath.startsWith(`${NOVEL_MAJOR_CATEGORY_RULES_DIR}/`) && entry.relativePath.endsWith(".md"))
+      .map((entry) => entry.relativePath)
+    const availableNovelSubcategoryRulePaths = catalog.entries
+      .filter((entry) => entry.entryKind === "file" && entry.relativePath.startsWith(`${NOVEL_SUBCATEGORY_RULES_DIR}/`) && entry.relativePath.endsWith(".md"))
+      .map((entry) => entry.relativePath)
+    const selectedRulePaths = [
+      input.presentation?.novelMajorCategoryRulePath,
+      input.presentation?.novelSubcategoryRulePath,
+    ].filter((path): path is string => path !== undefined)
+    const workStyleCandidatePaths = input.workStyleGate === undefined
+      ? []
+      : [
+          ...availableProseStylePaths,
+          ...availableNovelMajorCategoryRulePaths,
+          ...availableNovelSubcategoryRulePaths,
+          ...selectedRulePaths,
+        ]
     const workStyleCandidateEvidence = input.workStyleGate === undefined
       ? []
-      : (await Promise.all(availableProseStylePaths.map(async (path) => {
+      : (await Promise.all(workStyleCandidatePaths.map(async (path) => {
           try {
             const markdown = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, path)
             return {
               readId: this.dependencies.createId(),
               visibility: "committed" as const,
-              ownerKind: "workspace:prose_style_candidate",
+              ownerKind: "workspace:presentation_style_candidate",
               ownerId: path,
               exactKeys: [path],
               semanticText: markdown.length > 4_000
@@ -2415,6 +2542,10 @@ export class SynopsisConversationService {
     let retrievalGaps: TurnRetrievalGap[] = []
     let remainingCalls = maxModelCalls
     let budgetGraceUsed = false
+    let consecutiveTodoWrites = 0
+    let todoNoProgressStreak = 0
+    let todoLoopRepairIssued = false
+    let autoContinueBlocked = false
     let accumulatedReasoning = ""
     let attempt = 0
     let missingArtifactRetries = 0
@@ -2422,6 +2553,8 @@ export class SynopsisConversationService {
     let missingOutlineArtifactRetries = 0
     let missingDraftProposalRetries = 0
     let missingVolumePlanRetries = 0
+    let missingCreationDeskSettingsRetries = 0
+    let missingChoicesRetries = 0
     let goalScheduleRepairs = 0
     const repairHints: string[] = []
     if (input.batchAutomation === true) {
@@ -2455,6 +2588,36 @@ export class SynopsisConversationService {
         ].join("\n")
     let latestBudgetAdvisory: SynopsisConversationBudgetAdvisory | undefined
     let latestToolDraft: SynopsisWorkflowToolResult | undefined
+    const stopDiscussLoop = (content: string) => {
+      runtimeLog("warn", "synopsis-conversation", "discuss.safety_stop", {
+        projectId: input.projectId, sessionId: input.sessionId, attempt,
+        remainingCalls, todoNoProgressStreak, consecutiveTodoWrites,
+      })
+      const result = finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, {
+        content,
+        autoContinueBlocked: true,
+        availableProseStylePaths,
+        availableDescriptionRulePaths,
+        availableNovelMajorCategoryRulePaths,
+        availableNovelSubcategoryRulePaths,
+        ...(accumulatedReasoning.length === 0 ? {} : { reasoningContent: accumulatedReasoning }),
+        ...(latestToolDraft === undefined ? {} : { appendedDraft: {
+          revisionTaskId: latestToolDraft.revisionTaskId,
+          chapterId: latestToolDraft.chapterId,
+          draftVersionId: latestToolDraft.draftVersionId,
+          draftLabel: latestToolDraft.draftLabel,
+        } }),
+        choices: [
+          { label: "检查当前进度与阻塞原因", action: "continue_discuss" },
+          { label: "根据已有材料重试当前步骤", action: "continue_discuss" },
+        ],
+      })
+      synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
+        content: result.content,
+        ...(result.reasoningContent === undefined ? {} : { thinking: result.reasoningContent }),
+      })
+      return result
+    }
     let focusedDraftMarkdown = input.latestDraftMarkdown
     const projectSettingsForTools = this.dependencies.readProjectSettings === undefined
       ? undefined
@@ -2508,25 +2671,12 @@ export class SynopsisConversationService {
         )
       }
       if (attempt > maxModelCalls + maxRetrievalRounds + 8) {
-        runtimeLog("warn", "synopsis-conversation", "discuss.safety_stop", {
-          projectId: input.projectId,
-          sessionId: input.sessionId,
-          attempt,
-        })
-        return finalizeDiscussReturn(
-          input.projectId,
-          latestBudgetAdvisory,
-          {
-            ...buildSynopsisDiscussFallbackReturn({
-              projectId: input.projectId,
-              accumulatedReasoning,
-              streamedContent: synopsisConversationStreamHub.peek(input.projectId).content,
-            }),
-            availableProseStylePaths,
-          },
-        )
+        return stopDiscussLoop("本轮重复尝试过多，已暂停自动推进。已保存的结果与未完成任务均已保留，请检查当前阻塞原因后重试。")
       }
       if (remainingCalls <= 0) {
+        if (!shouldAllowDiscussBudgetGrace(remainingCalls, budgetGraceUsed)) {
+          return stopDiscussLoop("本轮模型调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留，请检查当前进度后重试。")
+        }
         budgetGraceUsed = true
         remainingCalls = 1
         repairHints.push(
@@ -2761,18 +2911,7 @@ export class SynopsisConversationService {
             attempt,
             error: error instanceof Error ? error.message : String(error),
           })
-          const softContent = [
-            "本轮工具与写入挤在同一份结果里，系统已按门禁拦住，没有落盘错误弹窗。",
-            "将自动继续：先单独调工具，工具结果回来后再写章节/换焦点。",
-          ].join("")
-          synopsisConversationStreamHub.setContent(input.projectId, softContent, this.dependencies.now())
-          synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
-            content: softContent,
-          })
-          return finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, {
-            content: softContent,
-            availableProseStylePaths,
-          })
+          return stopDiscussLoop("模型反复混合提交工具与写入，本轮调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留；重试时应先单独调用工具，再提交章节内容。")
         }
         throw error
       }
@@ -2871,6 +3010,11 @@ export class SynopsisConversationService {
         }
         if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
         const toolRequest = toolArtifact.data.toolRequest
+        if (toolRequest.name !== "todo_write") {
+          consecutiveTodoWrites = 0
+          todoNoProgressStreak = 0
+          todoLoopRepairIssued = false
+        }
         if (
           !isDiscussTodoBootstrapTool(toolRequest.name)
           && !discussTurnHasTodos(synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos)
@@ -2903,6 +3047,7 @@ export class SynopsisConversationService {
           round: toolRound,
         }, this.dependencies.now())
         try {
+          const todosBeforeTool = [...synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos]
           // Re-read after compaction: hidden descriptions no longer grant permission.
           const visibleMessages = toVisibleDiscussContextMessages(
             await this.dependencies.conversation.listDiscussContextMessages(input.sessionId),
@@ -2977,6 +3122,25 @@ export class SynopsisConversationService {
             messages: [{ role: "system", kind: "phase_instruction", content: JSON.stringify(toolResult) }],
           })
           synopsisConversationStreamHub.setContent(input.projectId, "", this.dependencies.now())
+          if (toolRequest.name === "todo_write") {
+            consecutiveTodoWrites += 1
+            // The initial describe fetches a contract; later calls must change the plan or do real work.
+            if (toolRequest.action === "invoke" || consecutiveTodoWrites > 1) {
+              todoNoProgressStreak = advanceTodoNoProgressStreak(
+                todoNoProgressStreak,
+                todosBeforeTool,
+                synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos,
+              )
+            }
+            if (shouldStopTodoWriteLoop(todoNoProgressStreak, todoLoopRepairIssued, consecutiveTodoWrites)) {
+              return stopDiscussLoop("任务清单连续重复更新，修复提示后仍未推进，已暂停自动推进。已保存结果与未完成任务均已保留，请检查阻塞原因后重试。")
+            }
+            if (shouldIssueTodoLoopRepair(todoNoProgressStreak, todoLoopRepairIssued, consecutiveTodoWrites)) {
+              todoLoopRepairIssued = true
+              autoContinueBlocked = true
+              repairHints.push(DISCUSS_TODO_NO_PROGRESS_HINT)
+            }
+          }
         } catch (error) {
           synopsisConversationStreamHub.upsertToolRun(input.projectId, {
             runId: toolRunId,
@@ -3033,18 +3197,51 @@ export class SynopsisConversationService {
             attempt += 1
             continue
           }
+          if (completeVolumePlan && input.workStyleGate === undefined) {
+            const settings = sanitizeCreationDeskSettings({
+              update: artifact.data.creationDeskSettings,
+              availableDescriptionRulePaths,
+              availableProseStylePaths,
+              availableNovelMajorCategoryRulePaths,
+              availableNovelSubcategoryRulePaths,
+            })
+            const completeSettings = settings?.descriptionRulePath !== undefined
+              && settings.proseStyleRulePath !== undefined
+              && settings.minimumWordCount !== undefined
+              && settings.maximumWordCount !== undefined
+              && settings.boundaryPace !== undefined
+              && settings.causalityFocus !== undefined
+            if (!completeSettings) {
+              if (missingCreationDeskSettingsRetries >= 1 || remainingCalls <= 0) {
+                throw new SynopsisInvalidStateError(
+                  "卷规划未完成：AI 未返回有效的写作设置结构化字段，控件没有切换。请重试卷规划。",
+                )
+              }
+              missingCreationDeskSettingsRetries += 1
+              repairHints.push(
+                "【卷规划写作设置必交】你刚才只在 assistantMessage 中声称切换设置，系统没有应用该文字。必须在 artifact.creationDeskSettings 返回完整字段：descriptionRulePath、proseStyleRulePath、novelMajorCategoryRulePath、novelSubcategoryRulePath、minimumWordCount、maximumWordCount、boundaryPace、causalityFocus。规则路径必须逐字来自本轮工作区真实 Markdown 文件；字数按卷总字数/章节数估算；未返回前禁止声称已切换或已同步。",
+              )
+              attempt += 1
+              continue
+            }
+          }
         }
         if (input.workStyleGate !== undefined) {
           const validStylePaths = availableProseStylePaths.map((path) => path.replaceAll("\\", "/"))
+          const validMajorCategoryPaths = new Set(availableNovelMajorCategoryRulePaths.map((path) => path.replaceAll("\\", "/")))
+          const validSubcategoryPaths = new Set(availableNovelSubcategoryRulePaths.map((path) => path.replaceAll("\\", "/")))
           const recommendations = (artifact.data.choices ?? []).filter((choice) => (
             choice.action === "continue_discuss"
-            && validStylePaths.some((path) => choice.label.includes(path))
+            && choice.workStyleSelection !== undefined
+            && validStylePaths.includes(choice.workStyleSelection.proseStyleRulePath.replaceAll("\\", "/"))
+            && validMajorCategoryPaths.has(choice.workStyleSelection.novelMajorCategoryRulePath.replaceAll("\\", "/"))
+            && validSubcategoryPaths.has(choice.workStyleSelection.novelSubcategoryRulePath.replaceAll("\\", "/"))
           ))
           if (input.workStyleGate.status === "awaiting_choice") {
-            const requiredRecommendations = Math.min(2, validStylePaths.length)
+            const requiredRecommendations = Math.min(2, validStylePaths.length, validMajorCategoryPaths.size, validSubcategoryPaths.size)
             if (recommendations.length < requiredRecommendations) {
               repairHints.push(
-                "风格门禁要求你先阅读全部 workspace:prose_style_candidate 证据，再给至少两个绑定真实候选路径的 continue_discuss 推荐；只做风格评估，不写任何文件。",
+                "风格门禁要求你先阅读全部 workspace:presentation_style_candidate 证据，再给至少两个分别绑定大类、次大类、笔风真实 Markdown 路径的 continue_discuss 推荐；只做风格评估，不写任何文件。",
               )
               attempt += 1
               continue
@@ -3058,7 +3255,7 @@ export class SynopsisConversationService {
               && selectedPath !== undefined
               && styleWrite.markdown.includes(selectedPath)
               && assessWorkStyleMarkdown(styleWrite.markdown).complete
-            if (!styleWriteApproved && recommendations.length < Math.min(2, validStylePaths.length)) {
+            if (!styleWriteApproved && recommendations.length < Math.min(2, validStylePaths.length, validMajorCategoryPaths.size, validSubcategoryPaths.size)) {
               repairHints.push(
                 `审核所选笔风「${selectedPath ?? "（缺失）"}」后，必须给出完整合格的 ${WORK_STYLE_RULE_PATH}，且保留所选路径；若不适配，提供至少两个绑定真实候选路径的替代方案。禁止写章节内容。`,
               )
@@ -3084,6 +3281,7 @@ export class SynopsisConversationService {
           && input.workStyleGate === undefined
           && discussTurnHasTodos(turnTodos)
           && !discussTodosAreSettled(turnTodos)
+          && !todoLoopRepairIssued
         ) {
           repairHints.push(DISCUSS_TODO_INCOMPLETE_HINT)
           attempt += 1
@@ -3254,6 +3452,19 @@ export class SynopsisConversationService {
             deferredDraftNotice = `系统状态：本轮只收到${deferredLabels}的草稿提案，顺序门禁已拒绝，当前焦点第${String(input.chapterSequence)}章没有生成或保存正文草稿。`
           }
         }
+        if (
+          (artifact.data.choices?.length ?? 0) === 0
+          && !(input.batchProceed === true && input.workStyleGate?.status === "style_selected")
+          && missingChoicesRetries < 1
+          && remainingCalls > 0
+        ) {
+          missingChoicesRetries += 1
+          repairHints.push(
+            "【停止前选项必交】本轮将结束并等待用户。请基于当前阶段补充至少两个彼此有区别、可直接执行的 choices，通常提供推荐路径与调整路径；每个 action 用 continue_discuss。不要只在 assistantMessage 中列选项。",
+          )
+          attempt += 1
+          continue
+        }
         const finalAssistantMessage = missingSynopsisNotice !== undefined
           ? missingSynopsisNotice
           : [artifact.data.assistantMessage, deferredDraftNotice, missingDraftNotice]
@@ -3266,7 +3477,11 @@ export class SynopsisConversationService {
         })
         return finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, {
           content: finalAssistantMessage,
+          ...(autoContinueBlocked ? { autoContinueBlocked: true } : {}),
           availableProseStylePaths,
+          availableDescriptionRulePaths,
+          availableNovelMajorCategoryRulePaths,
+          availableNovelSubcategoryRulePaths,
           ...(accumulatedReasoning.length === 0 ? {} : { reasoningContent: accumulatedReasoning }),
           ...(artifact.data.chapterTitle === undefined ? {} : { chapterTitle: artifact.data.chapterTitle }),
           ...(artifact.data.titleAlignTarget === undefined
@@ -3297,6 +3512,9 @@ export class SynopsisConversationService {
           ...mapArtifactChapterDraftProposals(allowedDraftProposals),
           ...mapArtifactVolumeChapterPlans(artifact.data.volumeChapterPlans),
           ...(artifact.data.volumePlanMeta === undefined ? {} : { volumePlanMeta: artifact.data.volumePlanMeta }),
+          ...(artifact.data.creationDeskSettings === undefined
+            ? {}
+            : { creationDeskSettings: artifact.data.creationDeskSettings }),
           ...(latestToolDraft === undefined ? {} : { appendedDraft: {
             revisionTaskId: latestToolDraft.revisionTaskId,
             chapterId: latestToolDraft.chapterId,
@@ -3398,6 +3616,19 @@ export class SynopsisConversationService {
           const gateNotice = hasDraftIntent && deferredDraftSequences.length > 0 && !hasAllowedDraft
             ? `系统状态：草稿提案${[...new Set(deferredDraftSequences)].sort((a, b) => a - b).map((sequence) => `第${String(sequence)}章`).join("、")}未通过章节顺序门禁，当前焦点第${String(input.chapterSequence)}章没有生成或保存正文草稿。`
             : undefined
+        if (
+          (artifact.data.choices?.length ?? 0) === 0
+          && !(input.batchProceed === true && input.workStyleGate?.status === "style_selected")
+          && missingChoicesRetries < 1
+          && remainingCalls > 0
+        ) {
+          missingChoicesRetries += 1
+          repairHints.push(
+            "【停止前选项必交】本轮将结束并等待用户。请基于当前阶段补充至少两个彼此有区别、可直接执行的 choices，通常提供推荐路径与调整路径；每个 action 用 continue_discuss。不要只在 assistantMessage 中列选项。",
+          )
+          attempt += 1
+          continue
+        }
         const finalAssistantMessage = missingSynopsisNotice !== undefined
             ? missingSynopsisNotice
           : missingOutlineNotice !== undefined
@@ -3412,7 +3643,11 @@ export class SynopsisConversationService {
           })
           return finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, {
             content: finalAssistantMessage,
+            ...(autoContinueBlocked ? { autoContinueBlocked: true } : {}),
             availableProseStylePaths,
+            availableDescriptionRulePaths,
+            availableNovelMajorCategoryRulePaths,
+            availableNovelSubcategoryRulePaths,
             ...(accumulatedReasoning.length === 0 ? {} : { reasoningContent: accumulatedReasoning }),
             ...(artifact.data.chapterTitle === undefined ? {} : { chapterTitle: artifact.data.chapterTitle }),
             ...(artifact.data.titleAlignTarget === undefined
@@ -3441,6 +3676,9 @@ export class SynopsisConversationService {
             ...mapArtifactChapterDraftProposals(allowedDraftProposals),
             ...mapArtifactVolumeChapterPlans(artifact.data.volumeChapterPlans),
             ...(artifact.data.volumePlanMeta === undefined ? {} : { volumePlanMeta: artifact.data.volumePlanMeta }),
+            ...(artifact.data.creationDeskSettings === undefined
+              ? {}
+              : { creationDeskSettings: artifact.data.creationDeskSettings }),
             ...(latestToolDraft === undefined ? {} : { appendedDraft: {
               revisionTaskId: latestToolDraft.revisionTaskId,
               chapterId: latestToolDraft.chapterId,
@@ -3485,6 +3723,9 @@ export class SynopsisConversationService {
               streamedContent: synopsisConversationStreamHub.peek(input.projectId).content,
             }),
             availableProseStylePaths,
+            availableDescriptionRulePaths,
+            availableNovelMajorCategoryRulePaths,
+            availableNovelSubcategoryRulePaths,
           },
         )
         synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
@@ -3500,6 +3741,10 @@ export class SynopsisConversationService {
         attempt += 1
         continue
       }
+
+      consecutiveTodoWrites = 0
+      todoNoProgressStreak = 0
+      todoLoopRepairIssued = false
 
       const searchRound = attempt + 1
       for (const read of requestedReads) {
@@ -3638,6 +3883,8 @@ export class SynopsisConversationService {
     presentation?: Readonly<{
       descriptionRulePath?: string | undefined
       proseStyleRulePath?: string | undefined
+      novelMajorCategoryRulePath?: string | undefined
+      novelSubcategoryRulePath?: string | undefined
       minimumWordCount: number
       maximumWordCount: number
     }>
@@ -3653,6 +3900,8 @@ export class SynopsisConversationService {
       ...(prosePath !== undefined && prosePath.length > 0 && isPresentationRuleMarkdownPath(prosePath)
         ? [prosePath]
         : []),
+      ...(input.presentation?.novelMajorCategoryRulePath === undefined ? [] : [input.presentation.novelMajorCategoryRulePath]),
+      ...(input.presentation?.novelSubcategoryRulePath === undefined ? [] : [input.presentation.novelSubcategoryRulePath]),
     ]
     const overlayPaths = listWorkDescriptionRuleFiles(input.catalog.entries).map((entry) => entry.relativePath)
     const userRulePaths = listUserRuleMarkdownPaths(input.catalog.entries)
@@ -4773,10 +5022,12 @@ function mapSynopsisPresentationWrites(
 function buildWorkStyleGatePromptAppendix(input: Readonly<{
   status: "awaiting_choice" | "style_selected"
   selectedProseStylePath?: string
+  novelMajorCategoryRulePath?: string
+  novelSubcategoryRulePath?: string
 }> | undefined): string | undefined {
   if (input === undefined) return undefined
   const sharedRules = [
-    "这是作品创作门禁，不是普通剧情讨论。必须逐份阅读本轮 readEvidence 中 ownerKind=workspace:prose_style_candidate 的真实规则正文，再结合用户构思判断适配度；禁止按文件名、题材关键词或固定排序猜选。",
+    "这是作品创作门禁，不是普通剧情讨论。必须逐份阅读本轮 readEvidence 中 ownerKind=workspace:presentation_style_candidate 的真实规则正文，再结合用户构思判断适配度；禁止按文件名、题材关键词或固定排序猜选。",
     "风格备选必须引用 readEvidence 中真实存在的完整路径；每条推荐说明适配点与需要规避的风险。不得声称已落盘，除非实际输出 presentationWrites。",
     "风格门禁期间 Todo 不适用：不要创建、更新或结清 Todo，也不要调用 todo_write 或任何 toolRequest；工具列表为空是预期行为，直接按本阶段要求返回 artifact。已有 Todo 暂停处理，不得因此阻止门禁交付。",
     "门禁未通过：禁止输出 synopsisBody、outlineBody、bodyEdits、chapterDraftProposal(s)、appendedDraft、volumeChapterPlans、arcPlan、focusChange 或 continueTurn；不得调用工作流工具。presentationWrites 是本阶段唯一允许的结构化写入，不是工具调用。",
@@ -4785,15 +5036,15 @@ function buildWorkStyleGatePromptAppendix(input: Readonly<{
     return [
       "【风格门禁阶段：AI评估并推荐，等待用户选择】",
       ...sharedRules,
-      "先比较所有候选预定义笔风与用户构思的兼容程度，挑出最合适的 2–3 个供用户选择。assistantMessage 必须简要呈现你的评估依据、推荐顺序以及预定义规则是否需要适配。",
-      "choices 必须有 2–3 个 continue_discuss 选项；每个 label 都必须包含对应的精确预定义路径及推荐理由。不要写入作品风格文件或章节内容；用户选择后再进入下一阶段。",
+      "先比较大类、次大类与笔风候选规则正文和用户构思的兼容程度，挑出最合适的 2–3 个组合供用户选择。assistantMessage 必须简要呈现你的评估依据、推荐顺序以及规则是否需要适配。",
+      "choices 必须有 2–3 个 continue_discuss 选项；每个选项的 workStyleSelection 必须结构化给出 novelMajorCategoryRulePath、novelSubcategoryRulePath、proseStyleRulePath 三条精确路径，label 显示三份规则文件名并写明推荐理由。路径必须逐项匹配真实 readEvidence。不要写入作品风格文件或章节内容；用户选择后再进入下一阶段。",
     ].join("\n")
   }
   return [
     "【风格门禁阶段：审核用户所选预定义笔风】",
     ...sharedRules,
-    `用户选择的笔风规则是：${input.selectedProseStylePath ?? "（缺失）"}。必须基于该路径对应的真实规则正文判断是否适用于本书。`,
-    `若适配，只返回 assistantMessage、finalSelfReview 与一个 presentationWrites 项，更新「${WORK_STYLE_RULE_PATH}」，将选定规则整合为符合 8 个必需章节的完整本书风格方案，并在语体笔风章节保留该精确路径；不允许同轮输出梗概、大纲或正文。`,
+    `用户选择的小说大类、次大类和笔风规则分别是：${input.novelMajorCategoryRulePath ?? "（缺失）"}、${input.novelSubcategoryRulePath ?? "（缺失）"}、${input.selectedProseStylePath ?? "（缺失）"}。必须基于三条路径对应的真实规则正文判断是否适用于本书。`,
+    `若适配，只返回 assistantMessage、finalSelfReview 与一个 presentationWrites 项，更新「${WORK_STYLE_RULE_PATH}」，将选定规则整合为符合 8 个必需章节的完整本书风格方案，并在语体笔风章节保留三条精确规则路径，分别写为「小说大类规则：」「小说次大类规则：」「小说笔风：」；不允许同轮输出梗概、大纲或正文。`,
     "若不适配或必须大幅违背预定义规则才能使用，不写作品风格文件；解释冲突并用 choices 给出新的 2–3 个真实候选路径供用户改选。",
   ].join("\n")
 }
@@ -4843,6 +5094,7 @@ function buildVolumePlanningPromptAppendix(
     `当前卷：${planning.volumeFolderName}`,
     `缺少首次写入：${planning.missing.length === 0 ? "无" : planning.missing.join("、")}`,
     `已记录目标：章节数=${planning.targetChapterCount ?? "待规划"}，预计总字数=${planning.targetWordCount ?? "待规划"}；卷梗概写入次数=${planning.synopsisWriteCount}，卷大纲写入次数=${planning.outlineWriteCount}。`,
+    "请同时根据题材与卷目标主动选定合适的创作台写作设置，并通过 artifact.creationDeskSettings 更新小说大类规则、小说次大类规则、描写规则、笔风规则、单章字数范围、边界节奏、因果焦点；字数范围必须同时给最小值与最大值，按预计总字数/章节数估算单章容量。四个规则路径必须来自工作区真实存在的 Markdown 文件。系统会同步到创作台现有可编辑控件，用户随时可以自行修改；不要再让用户手动切换刚选定的笔风。",
     "你必须主动完成卷规划，而不是只重复门禁提示、要求用户重新输入构思，或继续写第一章。依据已有构思给出可调整的合理估算；本轮直接通过 volumePlanMeta.targetChapterCount/targetWordCount 写入目标、volumeSynopsis.markdown 写入卷梗概、arcPlan.markdown 写入卷大纲。卷规划中的章节数和字数是本卷总目标，卷梗概和卷大纲描述本卷，不是第一章内容。",
     "卷规划完成前不得输出 synopsisBody、outlineBody、bodyEdits、chapterDraftProposal(s)、volumeChapterPlans、appendedDraft、focusChange、continueTurn 或章节工作流工具。规划三项可以在一次回复中全部提交；系统会在下一轮开始第一章剧情梗概。不得要求用户点击不存在的常驻规划按钮。",
   ].join("\n")
@@ -4950,6 +5202,8 @@ function finalizeDiscussReturn(
   latest: SynopsisConversationBudgetAdvisory | undefined,
   result: Readonly<{
     content: string
+    autoContinueBlocked?: boolean
+    appendedDraft?: NonNullable<SynopsisConversationSendResult["appendedDraft"]>
     reasoningContent?: string
     chapterTitle?: string
     titleAlignTarget?: "body" | "planning"
@@ -4966,6 +5220,7 @@ function finalizeDiscussReturn(
     chapterDraftProposals?: readonly ChapterDraftProposalEntry[]
     volumeChapterPlans?: readonly VolumeChapterPlan[]
     volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
+    creationDeskSettings?: CreationDeskSettingsUpdate
     volumeSynopsisMarkdown?: string
     focusChange?: Readonly<{
       chapterSequence: number
@@ -4998,9 +5253,14 @@ function finalizeDiscussReturn(
     }>[]
     arcPlanMarkdown?: string
     availableProseStylePaths?: readonly string[]
+    availableDescriptionRulePaths?: readonly string[]
+    availableNovelMajorCategoryRulePaths?: readonly string[]
+    availableNovelSubcategoryRulePaths?: readonly string[]
   }>,
 ): Readonly<{
   content: string
+  autoContinueBlocked?: boolean
+  appendedDraft?: NonNullable<SynopsisConversationSendResult["appendedDraft"]>
   reasoningContent?: string
   chapterTitle?: string
   titleAlignTarget?: "body" | "planning"
@@ -5017,6 +5277,7 @@ function finalizeDiscussReturn(
   chapterDraftProposals?: readonly ChapterDraftProposalEntry[]
   volumeChapterPlans?: readonly VolumeChapterPlan[]
   volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
+  creationDeskSettings?: CreationDeskSettingsUpdate
   focusChange?: Readonly<{
     chapterSequence: number
     focusKind?: DiscussFocusKind
@@ -5049,10 +5310,83 @@ function finalizeDiscussReturn(
   arcPlanMarkdown?: string
   volumeSynopsisMarkdown?: string
   availableProseStylePaths?: readonly string[]
+  availableDescriptionRulePaths?: readonly string[]
+  availableNovelMajorCategoryRulePaths?: readonly string[]
+  availableNovelSubcategoryRulePaths?: readonly string[]
   budgetAdvisory?: SynopsisConversationBudgetAdvisory
 }> {
   const budgetAdvisory = latest ?? peekSynopsisModelBudgetAdvisory(projectId)
   return budgetAdvisory === undefined ? result : { ...result, budgetAdvisory }
+}
+
+function sanitizeCreationDeskSettings(input: Readonly<{
+  update: CreationDeskSettingsUpdate | undefined
+  availableDescriptionRulePaths: readonly string[]
+  availableProseStylePaths: readonly string[]
+  availableNovelMajorCategoryRulePaths?: readonly string[]
+  availableNovelSubcategoryRulePaths?: readonly string[]
+}>): CreationDeskSettingsUpdate | undefined {
+  const update = input.update
+  if (update === undefined) return undefined
+  const descriptionPath = update.descriptionRulePath?.replaceAll("\\", "/")
+  const prosePath = update.proseStyleRulePath?.replaceAll("\\", "/")
+  const selectedDescriptionPath = descriptionPath === undefined
+    ? undefined
+    : input.availableDescriptionRulePaths.find((path) => path.replaceAll("\\", "/") === descriptionPath)
+  const selectedProsePath = prosePath === undefined
+    ? undefined
+    : input.availableProseStylePaths.find((path) => path.replaceAll("\\", "/") === prosePath)
+  const selectedMajorCategoryPath = update.novelMajorCategoryRulePath === undefined
+    ? undefined
+    : input.availableNovelMajorCategoryRulePaths?.find((path) => path.replaceAll("\\", "/") === update.novelMajorCategoryRulePath!.replaceAll("\\", "/"))
+  const selectedSubcategoryPath = update.novelSubcategoryRulePath === undefined
+    ? undefined
+    : input.availableNovelSubcategoryRulePaths?.find((path) => path.replaceAll("\\", "/") === update.novelSubcategoryRulePath!.replaceAll("\\", "/"))
+  const wordCountIsValid = update.minimumWordCount !== undefined
+    && update.maximumWordCount !== undefined
+    && update.minimumWordCount <= update.maximumWordCount
+    && update.minimumWordCount <= 50_000
+    && update.maximumWordCount <= 50_000
+  const sanitized: CreationDeskSettingsUpdate = {
+    ...(selectedMajorCategoryPath === undefined ? {} : { novelMajorCategoryRulePath: selectedMajorCategoryPath }),
+    ...(selectedSubcategoryPath === undefined ? {} : { novelSubcategoryRulePath: selectedSubcategoryPath }),
+    ...(selectedDescriptionPath === undefined ? {} : { descriptionRulePath: selectedDescriptionPath }),
+    ...(selectedProsePath === undefined ? {} : { proseStyleRulePath: selectedProsePath }),
+    ...(wordCountIsValid
+      ? {
+          minimumWordCount: update.minimumWordCount!,
+          maximumWordCount: update.maximumWordCount!,
+        }
+      : {}),
+    ...(update.boundaryPace === undefined ? {} : { boundaryPace: update.boundaryPace }),
+    ...(update.causalityFocus === undefined ? {} : { causalityFocus: update.causalityFocus }),
+  }
+  return Object.keys(sanitized).length === 0 ? undefined : sanitized
+}
+
+function getRejectedCreationDeskRulePaths(input: Readonly<{
+  update: CreationDeskSettingsUpdate | undefined
+  availableDescriptionRulePaths: readonly string[]
+  availableProseStylePaths: readonly string[]
+  availableNovelMajorCategoryRulePaths?: readonly string[]
+  availableNovelSubcategoryRulePaths?: readonly string[]
+}>): string[] {
+  const update = input.update
+  if (update === undefined) return []
+  const descriptionPath = update.descriptionRulePath?.replaceAll("\\", "/")
+  const prosePath = update.proseStyleRulePath?.replaceAll("\\", "/")
+  const validDescriptionPaths = new Set(input.availableDescriptionRulePaths.map((path) => path.replaceAll("\\", "/")))
+  const validProsePaths = new Set(input.availableProseStylePaths.map((path) => path.replaceAll("\\", "/")))
+  const validMajorPaths = new Set((input.availableNovelMajorCategoryRulePaths ?? []).map((path) => path.replaceAll("\\", "/")))
+  const validSubcategoryPaths = new Set((input.availableNovelSubcategoryRulePaths ?? []).map((path) => path.replaceAll("\\", "/")))
+  const majorPath = update.novelMajorCategoryRulePath?.replaceAll("\\", "/")
+  const subcategoryPath = update.novelSubcategoryRulePath?.replaceAll("\\", "/")
+  return [
+    ...(descriptionPath !== undefined && !validDescriptionPaths.has(descriptionPath) ? [descriptionPath] : []),
+    ...(prosePath !== undefined && !validProsePaths.has(prosePath) ? [prosePath] : []),
+    ...(majorPath !== undefined && !validMajorPaths.has(majorPath) ? [majorPath] : []),
+    ...(subcategoryPath !== undefined && !validSubcategoryPaths.has(subcategoryPath) ? [subcategoryPath] : []),
+  ]
 }
 
 function buildSynopsisDiscussFallbackReturn(input: Readonly<{
@@ -5220,6 +5554,22 @@ export function filterDiscussChoices(
     return true
   })
   return filtered.length === 0 ? undefined : filtered
+}
+
+function buildFallbackDiscussChoices(input: Readonly<{
+  volumePlanningNeedsFirstWrite: boolean
+  volumeFolderName: string
+}>): SynopsisConversationChoice[] {
+  if (input.volumePlanningNeedsFirstWrite) {
+    return [
+      { label: `按建议继续完善「${input.volumeFolderName}」卷规划`, action: "continue_discuss" },
+      { label: "我想调整本卷章节数、总字数、梗概或大纲", action: "continue_discuss" },
+    ]
+  }
+  return [
+    { label: "按当前建议继续", action: "continue_discuss" },
+    { label: "我想调整方向或补充要求", action: "continue_discuss" },
+  ]
 }
 
 function stripHeadingFromDraftBody(heading: string, body: string): string {

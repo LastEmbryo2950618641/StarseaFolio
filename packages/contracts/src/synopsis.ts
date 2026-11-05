@@ -22,6 +22,11 @@ export type DiscussFocusKind = z.infer<typeof discussFocusKindSchema>
 
 export const synopsisConversationChoiceSchema = z.object({
   label: z.string().min(1),
+  workStyleSelection: z.object({
+    proseStyleRulePath: z.string().trim().regex(/^表现输出\/笔风规则\/[^/]+\.md$/u),
+    novelMajorCategoryRulePath: z.string().trim().regex(/^表现输出\/小说大类规则\/[^/]+\.md$/u),
+    novelSubcategoryRulePath: z.string().trim().regex(/^表现输出\/小说次大类规则\/[^/]+\.md$/u),
+  }).optional(),
   action: z.enum([
     "start_turn",
     "continue_discuss",
@@ -252,6 +257,35 @@ export const synopsisConversationStartResultSchema = z.object({
 })
 export type SynopsisConversationStartResult = z.infer<typeof synopsisConversationStartResultSchema>
 
+export const creationDeskSettingsUpdateSchema = z.object({
+  novelMajorCategoryRulePath: z.string().trim().regex(/^表现输出\/小说大类规则\/[^/]+\.md$/u).optional(),
+  novelSubcategoryRulePath: z.string().trim().regex(/^表现输出\/小说次大类规则\/[^/]+\.md$/u).optional(),
+  descriptionRulePath: z.string().trim().regex(/^表现输出\/描写规则\/[^/]+\.md$/u).optional(),
+  proseStyleRulePath: z.string().trim().regex(/^表现输出\/笔风规则\/[^/]+\.md$/u).optional(),
+  minimumWordCount: z.number().int().positive().max(50_000).optional(),
+  maximumWordCount: z.number().int().positive().max(50_000).optional(),
+  boundaryPace: z.enum(["advance_allowed", "hold_without_resolution"]).optional(),
+  causalityFocus: z.enum(["auto", "buildup", "action", "payoff"]).optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.minimumWordCount === undefined) !== (value.maximumWordCount === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "最小字数与最大字数必须同时提供",
+      path: ["maximumWordCount"],
+    })
+  }
+  if (value.minimumWordCount !== undefined
+    && value.maximumWordCount !== undefined
+    && value.minimumWordCount > value.maximumWordCount) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "最小字数不能大于最大字数",
+      path: ["minimumWordCount"],
+    })
+  }
+})
+export type CreationDeskSettingsUpdate = z.infer<typeof creationDeskSettingsUpdateSchema>
+
 export const synopsisConversationSendResultSchema = z.object({
   session: synopsisConversationSessionSchema,
   messages: z.array(synopsisConversationMessageSchema),
@@ -259,6 +293,10 @@ export const synopsisConversationSendResultSchema = z.object({
   volumePlanningStage: z.boolean().optional(),
   pendingProposals: z.array(deductionGoalProposalSchema).optional(),
   pendingStagingPromotes: z.array(synopsisStagingPromoteProposalSchema).optional(),
+  /** AI-selected writing controls; applied to the same editable creation-desk fields. */
+  creationDeskSettings: creationDeskSettingsUpdateSchema.optional(),
+  /** Rule paths requested by the AI but rejected because they are not present in the workspace. */
+  rejectedCreationDeskRulePaths: z.array(z.string().min(1)).optional(),
   budgetAdvisory: synopsisConversationBudgetAdvisorySchema.optional(),
   usage: synopsisConversationStreamUsageSchema.optional(),
   /** Set when the discuss agent renamed the project/work display name. */

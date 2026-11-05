@@ -183,6 +183,8 @@ export type TurnPhaseInput = Readonly<{
     workStyleGate?: Readonly<{
       status: "awaiting_choice" | "style_selected"
       selectedProseStylePath?: string
+      novelMajorCategoryRulePath?: string
+      novelSubcategoryRulePath?: string
     }>
     volumePlanning?: Readonly<{
       volumeFolderName: string

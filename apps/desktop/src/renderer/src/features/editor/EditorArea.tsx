@@ -87,11 +87,15 @@ type Props = Readonly<{
   prompt: string
   descriptionRule: string
   proseRule: string
+  novelMajorCategoryRulePath: string
+  novelSubcategoryRulePath: string
   minimumWordCount: string
   maximumWordCount: string
   wordCountValid: boolean
   descriptionRules: readonly string[]
   proseRules: readonly string[]
+  novelMajorCategoryRules: readonly string[]
+  novelSubcategoryRules: readonly string[]
   boundaryPace: ChapterNarrativeIntent["boundaryPace"]
   causalityFocus: ChapterNarrativeIntent["causalityFocus"]
   onContentChange(value: string): void
@@ -100,6 +104,8 @@ type Props = Readonly<{
   onPromptChange(value: string): void
   onDescriptionRuleChange(value: string): void
   onProseRuleChange(value: string): void
+  onNovelMajorCategoryRuleChange(value: string): void
+  onNovelSubcategoryRuleChange(value: string): void
   onMinimumWordCountChange(value: string): void
   onMaximumWordCountChange(value: string): void
   onBoundaryPaceChange(value: ChapterNarrativeIntent["boundaryPace"]): void
@@ -271,15 +277,21 @@ export function EditorArea(props: Props): React.JSX.Element {
           : { tokenMetrics: props.synopsisTokenMetrics })}
         descriptionRule={props.descriptionRule}
         proseRule={props.proseRule}
+        novelMajorCategoryRulePath={props.novelMajorCategoryRulePath}
+        novelSubcategoryRulePath={props.novelSubcategoryRulePath}
         minimumWordCount={props.minimumWordCount}
         maximumWordCount={props.maximumWordCount}
         wordCountValid={props.wordCountValid}
         descriptionRules={props.descriptionRules}
         proseRules={props.proseRules}
+        novelMajorCategoryRules={props.novelMajorCategoryRules}
+        novelSubcategoryRules={props.novelSubcategoryRules}
         boundaryPace={props.boundaryPace}
         causalityFocus={props.causalityFocus}
         onDescriptionRuleChange={props.onDescriptionRuleChange}
         onProseRuleChange={props.onProseRuleChange}
+        onNovelMajorCategoryRuleChange={props.onNovelMajorCategoryRuleChange}
+        onNovelSubcategoryRuleChange={props.onNovelSubcategoryRuleChange}
         onMinimumWordCountChange={props.onMinimumWordCountChange}
         onMaximumWordCountChange={props.onMaximumWordCountChange}
         onBoundaryPaceChange={props.onBoundaryPaceChange}

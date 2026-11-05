@@ -17,7 +17,7 @@ function completeStyleMarkdown(): string {
     "",
     "## 1. 语体笔风",
     "",
-    "主锚：表现输出/笔风规则/东方玄幻.md。语气硬朗冷峻，描写密度适中，感官偏视觉。",
+    "小说大类：爽文。小说次大类：飞卢。小说笔风：表现输出/笔风规则/东方玄幻.md。主锚：表现输出/笔风规则/东方玄幻.md。语气硬朗冷峻，描写密度适中，感官偏视觉。",
     "",
     "## 2. 时代科技生活",
     "",
@@ -78,8 +78,13 @@ describe("work style gate", () => {
 
   it("requires an explicit user selection from a style choice", () => {
     const choices = [{
-      label: "以「表现输出/笔风规则/仙侠.md」为主笔风：氛围沉浸、描写细腻",
+      label: "爽文 + 飞卢｜表现输出/笔风规则/仙侠.md：氛围沉浸、描写细腻",
       action: "continue_discuss" as const,
+      workStyleSelection: {
+        proseStyleRulePath: "表现输出/笔风规则/仙侠.md",
+        novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+        novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+      },
     }]
     const messages = [{
       role: "assistant",
@@ -88,13 +93,29 @@ describe("work style gate", () => {
     }]
 
     const paths = ["表现输出/笔风规则/仙侠.md"]
-    expect(resolveColdStartStyleSelectionPath(messages, "继续推进下一章", paths)).toBeUndefined()
-    expect(resolveColdStartStyleSelectionPath(messages, choices[0].label, paths)).toBe(paths[0])
-    expect(resolveColdStartStyleSelectionPath([], "按你的推荐来定风格", paths)).toBe(paths[0])
+    const majorPaths = ["表现输出/小说大类规则/爽文.md"]
+    const subcategoryPaths = ["表现输出/小说次大类规则/飞卢.md"]
+    expect(resolveColdStartStyleSelectionPath(messages, "继续推进下一章", paths, majorPaths, subcategoryPaths)).toBeUndefined()
+    expect(resolveColdStartStyleSelectionPath(messages, choices[0].label, paths, majorPaths, subcategoryPaths)).toEqual({ proseStylePath: paths[0], novelMajorCategoryRulePath: majorPaths[0], novelSubcategoryRulePath: subcategoryPaths[0] })
+    expect(resolveColdStartStyleSelectionPath(
+      messages,
+      "我选择的风格组合是：小说大类规则「表现输出/小说大类规则/爽文.md」、小说次大类规则「表现输出/小说次大类规则/飞卢.md」、笔风规则「表现输出/笔风规则/仙侠.md」。请按这三份规则继续。",
+      paths,
+      majorPaths,
+      subcategoryPaths,
+    )).toEqual({ proseStylePath: paths[0], novelMajorCategoryRulePath: majorPaths[0], novelSubcategoryRulePath: subcategoryPaths[0] })
+    expect(resolveColdStartStyleSelectionPath(
+      messages,
+      "我选择的风格组合是：小说大类规则「表现输出/小说大类规则/不存在.md」、小说次大类规则「表现输出/小说次大类规则/飞卢.md」、笔风规则「表现输出/笔风规则/仙侠.md」。",
+      paths,
+      majorPaths,
+      subcategoryPaths,
+    )).toBeUndefined()
+    expect(resolveColdStartStyleSelectionPath(messages, "按你的推荐来定风格", paths, majorPaths, subcategoryPaths)).toEqual({ proseStylePath: paths[0], novelMajorCategoryRulePath: majorPaths[0], novelSubcategoryRulePath: subcategoryPaths[0] })
     expect(resolveColdStartStyleSelectionPath([
       ...messages,
       { role: "assistant", content: "继续讨论章节", choices: [{ label: "写下一章", action: "continue_discuss" as const }] },
-    ], choices[0].label, paths)).toBeUndefined()
+    ], choices[0].label, paths, majorPaths, subcategoryPaths)).toBeUndefined()
   })
 
   it("strips drafts and volume plans when style incomplete", () => {
@@ -139,12 +160,14 @@ describe("work style gate", () => {
         "表现输出/笔风规则/东方玄幻.md",
         "表现输出/笔风规则/轻小说.md",
       ],
+      availableNovelMajorCategoryRulePaths: ["表现输出/小说大类规则/爽文.md", "表现输出/小说大类规则/日系轻小说.md"],
+      availableNovelSubcategoryRulePaths: ["表现输出/小说次大类规则/飞卢.md", "表现输出/小说次大类规则/起点.md"],
       styleChoicePending: true,
       assist: {
         content: "模型错误地继续写了规划。",
         choices: [
-          { label: "AI推荐「表现输出/笔风规则/东方玄幻.md」：规则贴合本书", action: "continue_discuss" },
-          { label: "AI推荐「表现输出/笔风规则/轻小说.md」：可适配人物声口", action: "continue_discuss" },
+          { label: "爽文 + 飞卢｜表现输出/笔风规则/东方玄幻.md：规则贴合本书", action: "continue_discuss", workStyleSelection: { proseStyleRulePath: "表现输出/笔风规则/东方玄幻.md", novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md", novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md" } },
+          { label: "日系轻小说 + 起点｜表现输出/笔风规则/轻小说.md：可适配人物声口", action: "continue_discuss", workStyleSelection: { proseStyleRulePath: "表现输出/笔风规则/轻小说.md", novelMajorCategoryRulePath: "表现输出/小说大类规则/日系轻小说.md", novelSubcategoryRulePath: "表现输出/小说次大类规则/起点.md" } },
         ],
         presentationWrites: [{
           relativePath: "表现输出/本作品描写/其他.md",
@@ -160,6 +183,23 @@ describe("work style gate", () => {
     expect(assist.choices?.[0]?.label).toContain("东方玄幻.md")
     expect(assist.choices?.[1]?.label).toContain("轻小说.md")
     expect(assist.choices?.every((choice) => choice.action === "continue_discuss")).toBe(true)
+  })
+
+  it("builds structured fallback combinations when the model omits valid choices", () => {
+    const { assist } = applyColdStartStyleGate({
+      diskStyleMarkdown: WORK_STYLE_SEED_MARKDOWN,
+      availableProseStylePaths: ["表现输出/笔风规则/默认笔风规则.md"],
+      availableNovelMajorCategoryRulePaths: ["表现输出/小说大类规则/爽文.md"],
+      availableNovelSubcategoryRulePaths: ["表现输出/小说次大类规则/飞卢.md"],
+      styleChoicePending: true,
+      assist: { content: "先选择适合本书的组合定位。", choices: [] },
+    })
+    expect(assist.choices).toHaveLength(3)
+    expect(assist.choices?.[0]?.workStyleSelection).toEqual({
+      proseStyleRulePath: "表现输出/笔风规则/默认笔风规则.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+    })
   })
 
   it("persists style writes but blocks chapter drafts until a later ready turn", () => {

@@ -116,17 +116,18 @@ export function buildContextUsageBreakdown(input: Readonly<{
     add(buckets, "conversation", tokens)
   }
 
-  const chainTokens = Object.values(buckets).reduce((sum, value) => sum + value, 0)
+  const chainTokens = sumBuckets(buckets)
   const usedTokens = input.lastRequestInputTokens !== undefined && input.lastRequestInputTokens > 0
     ? input.lastRequestInputTokens
     : chainTokens
+  const reconciledBuckets = scaleBucketsToTotal(buckets, usedTokens, chainTokens)
   const percent = Math.min(100, Math.round((usedTokens / maxTokens) * 1000) / 10)
   return {
     usedTokens,
     maxTokens,
     percent,
-    categories: finalizeCategories(buckets, usedTokens),
-    empty: chainTokens === 0,
+    categories: finalizeCategories(reconciledBuckets, usedTokens),
+    empty: usedTokens === 0,
   }
 }
 
@@ -143,6 +144,34 @@ function emptyBuckets(): Record<ContextUsageCategoryId, number> {
     conversation: 0,
     latest_delta: 0,
   }
+}
+
+function sumBuckets(buckets: Readonly<Record<ContextUsageCategoryId, number>>): number {
+  return Object.values(buckets).reduce((sum, value) => sum + value, 0)
+}
+
+function scaleBucketsToTotal(
+  buckets: Readonly<Record<ContextUsageCategoryId, number>>,
+  usedTokens: number,
+  classifiedTokens: number,
+): Record<ContextUsageCategoryId, number> {
+  if (usedTokens <= 0 || classifiedTokens <= 0) return emptyBuckets()
+
+  const allocations = CONTEXT_USAGE_CATEGORY_IDS
+    .filter((id) => buckets[id] > 0)
+    .map((id) => {
+      const exact = (buckets[id] / classifiedTokens) * usedTokens
+      return { id, tokens: Math.floor(exact), remainder: exact - Math.floor(exact) }
+    })
+  let remaining = usedTokens - allocations.reduce((sum, allocation) => sum + allocation.tokens, 0)
+  allocations.sort((left, right) => right.remainder - left.remainder)
+  for (let index = 0; remaining > 0; index += 1, remaining -= 1) {
+    const allocation = allocations[index % allocations.length]
+    if (allocation !== undefined) allocation.tokens += 1
+  }
+  const normalized = emptyBuckets()
+  for (const allocation of allocations) normalized[allocation.id] = allocation.tokens
+  return normalized
 }
 
 function add(buckets: Record<ContextUsageCategoryId, number>, id: ContextUsageCategoryId, tokens: number): void {

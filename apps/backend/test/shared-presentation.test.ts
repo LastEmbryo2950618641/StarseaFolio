@@ -31,6 +31,24 @@ it("shares bundled presets, edits, imports and deletions across projects and res
   expect(report.issues).toEqual([])
   expect(report.inventory.filter((entry) => entry.kind === "file" && entry.path.startsWith("表现输出/笔风规则/"))).toHaveLength(41)
   expect(report.inventory.filter((entry) => entry.kind === "file" && entry.path.startsWith("表现输出/描写规则/"))).toHaveLength(11)
+  expect(report.inventory.filter((entry) => entry.kind === "file" && entry.path.startsWith("表现输出/小说大类规则/"))).toHaveLength(3)
+  expect(report.inventory.filter((entry) => entry.kind === "file" && entry.path.startsWith("表现输出/小说次大类规则/"))).toHaveLength(5)
+  for (const [path, heading] of [
+    ["表现输出/小说大类规则/爽文.md", "# 爽文"],
+    ["表现输出/小说大类规则/日系轻小说.md", "# 日系轻小说"],
+    ["表现输出/小说大类规则/传统文学.md", "# 传统文学"],
+    ["表现输出/小说次大类规则/飞卢.md", "# 飞卢"],
+    ["表现输出/小说次大类规则/起点.md", "# 起点"],
+    ["表现输出/小说次大类规则/番茄.md", "# 番茄"],
+    ["表现输出/小说次大类规则/刺猬猫.md", "# 刺猬猫"],
+    ["表现输出/小说次大类规则/菠萝包.md", "# 菠萝包"],
+  ] as const) {
+    const markdown = await container.workspace.readMarkdown(a, path)
+    expect(markdown).toContain(heading)
+    expect(markdown).toContain("## 来源与适用边界")
+  }
+  expect(await container.workspace.readMarkdown(a, "表现输出/小说大类规则/日系轻小说.md"))
+    .toContain("没有适用于所有出版社、读者和作品的统一定义或必要条件")
   await container.workspace.saveUserMarkdown(a, path, "shared edit")
   expect(await container.workspace.readMarkdown(b, path)).toBe("shared edit")
   await container.workspace.saveUserMarkdown(a, "表现输出/本作品描写/私有.md", "private")

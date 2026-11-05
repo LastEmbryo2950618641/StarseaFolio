@@ -57,8 +57,9 @@ describe("SQLite migrations", () => {
     const frontierColumns = await sql<{ name: string }>`PRAGMA table_info(frontier_refs)`.execute(database)
     const sourceUnitColumns = await sql<{ name: string }>`PRAGMA table_info(source_units)`.execute(database)
     const chapterArtifactColumns = await sql<{ name: string }>`PRAGMA table_info(chapter_artifact_states)`.execute(database)
+    const workStyleGateColumns = await sql<{ name: string }>`PRAGMA table_info(work_style_gate_states)`.execute(database)
 
-    expect(migrations.map((migration) => migration.version)).toEqual(Array.from({ length: 56 }, (_, index) => index + 1))
+    expect(migrations.map((migration) => migration.version)).toEqual(Array.from({ length: 57 }, (_, index) => index + 1))
     expect(tableNames).toEqual(expect.objectContaining(new Set([
       "projects",
       "project_manifests",
@@ -132,6 +133,10 @@ describe("SQLite migrations", () => {
       "outline_write_count",
       "body_write_count",
       "body_digest",
+    ]))
+    expect(workStyleGateColumns.rows.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "novel_major_categories_json",
+      "novel_subcategories_json",
     ]))
     expect(frontierColumns.rows.map((column) => column.name)).toEqual([
       "id",

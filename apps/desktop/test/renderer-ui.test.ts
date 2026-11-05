@@ -95,11 +95,15 @@ function editorDefaults(overrides: Partial<React.ComponentProps<typeof EditorAre
     prompt: "",
     descriptionRule: "",
     proseRule: "",
+    novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+    novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
     minimumWordCount: "2000",
     maximumWordCount: "3000",
     wordCountValid: true,
     descriptionRules: ["表现输出/描写规则/近景跟随.md"],
     proseRules: ["表现输出/笔风规则/克制叙述.md"],
+    novelMajorCategoryRules: ["表现输出/小说大类规则/爽文.md", "表现输出/小说大类规则/传统文学.md"],
+    novelSubcategoryRules: ["表现输出/小说次大类规则/飞卢.md", "表现输出/小说次大类规则/起点.md"],
     boundaryPace: "advance_allowed",
     causalityFocus: "auto",
     onContentChange: vi.fn(),
@@ -107,6 +111,8 @@ function editorDefaults(overrides: Partial<React.ComponentProps<typeof EditorAre
     onPromptChange: vi.fn(),
     onDescriptionRuleChange: vi.fn(),
     onProseRuleChange: vi.fn(),
+    onNovelMajorCategoryRuleChange: vi.fn(),
+    onNovelSubcategoryRuleChange: vi.fn(),
     onMinimumWordCountChange: vi.fn(),
     onMaximumWordCountChange: vi.fn(),
     onBoundaryPaceChange: vi.fn(),
@@ -335,6 +341,12 @@ describe("renderer workbench UI contract", () => {
     expect(html).not.toContain("从本轮输入开始")
     expect(html).toContain("近景跟随.md")
     expect(html).toContain("克制叙述.md")
+    expect(html).toContain("小说大类")
+    expect(html).toContain("小说次大类")
+    expect(html).toContain('value="表现输出/小说大类规则/爽文.md" selected')
+    expect(html).toContain('value="表现输出/小说次大类规则/飞卢.md" selected')
+    expect(html).toContain("传统文学.md")
+    expect(html).toContain("起点.md")
     expect(html).toContain("2000")
     expect(html).toContain("3000")
     expect(html).toContain("边界节奏")
@@ -713,6 +725,15 @@ describe("renderer workbench UI contract", () => {
         role: "assistant",
         content: "已写入草稿。",
         choices: [
+          {
+            label: "爽文 + 飞卢 + 仙侠",
+            action: "continue_discuss",
+            workStyleSelection: {
+              novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+              novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+              proseStyleRulePath: "表现输出/笔风规则/仙侠.md",
+            },
+          },
           { label: "是否将焦点调整到第2章", action: "set_focus", chapterSequence: 2 },
           { label: "是否确认用草稿(v1)经图治理覆盖正式正文", action: "promote_draft_to_body" },
         ],
@@ -730,11 +751,17 @@ describe("renderer workbench UI contract", () => {
       maximumWordCount: "3000",
       wordCountValid: true,
       descriptionRules: [],
-      proseRules: [],
+      novelMajorCategoryRulePath: "",
+      novelSubcategoryRulePath: "",
+      novelMajorCategoryRules: ["表现输出/小说大类规则/爽文.md", "表现输出/小说大类规则/传统文学.md"],
+      novelSubcategoryRules: ["表现输出/小说次大类规则/飞卢.md", "表现输出/小说次大类规则/起点.md"],
+      proseRules: ["表现输出/笔风规则/仙侠.md"],
       boundaryPace: "advance_allowed",
       causalityFocus: "auto",
       onDescriptionRuleChange: vi.fn(),
       onProseRuleChange: vi.fn(),
+      onNovelMajorCategoryRuleChange: vi.fn(),
+      onNovelSubcategoryRuleChange: vi.fn(),
       onMinimumWordCountChange: vi.fn(),
       onMaximumWordCountChange: vi.fn(),
       onBoundaryPaceChange: vi.fn(),
@@ -753,6 +780,14 @@ describe("renderer workbench UI contract", () => {
     expect(html).not.toContain("data-testid=\"creation-desk-model-quick\"")
     expect(html).not.toContain("data-testid=\"creation-desk-advanced-trigger\"")
     expect(html).toContain("data-testid=\"creation-desk-send\"")
+    expect(html).toContain("data-testid=\"synopsis-choice-your-idea\"")
+    expect(html).toContain("你的想法")
+    expect(html).toContain("data-testid=\"synopsis-style-picker\"")
+    expect(html).toContain("data-testid=\"style-picker-major\"")
+    expect(html).toContain("data-testid=\"style-picker-subcategory\"")
+    expect(html).toContain("data-testid=\"style-picker-prose\"")
+    expect(html).toContain("data-testid=\"style-picker-insert\"")
+    expect(html).toContain("data-testid=\"style-choice-use\"")
   })
 
   it("mounts only the active right panel layer", () => {

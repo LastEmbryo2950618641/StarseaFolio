@@ -101,6 +101,21 @@ describe("prompt contracts", () => {
     expect(PLATFORM_SKILLS.length).toBeGreaterThanOrEqual(7)
   })
 
+  it("uses shared Markdown rules for cold-start category and prose recommendations", () => {
+    const packageRoot = resolve(process.cwd(), "packages/prompt-contracts")
+    const readResource = (resource: string): string => readFileSync(resolve(packageRoot, resource), "utf8")
+    const skillIndex = readResource("resources/v1/skill-index.md")
+    const coldStart = readResource("resources/skills/book-cold-start/SKILL.md")
+    const stylePack = readResource("resources/skills/book-cold-start/references/style-pack-spec.md")
+
+    expect(skillIndex).not.toContain("genre-style-presets")
+    expect(coldStart).toContain("表现输出/小说大类规则/")
+    expect(coldStart).toContain("表现输出/小说次大类规则/")
+    expect(coldStart).toContain("表现输出/笔风规则/")
+    expect(stylePack).toContain("由用户选择的小说大类、次大类和笔风规则 Markdown 正文决定")
+    expect(stylePack).not.toContain("题材默认")
+  })
+
   it("ships chinese-webnovel-skills vendor write rules verbatim-ish (MIT attribution header)", () => {
     const packageRoot = resolve(process.cwd(), "packages/prompt-contracts")
     for (const resource of WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES) {
@@ -719,6 +734,32 @@ describe("prompt contracts", () => {
     })
     expect(parsed.chapterDraftProposal?.body).toBe("雨还在下。")
     expect(parsed.choices?.[0]?.action).toBe("promote_draft_to_body")
+  })
+
+  it("accepts AI-selected creation-desk settings and requires a complete word-count range", () => {
+    const parsed = synopsisDiscussArtifactSchema.parse({
+      assistantMessage: "已按本书类型设置笔风和单章篇幅。",
+      creationDeskSettings: {
+        descriptionRulePath: "表现输出/描写规则/自动.md",
+        proseStyleRulePath: "表现输出/笔风规则/网文白话.md",
+        minimumWordCount: 2500,
+        maximumWordCount: 3500,
+        boundaryPace: "advance_allowed",
+        causalityFocus: "action",
+      },
+      finalSelfReview: "设置值完整且范围有效。",
+    })
+    expect(parsed.creationDeskSettings?.proseStyleRulePath).toBe("表现输出/笔风规则/网文白话.md")
+    expect(() => synopsisDiscussArtifactSchema.parse({
+      assistantMessage: "只调整了最小字数。",
+      creationDeskSettings: { minimumWordCount: 2500 },
+      finalSelfReview: "范围不完整。",
+    })).toThrow(/minimumWordCount.*maximumWordCount|同时/u)
+    expect(() => synopsisDiscussArtifactSchema.parse({
+      assistantMessage: "范围颠倒。",
+      creationDeskSettings: { minimumWordCount: 4000, maximumWordCount: 3000 },
+      finalSelfReview: "范围无效。",
+    })).toThrow(/最小字数/u)
   })
 
   it("accepts volumeChapterPlans and chapterDraftProposals for batch volume workflow", () => {

@@ -49,6 +49,8 @@ export class SqliteSynopsisConversationRepository {
       project_id: projectId,
       status: "awaiting_choice",
       selected_prose_style_path: null,
+      novel_major_category_rule_path: null,
+      novel_subcategory_rule_path: null,
       style_digest: null,
       updated_at_ms: Date.now(),
     }).onConflict((conflict) => conflict.column("project_id").doNothing()).executeTakeFirstOrThrow()
@@ -73,11 +75,15 @@ export class SqliteSynopsisConversationRepository {
         project_id: input.projectId,
         status: next.status,
         selected_prose_style_path: next.status === "awaiting_choice" ? null : next.selectedProseStylePath,
+        novel_major_category_rule_path: next.status === "awaiting_choice" ? null : next.novelMajorCategoryRulePath,
+        novel_subcategory_rule_path: next.status === "awaiting_choice" ? null : next.novelSubcategoryRulePath,
         style_digest: next.status === "ready" ? next.styleDigest : null,
         updated_at_ms: input.updatedAtMs,
       }).onConflict((conflict) => conflict.column("project_id").doUpdateSet({
         status: next.status,
         selected_prose_style_path: next.status === "awaiting_choice" ? null : next.selectedProseStylePath,
+        novel_major_category_rule_path: next.status === "awaiting_choice" ? null : next.novelMajorCategoryRulePath,
+        novel_subcategory_rule_path: next.status === "awaiting_choice" ? null : next.novelSubcategoryRulePath,
         style_digest: next.status === "ready" ? next.styleDigest : null,
         updated_at_ms: input.updatedAtMs,
       })).executeTakeFirstOrThrow()
@@ -556,6 +562,8 @@ export class SqliteSynopsisConversationRepository {
 function mapWorkStyleGateState(row: {
   status: WorkStyleGateState["status"]
   selected_prose_style_path: string | null
+  novel_major_category_rule_path: string | null
+  novel_subcategory_rule_path: string | null
   style_digest: string | null
 }): WorkStyleGateState {
   if (row.status === "awaiting_choice" || row.selected_prose_style_path === null) {
@@ -565,10 +573,17 @@ function mapWorkStyleGateState(row: {
     return {
       status: "ready",
       selectedProseStylePath: row.selected_prose_style_path,
+      novelMajorCategoryRulePath: row.novel_major_category_rule_path ?? "",
+      novelSubcategoryRulePath: row.novel_subcategory_rule_path ?? "",
       styleDigest: row.style_digest,
     }
   }
-  return { status: "style_selected", selectedProseStylePath: row.selected_prose_style_path }
+  return {
+    status: "style_selected",
+    selectedProseStylePath: row.selected_prose_style_path,
+    novelMajorCategoryRulePath: row.novel_major_category_rule_path ?? "",
+    novelSubcategoryRulePath: row.novel_subcategory_rule_path ?? "",
+  }
 }
 
 function incrementWriteCount(

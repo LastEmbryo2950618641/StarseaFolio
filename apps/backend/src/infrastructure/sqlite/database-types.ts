@@ -333,6 +333,8 @@ export type WorkStyleGateStateRow = {
   project_id: string
   status: "awaiting_choice" | "style_selected" | "ready"
   selected_prose_style_path: string | null
+  novel_major_category_rule_path: string | null
+  novel_subcategory_rule_path: string | null
   style_digest: string | null
   updated_at_ms: Timestamp
 }

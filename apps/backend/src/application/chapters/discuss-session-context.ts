@@ -13,6 +13,8 @@ export function listSynopsisDiscussBootstrapPaths(input: Readonly<{
   presentation?: Readonly<{
     descriptionRulePath?: string | undefined
     proseStyleRulePath?: string | undefined
+    novelMajorCategoryRulePath?: string | undefined
+    novelSubcategoryRulePath?: string | undefined
   }>
 }>): readonly string[] {
   const descriptionPaths = resolveDescriptionRulePaths(
@@ -27,6 +29,8 @@ export function listSynopsisDiscussBootstrapPaths(input: Readonly<{
     ...(prosePath !== undefined && prosePath.length > 0 && isPresentationRuleMarkdownPath(prosePath)
       ? [prosePath]
       : []),
+    ...(input.presentation?.novelMajorCategoryRulePath === undefined ? [] : [input.presentation.novelMajorCategoryRulePath]),
+    ...(input.presentation?.novelSubcategoryRulePath === undefined ? [] : [input.presentation.novelSubcategoryRulePath]),
     ...listWorkDescriptionRuleFiles(input.catalog.entries).map((entry) => entry.relativePath),
     ...listUserRuleMarkdownPaths(input.catalog.entries),
   ]
@@ -37,6 +41,8 @@ export function computeDiscussBootstrapDigest(input: Readonly<{
   presentation?: Readonly<{
     descriptionRulePath?: string | undefined
     proseStyleRulePath?: string | undefined
+    novelMajorCategoryRulePath?: string | undefined
+    novelSubcategoryRulePath?: string | undefined
   }>
 }>): string {
   const paths = listSynopsisDiscussBootstrapPaths(input)

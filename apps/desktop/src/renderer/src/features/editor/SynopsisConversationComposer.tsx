@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm"
 import type {
   DiscussAgentMode,
   DiscussFocusKind,
+  SynopsisConversationChoice,
   SynopsisConversationMessage,
   SynopsisConversationSession,
   SynopsisConversationStreamSnapshot,
@@ -68,15 +69,21 @@ import { useDeductionGoals } from "./use-deduction-goals.js"
 type PresentationProps = Readonly<{
   descriptionRule: string
   proseRule: string
+  novelMajorCategoryRulePath: string
+  novelSubcategoryRulePath: string
   minimumWordCount: string
   maximumWordCount: string
   wordCountValid: boolean
   descriptionRules: readonly string[]
   proseRules: readonly string[]
+  novelMajorCategoryRules: readonly string[]
+  novelSubcategoryRules: readonly string[]
   boundaryPace: ChapterNarrativeIntent["boundaryPace"]
   causalityFocus: ChapterNarrativeIntent["causalityFocus"]
   onDescriptionRuleChange(value: string): void
   onProseRuleChange(value: string): void
+  onNovelMajorCategoryRuleChange(value: string): void
+  onNovelSubcategoryRuleChange(value: string): void
   onMinimumWordCountChange(value: string): void
   onMaximumWordCountChange(value: string): void
   onBoundaryPaceChange(value: ChapterNarrativeIntent["boundaryPace"]): void
@@ -148,6 +155,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const [focusUnfilled, setFocusUnfilled] = useState(false)
   const [choicesRefreshing, setChoicesRefreshing] = useState(false)
   const [footerCollapse, setFooterCollapse] = useState<CreationDeskFooterCollapse>(() => loadCreationDeskFooterCollapse())
+  const [choicePrefill, setChoicePrefill] = useState<Readonly<{ text: string; token: number }> | undefined>()
   const footerDragRef = useRef<Readonly<{ startY: number, startLevel: CreationDeskFooterCollapse }> | null>(null)
   const todoMenuRef = useRef<HTMLDivElement>(null)
   const goals = useDeductionGoals({
@@ -156,6 +164,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   })
   const chapterSequence = props.session?.chapterSequence ?? 1
   const threadRef = useRef<HTMLDivElement>(null)
+  const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const advancedMenuRef = useRef<HTMLDivElement>(null)
   const stickToLatestRef = useRef(true)
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
@@ -385,10 +394,17 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   isLatestChoiceMessage={message.messageId === latestChoiceMessageId}
                   focusLocked={props.focusLocked === true}
                   chapterWorkflowEnabled={props.chapterWorkflowEnabled === true}
+                  novelMajorCategoryRules={props.novelMajorCategoryRules}
+                  novelSubcategoryRules={props.novelSubcategoryRules}
+                  proseRules={props.proseRules}
                   onSend={sendMessage}
                   onPromoteStaging={props.onPromoteStaging}
                   onStartTurn={props.onStartTurn}
                   onRefreshChoices={refreshChoices}
+                  onFocusComposer={() => composerInputRef.current?.focus()}
+                  onPrefillChoice={(text) => {
+                    setChoicePrefill((current) => ({ text, token: (current?.token ?? 0) + 1 }))
+                  }}
                   {...(props.onPromoteDraftToBody === undefined
                     ? {}
                     : { onPromoteDraftToBody: props.onPromoteDraftToBody })}
@@ -481,17 +497,31 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   </summary>
                 <div className="creation-desk-settings">
                   <label>
-                    <span>描写</span>
-                    <select value={props.descriptionRule} onChange={(event) => { props.onDescriptionRuleChange(event.target.value); }}>
-                      <option value="">自动</option>
-                      {props.descriptionRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
+                    <span>小说大类</span>
+                    <select aria-label="小说大类" data-testid="setting-novel-major-category" value={props.novelMajorCategoryRulePath} onChange={(event) => { props.onNovelMajorCategoryRuleChange(event.target.value); }}>
+                      <option value="">未选择</option>
+                      {props.novelMajorCategoryRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>小说次大类</span>
+                    <select aria-label="小说次大类" data-testid="setting-novel-subcategory" value={props.novelSubcategoryRulePath} disabled={props.novelMajorCategoryRulePath.length === 0} onChange={(event) => { props.onNovelSubcategoryRuleChange(event.target.value); }}>
+                      <option value="">未选择</option>
+                      {props.novelSubcategoryRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
                     </select>
                   </label>
                   <label>
                     <span>笔风</span>
-                    <select value={props.proseRule} onChange={(event) => { props.onProseRuleChange(event.target.value); }}>
+                    <select aria-label="笔风" data-testid="setting-prose-style" value={props.proseRule} disabled={props.novelSubcategoryRulePath.length === 0} onChange={(event) => { props.onProseRuleChange(event.target.value); }}>
                       <option value="">默认</option>
                       {props.proseRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>描写</span>
+                    <select value={props.descriptionRule} onChange={(event) => { props.onDescriptionRuleChange(event.target.value); }}>
+                      <option value="">自动</option>
+                      {props.descriptionRules.map((rule) => <option key={rule} value={rule}>{rule.split("/").at(-1)}</option>)}
                     </select>
                   </label>
                   <label className={`creation-desk-word-count${props.wordCountValid ? "" : " invalid"}`}>
@@ -575,6 +605,8 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
           projectId={props.projectId}
           workspaceRootRef={props.workspaceRootRef}
           sessionId={props.session?.sessionId}
+          inputRef={composerInputRef}
+          {...(choicePrefill === undefined ? {} : { choicePrefill })}
           busy={props.busy}
           running={props.running}
           showStop={showStop}
@@ -615,6 +647,8 @@ type ComposerInputProps = Readonly<{
   projectId: string | undefined
   workspaceRootRef: string | undefined
   sessionId: string | undefined
+  inputRef: React.RefObject<HTMLTextAreaElement | null>
+  choicePrefill?: Readonly<{ text: string; token: number }>
   busy: boolean
   running: boolean
   showStop: boolean
@@ -663,6 +697,16 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
     if (props.draftRestore === undefined) return
     setDraft(typeof props.draftRestore.text === "string" ? props.draftRestore.text : "")
   }, [props.draftRestore])
+
+  useEffect(() => {
+    if (props.choicePrefill === undefined) return
+    const text = props.choicePrefill.text
+    setDraft((current) => {
+      const withoutPreviousSelection = current.replace(/我选择的风格组合是：小说大类规则「[^」]+」、小说次大类规则「[^」]+」、笔风规则「[^」]+」。请按这三份规则继续。/gu, "").trimEnd()
+      return withoutPreviousSelection.trim().length === 0 ? text : `${withoutPreviousSelection}\n${text}`
+    })
+    props.inputRef.current?.focus()
+  }, [props.choicePrefill, props.inputRef])
 
   const activeProfile = props.modelProfiles.find((profile) => profile.id === props.activeModelProfileId)
     ?? props.modelProfiles[0]
@@ -781,6 +825,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
           />
         </div>}
     <textarea
+      ref={props.inputRef}
       value={draft}
       disabled={props.busy || props.running}
       placeholder={bookIdeaPrompts[ideaPromptIndex] ?? bookIdeaPrompts[0]}
@@ -973,16 +1018,24 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
   focusLocked: boolean
   pendingStagingPromotes?: readonly SynopsisStagingPromoteProposal[]
   chapterWorkflowEnabled?: boolean
+  novelMajorCategoryRules: readonly string[]
+  novelSubcategoryRules: readonly string[]
+  proseRules: readonly string[]
   onSend(message: string): Promise<void>
+  onPrefillChoice(message: string): void
   onPromoteStaging(): Promise<void>
   onRejectStagingPromote?(proposalIds: readonly string[]): Promise<void>
   onStartTurn(): void
   onSetFocus?(sequence: number, focusKind: DiscussFocusKind): void
   onPromoteDraftToBody?(): Promise<void>
   onRefreshChoices(messageId: string): Promise<void>
+  onFocusComposer(): void
   onOpenSettingsLineage?(): void
 }>): React.JSX.Element {
   const { message } = props
+  const [selectedMajorCategory, setSelectedMajorCategory] = useState("")
+  const [selectedSubcategory, setSelectedSubcategory] = useState("")
+  const [selectedProseStyle, setSelectedProseStyle] = useState("")
   const choices = (message.choices ?? []).filter((choice) => (
     (!props.focusLocked || choice.action !== "set_focus")
     && (props.chapterWorkflowEnabled === true || choice.action !== "start_turn")
@@ -1011,12 +1064,75 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
       {message.role === "assistant" && message.error !== undefined
         ? <p className="creation-desk-message-error" role="status">{message.error}</p>
         : null}
-      {message.role === "assistant" && choices.length > 0
+      {message.role === "assistant"
         ? <div className="synopsis-conversation-choices">
+            {choices.some((choice) => choice.workStyleSelection !== undefined)
+              ? <div className="synopsis-style-picker" data-testid="synopsis-style-picker">
+                  <select
+                    aria-label="选择小说大类"
+                    data-testid="style-picker-major"
+                    value={selectedMajorCategory}
+                    disabled={props.running || props.busy || props.choicesRefreshing}
+                    onChange={(event) => {
+                      setSelectedMajorCategory(event.target.value)
+                      setSelectedSubcategory("")
+                      setSelectedProseStyle("")
+                    }}
+                  >
+                    <option value="">选择大类</option>
+                    {props.novelMajorCategoryRules.map((path) => <option key={path} value={path}>{path.split("/").at(-1)?.replace(/\.md$/u, "")}</option>)}
+                  </select>
+                  <select
+                    aria-label="选择小说次大类"
+                    data-testid="style-picker-subcategory"
+                    value={selectedSubcategory}
+                    disabled={selectedMajorCategory.length === 0 || props.running || props.busy || props.choicesRefreshing}
+                    onChange={(event) => {
+                      setSelectedSubcategory(event.target.value)
+                      setSelectedProseStyle("")
+                    }}
+                  >
+                    <option value="">选择次大类</option>
+                    {props.novelSubcategoryRules.map((path) => <option key={path} value={path}>{path.split("/").at(-1)?.replace(/\.md$/u, "")}</option>)}
+                  </select>
+                  <select
+                    aria-label="选择笔风"
+                    data-testid="style-picker-prose"
+                    value={selectedProseStyle}
+                    disabled={selectedSubcategory.length === 0 || props.running || props.busy || props.choicesRefreshing}
+                    onChange={(event) => { setSelectedProseStyle(event.target.value); }}
+                  >
+                    <option value="">选择笔风</option>
+                    {props.proseRules.map((path) => <option key={path} value={path}>{path.split("/").at(-1)?.replace(/\.md$/u, "")}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className="synopsis-choice synopsis-style-picker-insert"
+                    data-testid="style-picker-insert"
+                    aria-label="将风格组合填入对话框"
+                    title="将风格组合填入对话框"
+                    disabled={selectedMajorCategory.length === 0 || selectedSubcategory.length === 0 || selectedProseStyle.length === 0 || props.running || props.busy || props.choicesRefreshing}
+                    onClick={() => {
+                      props.onPrefillChoice(formatStyleSelectionMessage({
+                        novelMajorCategoryRulePath: selectedMajorCategory,
+                        novelSubcategoryRulePath: selectedSubcategory,
+                        proseStyleRulePath: selectedProseStyle,
+                      }))
+                    }}
+                  >
+                    <Send size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              : null}
             {choices.map((choice) => <button
               key={choice.label}
               type="button"
               className="synopsis-choice"
+              {...(choice.workStyleSelection === undefined ? {} : {
+                "data-testid": "style-choice-use",
+                title: "将此组合填入对话框",
+                "aria-label": `填入对话框：${choice.label}`,
+              })}
               disabled={props.running || props.busy || props.choicesRefreshing}
               onClick={() => {
                 if (choice.action === "start_turn") {
@@ -1039,6 +1155,10 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
                   props.onSetFocus?.(choice.chapterSequence, "plot_synopsis")
                   return
                 }
+                if (choice.workStyleSelection !== undefined) {
+                  props.onPrefillChoice(formatStyleSelectionMessage(choice.workStyleSelection))
+                  return
+                }
                 if (
                   choice.label.includes("暂不落盘")
                   && props.onRejectStagingPromote !== undefined
@@ -1051,8 +1171,18 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
                 void props.onSend(choice.label)
               }}
             >
-              {choice.action === "start_turn" ? "调用正文推演工具" : choice.label}
+              <span>{choice.action === "start_turn" ? "调用正文推演工具" : choice.label}</span>
+              {choice.workStyleSelection !== undefined ? <Send size={13} aria-hidden="true" /> : null}
             </button>)}
+            <button
+              type="button"
+              className="synopsis-choice synopsis-choice-idea"
+              data-testid="synopsis-choice-your-idea"
+              disabled={props.running || props.busy}
+              onClick={props.onFocusComposer}
+            >
+              你的想法
+            </button>
             {props.isLatestChoiceMessage
               ? <button
                   type="button"
@@ -1073,6 +1203,11 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
     </div>
   </article>
 })
+
+function formatStyleSelectionMessage(selection: SynopsisConversationChoice["workStyleSelection"]): string {
+  if (selection === undefined) return ""
+  return `我选择的风格组合是：小说大类规则「${selection.novelMajorCategoryRulePath}」、小说次大类规则「${selection.novelSubcategoryRulePath}」、笔风规则「${selection.proseStyleRulePath}」。请按这三份规则继续。`
+}
 
 const PROCESS_SEGMENT_KINDS = new Set(["thinking", "searching", "running", "editing"])
 

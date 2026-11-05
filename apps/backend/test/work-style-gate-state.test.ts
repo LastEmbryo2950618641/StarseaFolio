@@ -9,7 +9,7 @@ import { assessWorkStyleMarkdown } from "../src/core/workspace/work-style-gate.j
 
 const completeStyle = [
   "# 作品风格",
-  "## 1. 语体笔风\n主锚：表现输出/笔风规则/仙侠.md。语气硬朗冷峻，描写密度适中，感官偏视觉。",
+  "## 1. 语体笔风\n小说大类规则：表现输出/小说大类规则/爽文.md。小说次大类规则：表现输出/小说次大类规则/飞卢.md。小说笔风：表现输出/笔风规则/仙侠.md。主锚：表现输出/笔风规则/仙侠.md。语气硬朗冷峻，描写密度适中，感官偏视觉。",
   "## 2. 时代科技生活\n冷兵器与符箓并行；货币用灵石；机构写宗门与城卫，不写现代警察。",
   "## 3. 规则称谓能力\n战力用境界名落笔；技能先效果后名称；称谓按辈分与阵营。",
   "## 4. 命名\n人名双/三音节错开姓与偏旁；常同框禁止同姓墙。正例：林烬、沈砚。反例：凌寒与凌霜同批不合格。势力：正派「×宗/×门」，商会「×阁」。",
@@ -46,6 +46,8 @@ describe("work style gate state machine", () => {
     const selected = transitionWorkStyleGateState(initialWorkStyleGateState(), {
       type: "select_style",
       proseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
     })
     const stillIncomplete = transitionWorkStyleGateState(selected, {
       type: "style_document_saved",
@@ -65,6 +67,8 @@ describe("work style gate state machine", () => {
     expect(ready).toEqual({
       status: "ready",
       selectedProseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
       styleDigest: "style-digest-2",
     })
     expect(canProceedPastWorkStyleGate(ready)).toBe(true)
@@ -74,6 +78,8 @@ describe("work style gate state machine", () => {
     const selected = transitionWorkStyleGateState(initialWorkStyleGateState(), {
       type: "select_style",
       proseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
     })
     const mismatched = transitionWorkStyleGateState(selected, {
       type: "style_document_saved",
@@ -85,10 +91,34 @@ describe("work style gate state machine", () => {
     expect(canProceedPastWorkStyleGate(mismatched)).toBe(false)
   })
 
+  it("requires the selected Markdown category rule paths in the saved style document", () => {
+    const selected = transitionWorkStyleGateState(initialWorkStyleGateState(), {
+      type: "select_style",
+      proseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+    })
+    const missingCategory = transitionWorkStyleGateState(selected, {
+      type: "style_document_saved",
+      markdown: completeStyle.replace("小说大类规则：表现输出/小说大类规则/爽文.md。", ""),
+      digest: "missing-category",
+    })
+    expect(missingCategory).toEqual(selected)
+
+    const missingPlatformRule = transitionWorkStyleGateState(selected, {
+      type: "style_document_saved",
+      markdown: completeStyle.replace("小说次大类规则：表现输出/小说次大类规则/飞卢.md。", ""),
+      digest: "missing-platform-rule",
+    })
+    expect(missingPlatformRule).toEqual(selected)
+  })
+
   it("invalidates readiness when the approved style document changes", () => {
     const ready = {
       status: "ready" as const,
       selectedProseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
       styleDigest: "approved-digest",
     }
     const invalidated = transitionWorkStyleGateState(ready, {
@@ -99,6 +129,8 @@ describe("work style gate state machine", () => {
     expect(invalidated).toEqual({
       status: "style_selected",
       selectedProseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
     })
     expect(canProceedPastWorkStyleGate(invalidated)).toBe(false)
   })
@@ -107,6 +139,8 @@ describe("work style gate state machine", () => {
     expect(() => transitionWorkStyleGateState(initialWorkStyleGateState(), {
       type: "select_style",
       proseStylePath: "表现输出/本作品描写/作品风格.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
     })).toThrow("笔风规则")
   })
 })

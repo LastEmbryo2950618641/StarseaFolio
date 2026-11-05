@@ -33,7 +33,9 @@ describe("cold-start style gate flow", () => {
   it("guides the agent into first-volume planning and returns the active volume panel state", async () => {
     const phasePrompts: string[] = []
     const discussInputs: Array<Record<string, unknown>> = []
+    const modelResponses: unknown[] = []
     let todoStep = 0
+    let settingsResponseCount = 0
     const model: AIModelPort = {
       info: { provider: "fixture", model: "volume-planner", available: true, contextWindowTokens: 64_000 },
       execute: async (request, options) => {
@@ -68,6 +70,14 @@ describe("cold-start style gate flow", () => {
           todoStep = 3
           artifact = {
             assistantMessage: "先提交规划方案。",
+            creationDeskSettings: {
+              descriptionRulePath: "表现输出/描写规则/自动.md",
+              proseStyleRulePath: "表现输出/笔风规则/默认笔风规则.md",
+              minimumWordCount: 2500,
+              maximumWordCount: 3500,
+              boundaryPace: "advance_allowed",
+              causalityFocus: "action",
+            },
             volumePlanMeta: { targetChapterCount: 8, targetWordCount: 24_000 },
             volumeSynopsis: { markdown: "# 第一卷梗概\n主角从边城崛起，逐步查明灵潮异变的源头。\n" },
             arcPlan: {
@@ -93,8 +103,19 @@ describe("cold-start style gate flow", () => {
             finalSelfReview: "卷规划已完成，正在结清任务状态。",
           }
         } else {
+          settingsResponseCount += 1
           artifact = {
-            assistantMessage: "我已按现有构思规划并写入第一卷，章节数与字数可继续调整。",
+            assistantMessage: settingsResponseCount === 1
+              ? "我已切换笔风并完成卷规划。"
+              : "我已按现有构思规划并写入第一卷，章节数与字数可继续调整。",
+            ...(settingsResponseCount === 1 ? {} : { creationDeskSettings: {
+              descriptionRulePath: "表现输出/描写规则/自动.md",
+              proseStyleRulePath: "表现输出/笔风规则/默认笔风规则.md",
+              minimumWordCount: 2500,
+              maximumWordCount: 3500,
+              boundaryPace: "advance_allowed",
+              causalityFocus: "action",
+            } }),
             volumePlanMeta: { targetChapterCount: 8, targetWordCount: 24_000 },
             volumeSynopsis: { markdown: "# 第一卷梗概\n主角从边城崛起，逐步查明灵潮异变的源头。\n" },
             arcPlan: {
@@ -103,6 +124,7 @@ describe("cold-start style gate flow", () => {
             finalSelfReview: "已分别提交卷目标、卷梗概与卷大纲，未写章节材料。",
           }
         }
+        modelResponses.push(artifact)
         return {
           result: {
             schemaVersion: 1,
@@ -129,14 +151,34 @@ describe("cold-start style gate flow", () => {
     await invoke(harness, "synopsis.conversation.start", base)
     const sent = await invoke<{
       volumePlanningStage?: boolean
-      messages: Array<{ role: string; content: string }>
+      autoContinue?: { message: string }
+      creationDeskSettings?: {
+        descriptionRulePath?: string
+        proseStyleRulePath?: string
+        minimumWordCount?: number
+        maximumWordCount?: number
+        boundaryPace?: string
+        causalityFocus?: string
+      }
+      messages: Array<{ role: string; content: string; choices?: Array<{
+        label: string
+        action: string
+        workStyleSelection?: {
+          proseStyleRulePath: string
+          novelMajorCategoryRulePath: string
+          novelSubcategoryRulePath: string
+        }
+      }> }>
     }>(harness, "synopsis.conversation.send", {
       ...base,
       message: "根据我的构思规划第一卷。",
+      batchProceed: true,
     })
 
     expect(phasePrompts.at(-1)).toContain("当前阶段：第一卷卷级规划")
     expect(phasePrompts.at(-1)).toContain("你必须主动完成卷规划")
+    expect(phasePrompts.some((prompt) => prompt.includes("creationDeskSettings")))
+      .toBe(true)
     expect(discussInputs.at(-1)?.synopsisDiscuss).toMatchObject({
       volumePlanning: {
         volumeFolderName: "第一卷 待命名",
@@ -145,8 +187,29 @@ describe("cold-start style gate flow", () => {
       },
     })
     expect(sent.volumePlanningStage).toBe(true)
+    expect(sent.autoContinue?.message).toContain("当前卷首次规划已通过写入门禁")
+    expect(modelResponses.at(-1)).toMatchObject({
+      creationDeskSettings: { minimumWordCount: 2500, maximumWordCount: 3500 },
+    })
+    expect(modelResponses.some((response) => (
+      typeof response === "object" && response !== null
+      && "creationDeskSettings" in response
+      && (response as { creationDeskSettings?: unknown }).creationDeskSettings !== undefined
+    ))).toBe(true)
+    expect(sent.creationDeskSettings).toEqual({
+      descriptionRulePath: "表现输出/描写规则/自动.md",
+      proseStyleRulePath: "表现输出/笔风规则/默认笔风规则.md",
+      minimumWordCount: 2500,
+      maximumWordCount: 3500,
+      boundaryPace: "advance_allowed",
+      causalityFocus: "action",
+    })
     expect(sent.messages.filter((message) => message.role === "assistant").at(-1)?.content)
       .toContain("卷规划首次写入已完成")
+    expect(sent.messages.filter((message) => message.role === "assistant").at(-1)?.content)
+      .toContain("写作设置已同步")
+    expect(sent.messages.filter((message) => message.role === "assistant").at(-1)?.choices?.length)
+      .toBeGreaterThanOrEqual(2)
     const plan = await invoke<{ content: string }>(harness, "workspace.read", {
       ...base,
       relativePath: "大纲/第一卷 待命名.批量计划.md",
@@ -329,18 +392,19 @@ describe("cold-start style gate flow", () => {
       message: "灾变来临前，主角发现自己能预知危险。",
     })
 
-    const assistant = sent.messages.find((message) => message.role === "assistant")
-    expect(assistant?.content).toContain("逐份对照预定义笔风规则")
+    const assistant = sent.messages.filter((message) => message.role === "assistant").at(-1)
     expect(assistant?.choices?.length).toBeGreaterThan(0)
-    expect(assistant?.choices?.some((choice) => (
-      choice.label.includes("表现输出/笔风规则/") && choice.label.includes(".md」")
+    expect(assistant?.choices?.every((choice) => (
+      choice.workStyleSelection?.proseStyleRulePath.startsWith("表现输出/笔风规则/") === true
+      && choice.workStyleSelection.novelMajorCategoryRulePath.startsWith("表现输出/小说大类规则/")
+      && choice.workStyleSelection.novelSubcategoryRulePath.startsWith("表现输出/小说次大类规则/")
     ))).toBe(true)
     expect(modelRequests.some((request) => request.phase === "synopsis_discuss")).toBe(true)
     expect(modelRequests.some((request) => (
       request.phase === "synopsis_discuss"
       && (request.input as { readEvidence: Array<{ ownerKind: string; ownerId: string; semanticText: string }> })
-        .readEvidence.some((evidence) => evidence.ownerKind === "workspace:prose_style_candidate"
-          && evidence.ownerId.startsWith("表现输出/笔风规则/")
+        .readEvidence.some((evidence) => evidence.ownerKind === "workspace:presentation_style_candidate"
+          && evidence.ownerId.startsWith("表现输出/")
           && evidence.semanticText.length > 0)
     ))).toBe(true)
     expect(sent.session.synopsisPath).toBe(started.session.synopsisPath)
@@ -359,9 +423,12 @@ describe("cold-start style gate flow", () => {
     const requestsBeforeSelection = modelRequests.length
     const selected = await invoke<{
       messages: Array<{ role: string; content: string }>
+      creationDeskSettings?: { proseStyleRulePath?: string }
+      autoContinue?: { message: string }
     }>(harness, "synopsis.conversation.send", {
       ...base,
-      message: assistant!.choices![0]!.label,
+      message: "按你的推荐来定风格",
+      batchProceed: true,
     })
     expect(selected.messages.find((message) => message.role === "assistant")?.content).toContain("审核")
     expect(modelRequests.at(-1)?.input).toMatchObject({
@@ -377,8 +444,10 @@ describe("cold-start style gate flow", () => {
     expect(assessWorkStyleMarkdown(returnedStyle)).toMatchObject({ complete: true })
     const styleMarkdown = await harness.container.workspace.readMarkdown(harness.workspaceRootRef, WORK_STYLE_RULE_PATH)
     expect(assessWorkStyleMarkdown(styleMarkdown).complete).toBe(true)
-    const selectedPath = assistant!.choices![0]!.label.match(/表现输出\/笔风规则\/[^」]+/u)?.[0]
+    const selectedPath = assistant!.choices![0]!.workStyleSelection?.proseStyleRulePath
     expect(selectedPath).toBeDefined()
+    expect(selected.creationDeskSettings?.proseStyleRulePath).toBe(selectedPath)
+    expect(selected.autoContinue?.message).toContain("当前卷的章节数")
     expect(styleMarkdown).toContain(selectedPath)
     expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, started.session.synopsisPath))
       .not.toContain("主角发现自己能预知危险")
@@ -429,9 +498,9 @@ describe("cold-start style gate flow", () => {
     })
 
     const assistant = sent.messages.find((message) => message.role === "assistant")
-    expect(assistant?.content).toContain("逐份对照预定义笔风规则")
     expect(assistant?.content).not.toContain("正式输出")
-    expect(assistant?.choices).toHaveLength(3)
+    expect(assistant?.choices?.length).toBeGreaterThanOrEqual(2)
+    expect(assistant?.choices?.length).toBeLessThanOrEqual(3)
     expect(assistant?.choices?.every((choice) => choice.action === "continue_discuss")).toBe(true)
     expect(sent.session.synopsisPath).toBe(started.session.synopsisPath)
     expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, started.session.synopsisPath))

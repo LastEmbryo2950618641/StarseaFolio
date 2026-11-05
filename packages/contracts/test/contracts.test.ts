@@ -15,6 +15,7 @@ import {
   historyManifestSchema,
   runtimeMetricSchema,
   turnStartPayloadSchema,
+  synopsisConversationSendResultSchema,
 } from "../src/index.js"
 
 const ids = {
@@ -25,6 +26,13 @@ const ids = {
 }
 
 describe("shared contracts", () => {
+  it("preserves rejected AI writing-rule paths in synopsis send results", () => {
+    const schema = synopsisConversationSendResultSchema.pick({ rejectedCreationDeskRulePaths: true })
+    expect(schema.parse({
+      rejectedCreationDeskRulePaths: ["表现输出/笔风规则/不存在.md"],
+    })).toEqual({ rejectedCreationDeskRulePaths: ["表现输出/笔风规则/不存在.md"] })
+  })
+
   it("allows a turn acceptance run to disable workspace chapter reads", () => {
     const payload = turnStartPayloadSchema.parse({
       projectId: ids.context,
@@ -35,6 +43,22 @@ describe("shared contracts", () => {
     })
 
     expect(payload.allowWorkspaceChapterReads).toBe(false)
+  })
+
+  it("treats empty optional presentation category paths as unselected", () => {
+    const payload = turnStartPayloadSchema.parse({
+      projectId: ids.context,
+      workspaceRootRef: "C:\\Worldseed\\Acceptance",
+      userInput: "Continue from persisted world state",
+      chapterSequence: 1,
+      presentation: {
+        novelMajorCategoryRulePath: "",
+        novelSubcategoryRulePath: "  ",
+      },
+    })
+
+    expect(payload.presentation?.novelMajorCategoryRulePath).toBeUndefined()
+    expect(payload.presentation?.novelSubcategoryRulePath).toBeUndefined()
   })
 
   it("uses model aliases instead of UUIDs in the model-facing result contract", () => {

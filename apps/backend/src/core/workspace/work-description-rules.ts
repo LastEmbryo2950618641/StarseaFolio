@@ -3,9 +3,13 @@
 export const WORK_DESCRIPTION_RULES_DIR = "表现输出/本作品描写"
 export const DESCRIPTION_RULES_DIR = "表现输出/描写规则"
 export const PROSE_STYLE_RULES_DIR = "表现输出/笔风规则"
+export const NOVEL_MAJOR_CATEGORY_RULES_DIR = "表现输出/小说大类规则"
+export const NOVEL_SUBCATEGORY_RULES_DIR = "表现输出/小说次大类规则"
+export const NOVEL_MAJOR_CATEGORY_RULE_PATH_PATTERN = /^表现输出\/小说大类规则\/[^/]+\.md$/u
+export const NOVEL_SUBCATEGORY_RULE_PATH_PATTERN = /^表现输出\/小说次大类规则\/[^/]+\.md$/u
 export function isSharedPresentationPath(path: string): boolean {
   const normalized = normalizeWorkspaceRelativePath(path)
-  return [DESCRIPTION_RULES_DIR, PROSE_STYLE_RULES_DIR]
+  return [DESCRIPTION_RULES_DIR, PROSE_STYLE_RULES_DIR, NOVEL_MAJOR_CATEGORY_RULES_DIR, NOVEL_SUBCATEGORY_RULES_DIR]
     .some((directory) => normalized === directory || normalized.startsWith(`${directory}/`))
 }
 export const AUTO_DESCRIPTION_RULE_PATH = `${DESCRIPTION_RULES_DIR}/自动.md`
@@ -23,7 +27,7 @@ export const ALWAYS_ON_DESCRIPTION_BASELINES = [
 
 const WORK_DESCRIPTION_FILE_PATTERN = /^表现输出\/本作品描写\/[^/]+\.md$/u
 const DESCRIPTION_RULE_FILE_PATTERN = /^表现输出\/描写规则\/[^/]+\.md$/u
-const USER_PRESET_PRESENTATION_FILE_PATTERN = /^表现输出\/(?:描写规则|笔风规则)\/[^/]+\.md$/u
+const USER_PRESET_PRESENTATION_FILE_PATTERN = /^表现输出\/(?:描写规则|笔风规则|小说大类规则|小说次大类规则)\/[^/]+\.md$/u
 
 /** Platform seed: always-on sensory timing baseline (when to write, not how). */
 export const SENSORY_DESCRIPTION_RULE_MARKDOWN = [

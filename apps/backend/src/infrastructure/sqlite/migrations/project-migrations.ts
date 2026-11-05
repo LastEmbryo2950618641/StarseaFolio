@@ -1323,4 +1323,15 @@ export const projectMigrations = Object.freeze([
       )
     )`,
   ]),
+  defineSqlMigration<ProjectDatabase>(57, "057_work_style_gate_categories", [
+    "ALTER TABLE work_style_gate_states ADD COLUMN novel_major_category_rule_path TEXT",
+    "ALTER TABLE work_style_gate_states ADD COLUMN novel_subcategory_rule_path TEXT",
+    `UPDATE work_style_gate_states SET
+      status = 'awaiting_choice',
+      selected_prose_style_path = NULL,
+      style_digest = NULL,
+      novel_major_category_rule_path = NULL,
+      novel_subcategory_rule_path = NULL
+      WHERE status <> 'awaiting_choice'`,
+  ]),
 ])

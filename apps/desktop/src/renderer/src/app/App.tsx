@@ -52,7 +52,7 @@ import { WorkspaceNameDialog } from "../features/workspace/WorkspaceNameDialog.j
 import { AUTO_DESCRIPTION_RULE_PATH, canCreateFolderInDirectory, findDuplicateVolumeSequence, isValidVolumeFolderName, isChapterVolumeContainerPath, isVolumeDirectoryPath, resolveCreateDestination } from "../features/workspace/workspace-locks.js"
 import { EditorArea } from "../features/editor/EditorArea.js"
 import { ChapterBrowseDetailRail } from "../features/editor/ChapterBrowseDetailRail.js"
-import { useCreationDeskPresentationPreferences, reconcileSelectedRulePath } from "../features/editor/creation-desk-presentation-preferences.js"
+import { mapAiCreationDeskSettings, useCreationDeskPresentationPreferences, reconcileSelectedRulePath } from "../features/editor/creation-desk-presentation-preferences.js"
 import { SettingsLineagePanel } from "../features/settings/SettingsLineagePanel.js"
 import { ChapterWorkspaceRail } from "../features/editor/ChapterWorkspaceRail.js"
 import type { RelatedChapterArtifact } from "../features/editor/ChapterArtifactRelatedRail.js"
@@ -182,6 +182,8 @@ export function App(): React.JSX.Element {
   const {
     descriptionRule,
     proseRule,
+    novelMajorCategoryRulePath,
+    novelSubcategoryRulePath,
     minimumWordCount,
     maximumWordCount,
     boundaryPace,
@@ -1458,6 +1460,8 @@ export function App(): React.JSX.Element {
         workspaceRootRef: project.workspaceRootRef,
         message,
         presentation: {
+          ...(novelMajorCategoryRulePath.trim().length === 0 ? {} : { novelMajorCategoryRulePath }),
+          ...(novelSubcategoryRulePath.trim().length === 0 ? {} : { novelSubcategoryRulePath }),
           ...(descriptionRule.length === 0 ? {} : { descriptionRulePath: descriptionRule }),
           ...(proseRule.length === 0 ? {} : { proseStyleRulePath: proseRule }),
           minimumWordCount: parsedMinimumWordCount,
@@ -1508,6 +1512,19 @@ export function App(): React.JSX.Element {
       })
       pollStopped = true
       setSynopsisConversation(sent)
+      let creationDeskSettingsNotice: string | undefined
+      if (sent.creationDeskSettings !== undefined) {
+        const mapped = mapAiCreationDeskSettings(
+          sent.creationDeskSettings,
+          sent.rejectedCreationDeskRulePaths,
+        )
+        updatePresentation(mapped.patch)
+        if (mapped.rejectedRulePaths.length > 0) {
+          creationDeskSettingsNotice = `AI 选择的规则未能切换：${mapped.rejectedRulePaths.join("、")}。已应用其余有效设置，请检查写作设置。`
+        }
+      } else if ((sent.rejectedCreationDeskRulePaths?.length ?? 0) > 0) {
+        creationDeskSettingsNotice = `AI 选择的规则未能切换：${sent.rejectedCreationDeskRulePaths!.join("、")}。写作设置保持原样。`
+      }
       if (sent.volumePlanningStage === true) {
         const volumeFolderName = sent.session.synopsisPath.replaceAll("\\", "/").split("/")[1]
         if (volumeFolderName !== undefined && volumeFolderName.length > 0) {
@@ -1547,6 +1564,9 @@ export function App(): React.JSX.Element {
           await refreshChapterDraftVersions(sent.appendedDraft.revisionTaskId)
           setPostCommitNotice(`已写入草稿 ${sent.appendedDraft.draftLabel}。确认后才会覆盖正式正文。`)
         }
+      }
+      if (creationDeskSettingsNotice !== undefined) {
+        setPostCommitNotice(creationDeskSettingsNotice)
       }
       setSynopsisStream(undefined)
       setSynopsisConversationBusy(false)
@@ -1718,6 +1738,8 @@ export function App(): React.JSX.Element {
         workspaceRootRef: project.workspaceRootRef,
         messageId,
         presentation: {
+          ...(novelMajorCategoryRulePath.trim().length === 0 ? {} : { novelMajorCategoryRulePath }),
+          ...(novelSubcategoryRulePath.trim().length === 0 ? {} : { novelSubcategoryRulePath }),
           ...(descriptionRule.length === 0 ? {} : { descriptionRulePath: descriptionRule }),
           ...(proseRule.length === 0 ? {} : { proseStyleRulePath: proseRule }),
           minimumWordCount: parsedMinimumWordCount,
@@ -1835,6 +1857,8 @@ export function App(): React.JSX.Element {
         serviceTier: activeModelProfile.serviceTier,
       }
       const presentation = {
+        ...(novelMajorCategoryRulePath.trim().length === 0 ? {} : { novelMajorCategoryRulePath }),
+        ...(novelSubcategoryRulePath.trim().length === 0 ? {} : { novelSubcategoryRulePath }),
         ...(descriptionRule.length === 0 ? {} : { descriptionRulePath: descriptionRule }),
         ...(proseRule.length === 0 ? {} : { proseStyleRulePath: proseRule }),
         minimumWordCount: parsedMinimumWordCount,
@@ -2780,6 +2804,8 @@ export function App(): React.JSX.Element {
     && entry.path !== AUTO_DESCRIPTION_RULE_PATH
   )).map((entry) => entry.path), [report])
   const proseRules = useMemo(() => report.inventory.filter((entry) => entry.kind === "file" && entry.path.startsWith("表现输出/笔风规则/")).map((entry) => entry.path), [report])
+  const novelMajorCategoryRules = useMemo(() => report.inventory.filter((entry) => entry.kind === "file" && entry.path.startsWith("表现输出/小说大类规则/")).map((entry) => entry.path), [report])
+  const novelSubcategoryRules = useMemo(() => report.inventory.filter((entry) => entry.kind === "file" && entry.path.startsWith("表现输出/小说次大类规则/")).map((entry) => entry.path), [report])
 
   useEffect(() => {
     const next = reconcileSelectedRulePath(descriptionRule, descriptionRules)
@@ -2792,6 +2818,18 @@ export function App(): React.JSX.Element {
     if (next === undefined) return
     updatePresentation({ proseRule: next })
   }, [proseRule, proseRules, updatePresentation])
+
+  useEffect(() => {
+    const next = reconcileSelectedRulePath(novelMajorCategoryRulePath, novelMajorCategoryRules)
+    if (next === undefined) return
+    updatePresentation({ novelMajorCategoryRulePath: next })
+  }, [novelMajorCategoryRulePath, novelMajorCategoryRules, updatePresentation])
+
+  useEffect(() => {
+    const next = reconcileSelectedRulePath(novelSubcategoryRulePath, novelSubcategoryRules)
+    if (next === undefined) return
+    updatePresentation({ novelSubcategoryRulePath: next })
+  }, [novelSubcategoryRulePath, novelSubcategoryRules, updatePresentation])
 
   useEffect(() => {
     if (postCommitNotice === undefined) return
@@ -3149,11 +3187,15 @@ export function App(): React.JSX.Element {
           prompt={prompt}
           descriptionRule={descriptionRule}
           proseRule={proseRule}
+          novelMajorCategoryRulePath={novelMajorCategoryRulePath}
+          novelSubcategoryRulePath={novelSubcategoryRulePath}
           minimumWordCount={minimumWordCount}
           maximumWordCount={maximumWordCount}
           wordCountValid={wordCountValid}
           descriptionRules={descriptionRules}
           proseRules={proseRules}
+          novelMajorCategoryRules={novelMajorCategoryRules}
+          novelSubcategoryRules={novelSubcategoryRules}
           boundaryPace={boundaryPace}
           causalityFocus={causalityFocus}
           onContentChange={setContent}
@@ -3162,6 +3204,8 @@ export function App(): React.JSX.Element {
           onPromptChange={setPrompt}
           onDescriptionRuleChange={(value) => { updatePresentation({ descriptionRule: value }); }}
           onProseRuleChange={(value) => { updatePresentation({ proseRule: value }); }}
+          onNovelMajorCategoryRuleChange={(value) => { updatePresentation({ novelMajorCategoryRulePath: value, novelSubcategoryRulePath: "", proseRule: "" }); }}
+          onNovelSubcategoryRuleChange={(value) => { updatePresentation({ novelSubcategoryRulePath: value, proseRule: "" }); }}
           onMinimumWordCountChange={(value) => { updatePresentation({ minimumWordCount: value }); }}
           onMaximumWordCountChange={(value) => { updatePresentation({ maximumWordCount: value }); }}
           onBoundaryPaceChange={(value) => { updatePresentation({ boundaryPace: value }); }}

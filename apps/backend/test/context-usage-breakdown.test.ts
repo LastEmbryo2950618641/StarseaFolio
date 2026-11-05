@@ -121,7 +121,45 @@ describe("buildContextUsageBreakdown", () => {
       ],
     })
     expect(result.usedTokens).toBe(12_000)
+    expect(result.categories.reduce((sum, category) => sum + category.tokens, 0)).toBe(result.usedTokens)
+    expect(result.categories.some((category) => category.id === "unclassified")).toBe(false)
+    expect(result.categories.reduce((sum, category) => sum + category.share, 0)).toBeCloseTo(1)
     const ids = new Set(result.categories.map((category) => category.id))
     expect(ids.has("presentation_rules") || ids.has("evidence") || ids.has("narrative") || ids.has("memory")).toBe(true)
+  })
+
+  it("scales estimated categories proportionally when the provider total is lower", () => {
+    const result = buildContextUsageBreakdown({
+      contextWindowTokens: 100_000,
+      lastRequestInputTokens: 100,
+      messages: [
+        message({ kind: "system_rules", sequence: 0, content: "rules ".repeat(300) }),
+        message({ kind: "phase_response", sequence: 1, content: "answer ".repeat(300) }),
+      ],
+    })
+
+    expect(result.categories.reduce((sum, category) => sum + category.tokens, 0)).toBe(result.usedTokens)
+    expect(result.categories.some((category) => category.id === "unclassified")).toBe(false)
+  })
+
+  it("scales estimated categories proportionally when the provider total is higher", () => {
+    const systemEstimate = estimateModelMessageTokens("rules ".repeat(30))
+    const conversationEstimate = estimateModelMessageTokens("answer ".repeat(70))
+    const estimateTotal = systemEstimate + conversationEstimate
+    const result = buildContextUsageBreakdown({
+      contextWindowTokens: 100_000,
+      lastRequestInputTokens: 10_000,
+      messages: [
+        message({ kind: "system_rules", sequence: 0, content: "rules ".repeat(30) }),
+        message({ kind: "phase_response", sequence: 1, content: "answer ".repeat(70) }),
+      ],
+    })
+    const system = result.categories.find((category) => category.id === "system_rules")
+    const conversation = result.categories.find((category) => category.id === "conversation")
+
+    expect(system?.tokens / result.usedTokens).toBeCloseTo(systemEstimate / estimateTotal, 3)
+    expect(conversation?.tokens / result.usedTokens).toBeCloseTo(conversationEstimate / estimateTotal, 3)
+    expect(result.categories.reduce((sum, category) => sum + category.tokens, 0)).toBe(result.usedTokens)
+    expect(result.categories.reduce((sum, category) => sum + category.share, 0)).toBeCloseTo(1)
   })
 })

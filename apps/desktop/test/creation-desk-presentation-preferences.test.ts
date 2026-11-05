@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import {
   DEFAULT_CREATION_DESK_PRESENTATION,
+  mapAiCreationDeskSettings,
   loadCreationDeskPresentationPreferences,
   reconcileSelectedRulePath,
 } from "../src/renderer/src/features/editor/creation-desk-presentation-preferences.js"
@@ -35,10 +36,37 @@ afterEach(() => {
 })
 
 describe("creation desk presentation preferences", () => {
+  it("maps AI setting updates into the same editable controls", () => {
+    expect(mapAiCreationDeskSettings({
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+      descriptionRulePath: "表现输出/描写规则/自动.md",
+      proseStyleRulePath: "表现输出/笔风规则/网文白话.md",
+      minimumWordCount: 2500,
+      maximumWordCount: 3500,
+      boundaryPace: "hold_without_resolution",
+      causalityFocus: "action",
+    }, ["表现输出/笔风规则/不存在.md"])).toEqual({
+      patch: {
+        novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+        novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+        descriptionRule: "",
+        proseRule: "表现输出/笔风规则/网文白话.md",
+        minimumWordCount: "2500",
+        maximumWordCount: "3500",
+        boundaryPace: "hold_without_resolution",
+        causalityFocus: "action",
+      },
+      rejectedRulePaths: ["表现输出/笔风规则/不存在.md"],
+    })
+  })
+
   it("restores word counts saved as numbers instead of falling back to 2000–3000", () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
       descriptionRule: "",
       proseRule: "表现输出/笔风规则/虚渊玄风格.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
       minimumWordCount: 10000,
       maximumWordCount: 20000,
       boundaryPace: "advance_allowed",
@@ -48,6 +76,8 @@ describe("creation desk presentation preferences", () => {
     expect(loaded.minimumWordCount).toBe("10000")
     expect(loaded.maximumWordCount).toBe("20000")
     expect(loaded.proseRule).toBe("表现输出/笔风规则/虚渊玄风格.md")
+    expect(loaded.novelMajorCategoryRulePath).toBe("表现输出/小说大类规则/爽文.md")
+    expect(loaded.novelSubcategoryRulePath).toBe("表现输出/小说次大类规则/飞卢.md")
     expect(loaded).not.toEqual(DEFAULT_CREATION_DESK_PRESENTATION)
   })
 

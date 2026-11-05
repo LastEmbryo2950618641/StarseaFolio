@@ -116,6 +116,16 @@ describe("TurnOrchestrator", () => {
       "表现输出/描写规则/近景跟随.md",
       "# 近景跟随\n\n保持贴近当前行动主体的观察距离。\n",
     )
+    await fixture.workspace.saveUserMarkdown(
+      fixture.workspaceRoot,
+      "表现输出/小说大类规则/爽文.md",
+      "# 爽文规则\n\n成长和回报须由行动与代价支撑。\n",
+    )
+    await fixture.workspace.saveUserMarkdown(
+      fixture.workspaceRoot,
+      "表现输出/小说次大类规则/飞卢.md",
+      "# 平台规则\n\n以所选规则正文作为受众与内容约束。\n",
+    )
     const fake = new FakeAiModelAdapter(randomUUID)
     let interpretInput: TurnPhaseInput | undefined
     const model: AIModelPort = {
@@ -134,6 +144,8 @@ describe("TurnOrchestrator", () => {
       chapterSequence: 1,
       presentation: {
         descriptionRulePath: "表现输出/描写规则/近景跟随.md",
+        novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+        novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
         minimumWordCount: 2000,
         maximumWordCount: 3000,
       },
@@ -147,6 +159,8 @@ describe("TurnOrchestrator", () => {
       "表现输出/描写规则/感官描写.md",
       "表现输出/描写规则/去AI味.md",
       "表现输出/描写规则/近景跟随.md",
+      "表现输出/小说大类规则/爽文.md",
+      "表现输出/小说次大类规则/飞卢.md",
     ]))
     expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId.endsWith("角色出场.md"))?.semanticText)
       .toContain("用户指定的角色出场规则")
@@ -156,6 +170,10 @@ describe("TurnOrchestrator", () => {
     ))
     expect(descriptionEvidence?.semanticText).toContain("保持贴近当前行动主体")
     expect(descriptionEvidence?.semanticText).toContain("【描写·本轮锁定】")
+    expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/小说大类规则/爽文.md")?.semanticText)
+      .toContain("成长和回报须由行动与代价支撑")
+    expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/小说次大类规则/飞卢.md")?.semanticText)
+      .toContain("以所选规则正文作为受众与内容约束")
     const sensoryEvidence = interpretInput?.readEvidence.find((evidence) => (
       evidence.ownerId === "表现输出/描写规则/感官描写.md"
     ))

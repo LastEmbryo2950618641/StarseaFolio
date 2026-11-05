@@ -107,12 +107,19 @@ export const chapterNarrativeIntentSchema = z.object({
 })
 export type ChapterNarrativeIntent = z.infer<typeof chapterNarrativeIntentSchema>
 
+const optionalPresentationRulePath = (pattern: RegExp) => z.preprocess(
+  (value) => typeof value === "string" && value.trim().length === 0 ? undefined : value,
+  z.string().trim().regex(pattern).optional(),
+)
+
 export const turnStartPayloadSchema = z.object({
   projectId: idSchema,
   workspaceRootRef: z.string().min(1),
   userInput: z.string().trim().min(1),
   chapterSequence: z.number().int().positive(),
   presentation: z.object({
+    novelMajorCategoryRulePath: optionalPresentationRulePath(/^表现输出\/小说大类规则\/[^/]+\.md$/u),
+    novelSubcategoryRulePath: optionalPresentationRulePath(/^表现输出\/小说次大类规则\/[^/]+\.md$/u),
     descriptionRulePath: z.string().trim().min(1).optional(),
     proseStyleRulePath: z.string().trim().min(1).optional(),
     minimumWordCount: z.number().int().positive().default(2000),

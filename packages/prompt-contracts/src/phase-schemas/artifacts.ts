@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import {
   aiPhaseSchema,
+  creationDeskSettingsUpdateSchema,
   discussFocusKindSchema,
   type AIPhase,
 } from "@worldseed/contracts"
@@ -714,6 +715,11 @@ export const synopsisDiscussArtifactSchema = z.object({
   }).optional(),
   choices: z.array(z.object({
     label: z.string().min(1),
+    workStyleSelection: z.object({
+      proseStyleRulePath: z.string().trim().regex(/^表现输出\/笔风规则\/[^/]+\.md$/u),
+      novelMajorCategoryRulePath: z.string().trim().regex(/^表现输出\/小说大类规则\/[^/]+\.md$/u),
+      novelSubcategoryRulePath: z.string().trim().regex(/^表现输出\/小说次大类规则\/[^/]+\.md$/u),
+    }).optional(),
     action: z.enum([
       "start_turn",
       "continue_discuss",
@@ -730,6 +736,8 @@ export const synopsisDiscussArtifactSchema = z.object({
   stagingPromote: synopsisStagingPromoteArtifactSchema.optional(),
   /** Create or overwrite 本作品描写 Markdown; applied immediately (not 设定集 promote). */
   presentationWrites: z.array(synopsisPresentationWriteSchema).min(1).max(8).optional(),
+  /** Update the user's editable creation-desk writing controls for upcoming turns. */
+  creationDeskSettings: creationDeskSettingsUpdateSchema.optional(),
   arcPlan: z.object({
     markdown: z.string().min(1).max(20_000),
     estimatedChapterCount: z.number().int().positive().max(50).optional(),
