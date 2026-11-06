@@ -385,8 +385,12 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                 <p>{isRail
                   ? "本章草稿讨论"
                   : "在对话框输入你对本书小小的构思，你的智能助手--结衣会帮助你的。"}</p>
-                {props.session === undefined && !isRail
-                  ? <span className="creation-desk-empty-hint">发送首条消息后将创建占位文件</span>
+                {!isRail
+                  ? <span className="creation-desk-empty-hint">
+                      {batchProceed
+                        ? "批量推进已开启：章节完成后会自动连续推进。关闭后，结衣会逐章引导你梳理每章内容。"
+                        : "批量推进已关闭：结衣会逐章引导你梳理每章内容；开启后，章节完成会自动连续推进。"}
+                    </span>
                   : null}
               </div>
             : <>
@@ -558,7 +562,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                 </details>
                 <UiTooltip label={batchProceed
                   ? "已开启：一章写完自动下一章，梗概/细纲/正文不逐步停等确认"
-                  : "已关闭：梗概→细纲→正文每一步停下等你确认后再继续"}>
+                  : "已关闭：AI 会逐章引导你讨论梗概、细纲和正文；每步由你确认后再继续"}>
                   <button
                     type="button"
                     className={`model-toggle creation-desk-batch-proceed${batchProceed ? " enabled" : ""}`}
