@@ -1,6 +1,6 @@
 appId: com.worldseed.desktop
-productName: WorldSeed
-copyright: Copyright © WorldSeed
+productName: 星海余页
+copyright: Copyright © StarseaFolio
 directories:
   output: release
   buildResources: resources
@@ -20,7 +20,7 @@ extraResources:
   - from: build-info.json
     to: build-info.json
 win:
-  executableName: WorldSeed
+  executableName: StarseaFolio
   target:
     - target: nsis
       arch:
@@ -34,9 +34,9 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  shortcutName: WorldSeed
-  uninstallDisplayName: WorldSeed
-  artifactName: WorldSeed-${version}-Setup.${ext}
+  shortcutName: 星海余页
+  uninstallDisplayName: 星海余页
+  artifactName: Starsea-Folio-${version}-Setup.${ext}
 portable:
-  artifactName: WorldSeed-${version}-Portable.${ext}
+  artifactName: Starsea-Folio-${version}-Portable.${ext}
 npmRebuild: true

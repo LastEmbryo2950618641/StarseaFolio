@@ -129,12 +129,12 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           BUILD_NUMBER: ${{ steps.version.outputs.buildNumber }}
         run: |
-          $downloadUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/WorldSeed-$env:RELEASE_VERSION-Setup.exe"
+          $downloadUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/Starsea-Folio-$env:RELEASE_VERSION-Setup.exe"
           $manifest = [ordered]@{
             version = $env:RELEASE_VERSION
             buildNumber = "$env:BUILD_NUMBER"
             downloadUrl = $downloadUrl
-            productName = "WorldSeed"
+            productName = "星海余页 (StarseaFolio)"
           }
           ($manifest | ConvertTo-Json) | Set-Content -Path "apps/desktop/release/latest.json" -Encoding utf8
           Get-Content "apps/desktop/release/latest.json"
@@ -161,7 +161,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: WorldSeed ${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.buildNumber }})
+          name: StarseaFolio ${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.buildNumber }})
           draft: false
           make_latest: true
           prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true' }}

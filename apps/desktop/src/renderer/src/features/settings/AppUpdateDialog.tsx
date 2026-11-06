@@ -47,7 +47,7 @@ export function AppUpdateDialog(props: Props): React.JSX.Element {
     : `${state.local.version}（构建 ${state.local.buildNumber}）`
 
   let title = "应用更新"
-  let subtitle = "WorldSeed"
+  let subtitle = "星海余页 · StarseaFolio"
   let body: React.ReactNode = null
   let footer: React.ReactNode = null
 
@@ -109,7 +109,7 @@ export function AppUpdateDialog(props: Props): React.JSX.Element {
     subtitle = remoteLabel ?? "可以安装"
     body = (
       <>
-        <p>安装包已就绪。点击后将退出 WorldSeed 并打开安装向导（可选择安装目录）。</p>
+        <p>安装包已就绪。点击后将退出星海余页并打开安装向导（可选择安装目录）。</p>
         <p className="app-update-dialog-meta">请先保存未提交的工作，再开始安装。</p>
       </>
     )

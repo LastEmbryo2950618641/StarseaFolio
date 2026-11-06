@@ -59,7 +59,7 @@ pnpm --filter @worldseed/backend start:http
 
 ```ini
 [Unit]
-Description=WorldSeed HTTP backend
+Description=StarseaFolio HTTP backend
 After=network.target
 
 [Service]

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { cpSync, existsSync } from "node:fs"
 import { loadEnvFile } from "node:process"
 import { join, resolve } from "node:path"
 
@@ -15,6 +15,16 @@ import { registerWindowControls, unregisterWindowControls } from "./window-contr
 import { registerNativeMenuActions, unregisterNativeMenuActions } from "./native-menu-actions.js"
 
 const backend = new BackendProcess()
+
+const appDataDirectory = app.getPath("appData")
+const legacyUserDataPath = join(appDataDirectory, "WorldSeed")
+const userDataPath = join(appDataDirectory, "StarseaFolio")
+
+if (existsSync(legacyUserDataPath) && !existsSync(userDataPath)) {
+  cpSync(legacyUserDataPath, userDataPath, { recursive: true, errorOnExist: true })
+}
+
+app.setPath("userData", userDataPath)
 
 if (!app.isPackaged && process.env.WORLDSEED_CDP_PORT !== undefined) {
   app.commandLine.appendSwitch("remote-debugging-port", process.env.WORLDSEED_CDP_PORT)

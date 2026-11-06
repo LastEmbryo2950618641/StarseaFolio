@@ -1,4 +1,4 @@
-# WorldSeed Web（复用桌面 renderer）
+# StarseaFolio Web（复用桌面 renderer）
 
 与 Electron 桌面共用 `apps/desktop/src/renderer` UI，通过 `POST /rpc` + Bearer 连接远程 backend。
 

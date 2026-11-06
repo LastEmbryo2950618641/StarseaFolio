@@ -3,7 +3,7 @@
 写正文草稿、正式推演正文、修订正文时必须遵守。梗概/细纲可简写，但不得用梗概腔冒充正文。
 
 > **去 AI 味 / 对话 / 人味 / 情绪演出 / 句式节奏**：以平台 Skill（阶段默认包或 `load_skill`）加载的 vendor 原文为准（`resources/vendor/chinese-webnovel-skills/`，[tance-mang/chinese-webnovel-skills](https://github.com/tance-mang/chinese-webnovel-skills) MIT）。系统规则只常驻短索引，不塞全文。本文件**不替代**那些 skill。  
-> **本文件专责**：WorldSeed 交付硬闸、冲突密度、章钩/连贯、平台特有约束（共体、标签、计数等）。  
+> **本文件专责**：StarseaFolio 交付硬闸、冲突密度、章钩/连贯、平台特有约束（共体、标签、计数等）。
 > 另参考（未全文 vendor）：[zenstory-ai/oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode)、[op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh)、[LifelongLazyLearner/qu-ai-wei](https://github.com/LifelongLazyLearner/qu-ai-wei)、[LAY-lgtm/novel-writing-framework](https://github.com/LAY-lgtm/novel-writing-framework)。无许可证仓库不纳入。
 
 ## 0. 交付硬闸（写完先自查，不过则改后再交）

@@ -38,7 +38,7 @@ export type UpdateCheckResult = Readonly<{
 }>
 
 export const DEFAULT_UPDATE_URL =
-  "https://github.com/LastEmbryo2950618641/WorldSeed/releases/latest/download/latest.json"
+  "https://github.com/LastEmbryo2950618641/StarseaFolio/releases/latest/download/latest.json"
 
 export const UPDATE_INTERVAL_OPTIONS: readonly UpdateCheckIntervalHours[] = [1, 2, 4, 8, 24]
 
@@ -52,7 +52,7 @@ export function defaultUpdatePrefs(): AppUpdatePrefs {
 
 export async function readLocalAppIdentity(): Promise<LocalAppIdentity> {
   const version = app.getVersion()
-  const productName = app.isPackaged ? "WorldSeed" : "WorldSeed"
+  const productName = "星海余页 (StarseaFolio)"
   const buildNumber = await readBuildNumber()
   return { productName, version, buildNumber }
 }
@@ -125,7 +125,7 @@ export async function fetchUpdateManifest(updateUrl: string): Promise<UpdateMani
   const url = updateUrl.trim()
   if (url.length === 0) throw new Error("更新地址不能为空")
   const response = await fetch(url, {
-    headers: { Accept: "application/json", "User-Agent": "WorldSeed-Updater" },
+    headers: { Accept: "application/json", "User-Agent": "StarseaFolio-Updater" },
     redirect: "follow",
   })
   if (!response.ok) {

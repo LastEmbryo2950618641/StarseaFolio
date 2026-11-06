@@ -2,8 +2,8 @@
   "name": "@worldseed/desktop",
   "version": "0.1.1",
   "private": true,
-  "description": "WorldSeed desktop novel writing app",
-  "author": "WorldSeed",
+  "description": "星海余页 (StarseaFolio) desktop novel writing app",
+  "author": "StarseaFolio",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {

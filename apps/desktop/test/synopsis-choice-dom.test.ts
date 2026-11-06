@@ -39,7 +39,7 @@ describe.skipIf(executable === undefined)("synopsis choice DOM fixture", () => {
             if (request.url === "/favicon.ico") { response.statusCode = 204; response.end(); return }
             if (request.url !== "/choice-fixture") { next(); return }
             response.setHeader("Content-Type", "text/html")
-            response.end(`<html><head><title>WorldSeed choice fixture</title></head><body><div id="root" style="height:100vh"></div><script type="module" src="/@fs/${fixturePath}"></script></body></html>`)
+            response.end(`<html><head><title>StarseaFolio choice fixture</title></head><body><div id="root" style="height:100vh"></div><script type="module" src="/@fs/${fixturePath}"></script></body></html>`)
           })
         },
       }],

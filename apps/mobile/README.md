@@ -1,4 +1,4 @@
-# WorldSeed Mobile（Expo / Android）
+# StarseaFolio Mobile（Expo / Android）
 
 手机端走**同一套后端** `ClientRequest` / `ClientResponse`：`POST /rpc` + `WS /events`。  
 **不要**把服务器 SSH 密码填进 App；只用部署时配置的 `WORLDSEED_API_TOKEN`。

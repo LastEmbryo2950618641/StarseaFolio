@@ -1,4 +1,4 @@
-> 来源：tance-mang/chinese-webnovel-skills（MIT）。WorldSeed 原样纳入平台规则；除摘除 YAML frontmatter 外不改正文。
+> 来源：tance-mang/chinese-webnovel-skills（MIT）。StarseaFolio 原样纳入平台规则；除摘除 YAML frontmatter 外不改正文。
 
 # 去 AI 味深度清单（Anti-AI Checklist）
 

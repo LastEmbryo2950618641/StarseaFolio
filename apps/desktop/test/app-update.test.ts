@@ -10,7 +10,7 @@ import {
 } from "../src/main/app-update.js"
 
 const local: LocalAppIdentity = {
-  productName: "WorldSeed",
+  productName: "星海余页 (StarseaFolio)",
   version: "0.1.0",
   buildNumber: "1",
 }
@@ -64,13 +64,13 @@ describe("app update compare", () => {
     expect(parseUpdateManifest({
       version: "0.1.1",
       buildNumber: 12,
-      downloadUrl: "https://example.com/WorldSeed-0.1.1-Setup.exe",
-      productName: "WorldSeed",
+      downloadUrl: "https://example.com/Starsea-Folio-0.1.1-Setup.exe",
+      productName: "星海余页 (StarseaFolio)",
     })).toEqual({
       version: "0.1.1",
       buildNumber: "12",
-      downloadUrl: "https://example.com/WorldSeed-0.1.1-Setup.exe",
-      productName: "WorldSeed",
+      downloadUrl: "https://example.com/Starsea-Folio-0.1.1-Setup.exe",
+      productName: "星海余页 (StarseaFolio)",
     })
   })
 

@@ -188,14 +188,14 @@ export function installHttpWorldseedBridge(session: WebSession): WorldseedBridge
     setActiveWorkDirectory: async () => booksSettings(),
     removeWorkDirectory: async () => booksSettings(),
     getAppUpdateInfo: async () => ({
-      local: { productName: "WorldSeed Web", version: "0.1.0", buildNumber: "web" },
+      local: { productName: "StarseaFolio Web", version: "0.1.0", buildNumber: "web" },
       update: { updateUrl: "https://example.invalid/worldseed-web" },
     }),
     saveAppUpdatePrefs: async () => booksSettings(),
     checkAppUpdate: async () => ({
       checkedAtMs: Date.now(),
       updateAvailable: false,
-      local: { productName: "WorldSeed Web", version: "0.1.0", buildNumber: "web" },
+      local: { productName: "StarseaFolio Web", version: "0.1.0", buildNumber: "web" },
       skipped: true,
       reason: "web-build",
     }),

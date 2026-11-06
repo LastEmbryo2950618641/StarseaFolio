@@ -90,7 +90,7 @@ export const DEAI_DESCRIPTION_RULE_MARKDOWN = [
   "",
   "> 职责：压掉机器腔与模板句，让正文读起来像人写的场面。不管题材腔、笔风词表；那些由笔风规则 / 本作品描写负责。",
   ">",
-  "> **完整去味 / 对话 / 人味 / 情绪演出**：以平台 skill（`load_skill` / 阶段默认包）中的 `chinese-webnovel-skills` vendor 原文为准（MIT，WorldSeed 不擅自删改）。本文件是描写目录里的**短基线提醒**；冲突时以更具体的 skill 条款为准。",
+  "> **完整去味 / 对话 / 人味 / 情绪演出**：以平台 skill（`load_skill` / 阶段默认包）中的 `chinese-webnovel-skills` vendor 原文为准（MIT，StarseaFolio 不擅自删改）。本文件是描写目录里的**短基线提醒**；冲突时以更具体的 skill 条款为准。",
   "",
   "## 本轮身份",
   "",

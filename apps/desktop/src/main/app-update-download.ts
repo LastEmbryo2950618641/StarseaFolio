@@ -24,7 +24,7 @@ export function resolveUpdateDownloadPath(downloadUrl: string, version: string, 
   const fromUrl = basename(new URL(downloadUrl).pathname)
   const safeName = fromUrl.toLowerCase().endsWith(".exe")
     ? fromUrl
-    : `WorldSeed-${version}-b${buildNumber}-Setup.exe`
+    : `Starsea-Folio-${version}-b${buildNumber}-Setup.exe`
   return join(app.getPath("temp"), "worldseed-updates", safeName)
 }
 
@@ -51,7 +51,7 @@ export async function startUpdateInstallerDownload(input: Readonly<{
     const response = await fetch(input.downloadUrl, {
       signal: controller.signal,
       redirect: "follow",
-      headers: { "User-Agent": "WorldSeed-Updater" },
+      headers: { "User-Agent": "StarseaFolio-Updater" },
     })
     if (!response.ok) {
       throw new Error(`下载失败（HTTP ${String(response.status)}）`)

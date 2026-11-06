@@ -1,6 +1,6 @@
 # 未 vendor 的上游（有意跳过）
 
-WorldSeed 不把下列仓库原文拷进 `resources/vendor/`，避免许可传染或无授权风险。
+StarseaFolio 不把下列仓库原文拷进 `resources/vendor/`，避免许可传染或无授权风险。
 
 ## GPL-3.0（不整仓搬入提示词正文）
 
@@ -25,7 +25,7 @@ WorldSeed 不把下列仓库原文拷进 `resources/vendor/`，避免许可传�
 
 ## 已用自有实现覆盖的能力
 
-| 上游想法 | WorldSeed 落点 |
+| 上游想法 | StarseaFolio 落点 |
 |----------|----------------|
 | 开书定叙事声音 | `book-cold-start` + `作品风格.md` 门禁 |
 | 去 AI / 对话 | `chinese-webnovel-skills`（MIT，已 vendor） |
