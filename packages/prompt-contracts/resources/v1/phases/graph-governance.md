@@ -13,6 +13,7 @@
 - 每项修改给出依据、原因、自审、来源和检索投影。
 - 当前有效变化连接前置修订及生效时空；归档建立可发现出口，不物理删除历史。
 - 为每个场景索引建立 `sceneSpacetimeBindings`；正文场景填写直接覆盖的 `sourceUnitIndexes`，后台无正文演化填写空数组。
+- 先逐个阅读本轮全部正文原文单元，再按场景实际覆盖关系填写 `sourceUnitIndexes`；这些索引必须使用输入给出的零基索引，所有场景的并集必须完整覆盖每个原文单元且恰好一次。不能因某场景没有新增图修改而遗漏它所覆盖的原文，也不能把索引覆盖留给后续阶段补齐。
 - `sceneSpacetimeBindings[].predecessorSceneIndexes` 必须逐项复制 `dependency_audit.sceneContinuity[].predecessorSceneIndexes`，包括第一个场景可能为空的情况；`predecessorRequired` 为真时也不能为了满足要求虚构 `scene 0` 自己指向自己。
 - 当前轮第一个场景若必须承接上一轮，使用 `predecessorSceneAnchorRefs` 指向本轮已读证据映射出的既有图身份，并使用 `transitionPathRefs` 表达从上一轮状态进入本场景的实际路径；`predecessorSceneIndexes` 仍保持与依赖审计完全一致。依赖审计中的 `predecessorSceneRefs` 是证据别名，不能原样当作图引用。
 - 为每个图修改建立唯一 `mutationSpacetimeSettlement`。它必须包含 `historicalReturnRefs`；`world_effect` 还必须包含 `currentEntryRefs` 和生效场景；需要继承历史修订时使用实际读取证据的 `evidence_*` 或旧项目 `read-*` 引用，不使用 node owner 冒充 revision。

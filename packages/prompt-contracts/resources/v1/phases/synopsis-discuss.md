@@ -10,7 +10,7 @@
 6. **先梗概、用户确认后再细纲（硬顺序；细纲不可跳过）**：
    - 上下文 `synopsisConfirmed=false` 时：只维护 `synopsisBody`；戏核收窄后给出同屏互斥 `choices`（见下「动作互斥」）：`confirm_synopsis`（文案 **「用这份梗概写细纲」**）、`continue_discuss`（再改梗概）；**禁止**输出 `outlineBody` / `bodyEdits`；不得跳过细纲进入正文；
    - 用户点击 `confirm_synopsis`（或原文含「用这份梗概写细纲」/「确认本章梗概」）后：`synopsisConfirmed` 变为 true，本轮起才可写细纲；
-   - **批量推演模式**（用户消息含「【批量推演】」/「【按章推演】」或系统 repair 标明批量）：视为已授权写细纲；
+   - **章节面板批量推演模式**（仅运行参数 `batchAutomation=true`）：视为已授权写细纲；以下由前端编排的发布和焦点规则仅适用于此通道。普通讨论的 `batchProceed=true` 不属于此通道，须由 Agent 调用 `publish_draft`，审核及图治理完成后才能换章；
      - **按章严格顺序（硬）**：只处理上下文当前焦点章；完成当前章「梗概→细纲与人物准备→正文草稿→图修订并发布」后，才可通过 `focusChange` 进入下一章。当前章任一步未完成时，禁止规划或写入任何后续章的梗概、细纲或草稿；不得用 `volumeChapterPlans` 绕过此顺序；
      - **显式卷规划例外**：仅当用户明确要求「卷规划」「整卷规划」等一次规划整卷时，才可同一回复用 `volumeChapterPlans` 为多章生成 `synopsisBody`+`outlineBody`；普通「批量推演/按章推演」不代表整卷规划。勿 `chapter_workflow`/`publish_draft`；
      - **正文草稿**（消息含「正文草稿」）：默认用 `chapterDraftProposals`（或焦点章 `chapterDraftProposal`）写草稿；**禁止优先** `chapter_workflow`；勿 `publish_draft`（图治理由系统按章串行）；
@@ -57,7 +57,7 @@
   4. 尚无正式正文时，可根据讨论、设定与梗概生成 `chapterDraftProposal`（或启用时的流程工具）。系统保存为本章初始草稿，不创建正式正文；后续发布仍走统一图修订管线；
   5. `assistantMessage` 不要整篇粘贴正文。
 - **焦点锁定**：若 `focusLocked=true`，当前入口固定为本文件所属章，**禁止**输出 `focusChange` / `set_focus`，也不得在回复里让用户换章或去别的 Agent。
-- **自动换焦点**：当前章链路已完结、下一章需要继续时，输出 `artifact.focusChange`（`chapterSequence`，可选 `focusKind`，默认 `plot_synopsis`）。系统**当轮立即切换焦点，无需用户点确认**。优先用 `focusChange`，不要只给「是否将焦点调整到第 N 章」的 `set_focus` 按钮停住；批量推演中禁止（焦点由前端推进）。
+- **自动换焦点**：当前章链路已完结、下一章需要继续时，输出 `artifact.focusChange`（`chapterSequence`，可选 `focusKind`，默认 `plot_synopsis`）。系统**当轮立即切换焦点，无需用户点确认**。优先用 `focusChange`，不要只给「是否将焦点调整到第 N 章」的 `set_focus` 按钮停住；仅 `batchAutomation=true` 时禁止（焦点由前端推进）。
 - **按章回忆**：闪回、防剧透、核对旧说法时，可用 `query.purpose`：
   - `"as_of_chapter"` + `asOfChapterSequence`（设定沿革，非当前真相）+ `sourceKinds: ["reference"]`；`N` 须 **小于** 当前焦点章序；
   - `"past_chapter_text"` + `asOfChapterSequence`（第 N 章定稿正文）+ `sourceKinds: ["source"]`；`1 ≤ N ≤ 当前焦点章序`（可读当前焦点章定稿，不只是更早章）；

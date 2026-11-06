@@ -75,6 +75,9 @@ import { createDefaultWebResearchPort } from "../infrastructure/web-research/ind
 import { buildTurnMonitorPhases } from "../application/chapters/turn-handoff.js"
 import type { Kysely } from "kysely"
 import type { ProjectDatabase } from "../infrastructure/sqlite/database-types.js"
+import { SqliteCreativeSetupRepository } from "../infrastructure/sqlite/repositories/sqlite-creative-setup-repository.js"
+import { volumePlanningMarkdownHasContent } from "../application/chapters/volume-planning-gate.js"
+import { protagonistCreativeSetupMarkdownHasContent } from "../application/chapters/creative-setup-state.js"
 import { runtimeLog } from "../infrastructure/diagnostics/index.js"
 import { graphRevisionProgress } from "../application/chapters/graph-revision-progress.js"
 import { createGraphRevisionModel } from "../application/chapters/graph-revision-model.js"
@@ -114,7 +117,28 @@ export class ProjectRuntime {
     }
   }
 
+  public async assertCreativeSetupReady(volumeFolderName?: string): Promise<void> {
+    await this.assertWorkStyleGateReady()
+    const creativeSetup = new SqliteCreativeSetupRepository(this.database)
+    const protagonist = await creativeSetup.find(this.projectId, "protagonist")
+    if (protagonist?.status !== "ready") {
+      throw new Error("主角罗盘门禁未通过：请先由用户确认主角性格爱好、样貌、年龄、身世背景、目标及其他信息和备注，并写入主角设定")
+    }
+    const protagonistMarkdown = protagonist.settingsPath === undefined ? "" : await this.workspace
+      .readMarkdown(this.workspaceRootRef, protagonist.settingsPath).catch(() => "")
+    if (!protagonistCreativeSetupMarkdownHasContent(protagonistMarkdown)) {
+      throw new Error("主角设定文档缺失或核心信息不完整，请先恢复主角罗盘的实际写入")
+    }
+    if (volumeFolderName !== undefined) {
+      const storyline = await creativeSetup.find(this.projectId, `volume:${volumeFolderName}`)
+      if (storyline?.status !== "ready") {
+        throw new Error(`卷主支线门禁未通过（${volumeFolderName}）：必须先询问并由用户确认开场、高潮、结局和支线事件时机`)
+      }
+    }
+  }
+
   public async assertVolumePlanningGateReady(chapterSequence: number, requestedVolumeFolderName?: string): Promise<void> {
+    await this.assertCreativeSetupReady()
     const inventory = await this.workspace.validate(this.workspaceRootRef)
     const prefix = "章节正文/"
     const synopsis = inventory.inventory.find((entry) => {
@@ -125,6 +149,7 @@ export class ProjectRuntime {
     const volumeFolderName = requestedVolumeFolderName
       ?? synopsis?.path.split("/")[1]
       ?? DEFAULT_VOLUME_FOLDER_NAME
+    await this.assertCreativeSetupReady(volumeFolderName)
     let state
     try {
       state = parseVolumePlanningState(await this.workspace.readMarkdown(
@@ -136,6 +161,12 @@ export class ProjectRuntime {
     }
     if (!volumePlanningGateReady(state)) {
       throw new Error(`卷级首次写入门禁未通过（${volumeFolderName}）：需要先规划目标章节数与预计总字数，并首次写入卷梗概和卷大纲`)
+    }
+    for (const suffix of [".梗概.md", ".md"]) {
+      const content = await this.workspace.readMarkdown(this.workspaceRootRef, `大纲/${volumeFolderName}${suffix}`).catch(() => "")
+      if (!volumePlanningMarkdownHasContent(content)) {
+        throw new Error(`卷规划实际内容缺失（${volumeFolderName}）：请恢复卷梗概和卷大纲的有效内容后再生成章节`)
+      }
     }
   }
 
@@ -188,7 +219,13 @@ export class ProjectRuntime {
     })
   }
 
-  public submitChapterRevision(input: Parameters<ChapterRevisionService["submit"]>[0]): Promise<ChapterRevision> {
+  public async submitChapterRevision(input: Parameters<ChapterRevisionService["submit"]>[0]): Promise<ChapterRevision> {
+    const revision = await new SqliteChapterRevisionRepository(this.database).find(input.revisionTaskId)
+    if (revision === undefined || revision.projectId !== this.projectId) throw new Error("图修订任务不存在")
+    const sequence = revision.chapterSequence
+      ?? (await new SqliteChapterIndexRepository(this.database).find(this.projectId, revision.chapterId))?.sequence
+    if (sequence === undefined) throw new Error("章节序号缺失，不能绕过卷规划门禁发布")
+    await this.assertVolumePlanningGateReady(sequence)
     // Keep the legacy API shape compatible while enforcing the same review gate.
     // A direct request is converted into review -> reviewed submission before any graph job starts.
     if (input.mode === "direct") {
@@ -730,6 +767,9 @@ export class ProjectRuntime {
       await this.assertVolumePlanningGateReady(chapterWrite.chapterSequence, chapterWrite.volumeFolderName)
     }
     const planningArtifact = resolveVolumePlanningArtifact(relativePath)
+    const batchPlanVolume = relativePath.replaceAll("\\", "/").match(/^大纲\/(.+)\.批量计划\.md$/u)?.[1]
+    const planningVolume = planningArtifact?.volumeFolderName ?? batchPlanVolume
+    if (planningVolume !== undefined) await this.assertCreativeSetupReady(planningVolume)
     const previous = planningArtifact === undefined ? undefined : await this.readMarkdown(relativePath).catch(() => "")
     await this.workspace.saveUserMarkdown(this.workspaceRootRef, relativePath, content)
     if (planningArtifact !== undefined && previous !== content) {
@@ -927,6 +967,7 @@ export class ProjectRuntime {
 
   public createSynopsisConversationService(): SynopsisConversationService {
     return new SynopsisConversationService({
+      creativeSetup: new SqliteCreativeSetupRepository(this.database),
       executeWorkflowTool: async (input) => {
         await this.assertWorkStyleGateReady()
         await this.assertVolumePlanningGateReady(input.chapterSequence)

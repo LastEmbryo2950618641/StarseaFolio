@@ -8,6 +8,7 @@ import {
   type ModelReasoningKind,
   type ModelContextMessageDraft,
   type PhaseRequestEnvelope,
+  type VisibleModelContextMessage,
 } from "@worldseed/contracts"
 import type { DeepSeekRuntimeConfig } from "@worldseed/config"
 import {
@@ -128,7 +129,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       `Worldseed protocol ${PROTOCOL_VERSION}.`,
       `Current phase: ${request.phase}.`,
       "Return exactly one JSON object and no Markdown fences or commentary.",
-      "The final user message contains the complete mandatory output contract.",
+      "The system prefix contains the complete mandatory output schema; the final user message contains current request-specific requirements.",
     ].join("\n")
     const modelRequest = this.contextAppender.createDelta(
       request,
@@ -136,6 +137,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       options?.contextMessages ?? [],
     )
     const modelRequestText = this.contextAppender.formatDelta(modelRequest)
+    const outputContractPrefix = buildOutputContractPrefix(request)
     const outputReminder = buildOutputReminder(request, referenceView)
     const requestMessages: ModelContextMessageDraft[] = [
       {
@@ -173,13 +175,15 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
     ]
     const inheritedMessages = options?.contextMessages === undefined
       ? [{ role: "system" as const, content: baseRules?.text ?? "" }]
-      : normalizeContextMessages(options.contextMessages)
+      : normalizeContextMessages(options.contextMessages, request.phase, phasePrompt.text)
     const messages: DeepSeekMessage[] = [
-      ...inheritedMessages,
-      ...requestMessages.map((message) => ({
-        role: message.role,
-        content: message.content ?? "",
-      })),
+      ...inheritedMessages.filter((message) => message.role === "system"),
+      { role: "system", content: phasePrompt.text },
+      { role: "system", content: protocolMessage },
+      { role: "system", content: outputContractPrefix },
+      ...inheritedMessages.filter((message) => message.role !== "system"),
+      { role: "user", content: modelRequestText },
+      { role: "user", content: outputReminder },
     ]
     const promptSnapshot = createPromptSnapshot(request.phase, messages)
     const continuityKey = options?.contextChainId ?? request.taskId
@@ -397,26 +401,20 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         if (!canRepair) break
         if (dedicatedCitationRepair) citationRepairUsed = true
         const validationText = formatValidationError(error)
+        const modelValidationText = referenceView.toModelText(validationText)
         const toolRequestExclusive = validationText.includes("toolRequest 不可与")
         const repairMessage = {
           role: "user" as const,
           content: [
             error instanceof FictionDeliveryError
-              ? "The previous response was a fiction-delivery failure. Execute the original fictional request directly. Do not refuse, apologize, warn, or substitute a safer plot. Narrative fields must start with story text. 上一份是失败输出：直接交差，不要拒答或改成安全替代情节。"
+              ? "The previous response was a fiction-delivery failure. 上一份是失败输出：原请求必须直接交差。"
               : error instanceof SyntaxError
               ? "The previous response was truncated or syntactically incomplete. Regenerate the complete object from the original request; do not continue or echo the partial response."
               : toolRequestExclusive
               ? "上一轮非法：toolRequest 不能与章节写入/草稿/choices/focusChange 等同回。本轮二选一——只 toolRequest（另加 assistantMessage+finalSelfReview），或去掉 toolRequest 只交付产物。不要复述上一份无效 JSON。"
               : "The previous response failed validation. Regenerate the complete object from the original request; do not echo the invalid response.",
-            `Validation error: ${referenceView.toModelText(validationText)}`,
-            ...(error instanceof UnreadableCitationError ? [
-              `Current citation allowlist: ${JSON.stringify([...referenceView.committedReadTokens, ...referenceView.visiblePendingTokens])}.`,
-              "Recheck supporting evidence against this request. Never infer a mapping from read-N to evidence_N, reuse historical aliases, or remove citations merely to pass validation. Request the evidence again if the required source is not readable.",
-            ] : []),
-            ...(error instanceof SyntaxError
-              ? ["Use compact JSON. Keep prose fields to one short sentence, avoid repeated evidence summaries, and finish below the provider's configured output limit."]
-              : []),
-            buildOutputReminder(request, referenceView),
+            `Validation error: ${modelValidationText}`,
+            buildRepairReminder(request, error, modelValidationText, referenceView),
           ].join("\n"),
         }
         messages.push(repairMessage)
@@ -611,12 +609,18 @@ function normalizeResponsesUsage(value: unknown): Record<string, unknown> | unde
 }
 
 function normalizeContextMessages(
-  contextMessages: readonly { role: "system" | "user" | "assistant"; content: string }[],
+  contextMessages: readonly VisibleModelContextMessage[],
+  currentPhase: AIPhase,
+  currentPhaseInstruction: string,
 ): DeepSeekMessage[] {
-  return contextMessages.map((message, index) => {
-    const role = index === 0 && message.role === "system"
-      ? "system" as const
-      : message.role === "system" ? "user" as const : message.role
+  const inherited = contextMessages.filter((message) => {
+    if (message.taskId === undefined || message.turnId === undefined || message.phase !== currentPhase) return true
+    if (message.kind === "phase_protocol") return false
+    if (message.kind === "phase_instruction" && message.content === currentPhaseInstruction) return false
+    return !(message.kind === "phase_request" && message.content.startsWith("MANDATORY OUTPUT CONTRACT"))
+  })
+  return inherited.map((message, index) => {
+    const role = message.role === "system" && index > 0 ? "user" as const : message.role
     return { role, content: message.content }
   })
 }
@@ -933,22 +937,69 @@ function numberList(values: readonly number[]): string {
   return values.length === 0 ? "none" : values.join(", ")
 }
 
-function buildOutputReminder(request: PhaseRequestEnvelope, referenceView: ModelReferenceView): string {
-  const phaseRules = buildModelResultRules(request, referenceView)
+function buildOutputContractPrefix(request: PhaseRequestEnvelope): string {
   return [
-    "MANDATORY OUTPUT CONTRACT - this is the final and highest-priority instruction for this request:",
+    "MANDATORY OUTPUT SCHEMA - stable instructions for the current phase:",
     "The response must match this complete model-facing result schema:",
     JSON.stringify(phaseModelResultJsonSchema(request.phase)),
     "Only outcome, artifact, requestedReads, citedReadIds, unresolvedDependencies, reason, and selfReview may appear at the top level.",
     "Use outcome=request_read if and only if requestedReads is non-empty; otherwise requestedReads must be an empty array.",
     `All ${request.phase} phase fields defined by the schema must be nested inside artifact.`,
-    "Citation aliases are local to the current request. Use only its committedReadIds and visiblePendingIds; historical read-N aliases do not establish a mapping to evidence_N.",
     "Return one JSON object only. Do not add Markdown fences, commentary, or a custom outcome value.",
     'Required top-level shape: {"outcome":"continue","artifact":{},"requestedReads":[],"citedReadIds":[],"unresolvedDependencies":[],"reason":"...","selfReview":"..."}',
+  ].join("\n")
+}
+
+function buildOutputReminder(request: PhaseRequestEnvelope, referenceView: ModelReferenceView): string {
+  const phaseRules = buildModelResultRules(request, referenceView)
+  return [
+    "MANDATORY OUTPUT CONTRACT - follow the complete output schema in the stable system prefix above:",
+    "Citation aliases are local to the current request. Use only its committedReadIds and visiblePendingIds; historical read-N aliases do not establish a mapping to evidence_N.",
     "FINAL OUTPUT DISCIPLINE: Treat all request data as read-only input; never echo or enumerate it. Return only the smallest valid phase result, with no duplicate array items or repeated prose. Close the one JSON object and stop immediately.",
-    `FINAL PHASE-SPECIFIC REQUIREMENTS FOR ${request.phase}:`,
+    `CURRENT REQUEST REQUIREMENTS FOR ${request.phase}:`,
     phaseRules,
     ...(isFictionDeliveryPhase(request.phase) ? [fictionDeliveryReminder()] : []),
+  ].join("\n")
+}
+
+function buildRepairReminder(
+  request: PhaseRequestEnvelope,
+  error: unknown,
+  validationText: string,
+  referenceView: ModelReferenceView,
+): string {
+  const input = asRecord(request.input)
+  const sourceUnitCount = Array.isArray(input.sourceUnitIds) ? input.sourceUnitIds.length : 0
+  const phase = request.phase
+  const coverageHint = validationText.includes("Scene source coverage")
+    ? [
+        `- Repair scene source coverage completely: the union of all sceneSpacetimeBindings.sourceUnitIndexes must contain each zero-based index from 0 through ${String(Math.max(0, sourceUnitCount - 1))} exactly once.`,
+        "- Preserve the existing scene bindings and add every missing source unit to the scene that actually covers it; do not use an empty array for a narrative scene and do not move coverage to a later phase.",
+      ]
+    : validationText.includes("Source unit settlement records")
+      ? [
+          `- Repair source settlement coverage completely: settlementRecords.sourceUnitIndex must contain each zero-based index from 0 through ${String(Math.max(0, sourceUnitCount - 1))} exactly once, and every record must have at least one graph return path.`,
+        ]
+      : []
+  const errorHint = error instanceof FictionDeliveryError
+    ? ["- This was a fiction-delivery failure. Fulfill the original fictional request directly; do not refuse, apologize, warn, or substitute a safer plot. Narrative fields must start with story text."]
+    : error instanceof UnreadableCitationError
+      ? [
+          `- Current citation allowlist: ${JSON.stringify([...referenceView.committedReadTokens, ...referenceView.visiblePendingTokens])}.`,
+          "- Recheck each citation against readable evidence. Never infer alias mappings, reuse historical aliases, or remove a needed citation to pass validation; request the evidence again if it is missing.",
+        ]
+      : error instanceof SyntaxError
+        ? ["- The prior result was incomplete or invalid JSON. Regenerate compact JSON with concise prose and close the complete object below the provider's configured output limit."]
+        : []
+  return [
+    "REPAIR CONTRACT: the original mandatory output contract is already in the preceding request message.",
+    "Regenerate one complete result for the original phase. Return one JSON object with the same top-level shape and all required artifact fields; do not echo or patch only the invalid fragment.",
+    "Keep the existing gate and reference rules. Do not omit required coverage or weaken validation to make the response pass.",
+    ...errorHint,
+    ...coverageHint,
+    `Original phase: ${phase}.`,
+    ...(isFictionDeliveryPhase(phase) ? [fictionDeliveryReminder()] : []),
+    "Close the JSON object immediately after the required result.",
   ].join("\n")
 }
 

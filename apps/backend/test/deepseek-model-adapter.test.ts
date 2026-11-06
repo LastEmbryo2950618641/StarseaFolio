@@ -55,7 +55,7 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(adapter.info).toMatchObject({ provider: "deepseek", model: "deepseek-v4-flash", available: true })
   })
 
-  it("appends the phase tail to inherited context without rebuilding the stable prefix", async () => {
+  it("keeps phase instructions and output schema in a stable system prefix before inherited history", async () => {
     const request = createRequest()
     const fake = await new FakeAiModelAdapter(randomUUID).execute(request)
     let completionMessages: readonly { role: string; content: string }[] = []
@@ -109,6 +109,36 @@ describe("DeepSeekAiModelAdapter", () => {
         kind: "canonical_chapter" as const,
         content: "# 第一章 已提交正文",
       },
+      {
+        messageId: randomUUID(),
+        sequence: 2,
+        role: "user" as const,
+        kind: "phase_instruction" as const,
+        taskId: "old-task",
+        turnId: "old-turn",
+        phase: "synopsis_discuss" as const,
+        content: "# synopsis_discuss\n旧阶段提示",
+      },
+      {
+        messageId: randomUUID(),
+        sequence: 3,
+        role: "user" as const,
+        kind: "phase_protocol" as const,
+        taskId: "old-task",
+        turnId: "old-turn",
+        phase: "synopsis_discuss" as const,
+        content: "旧协议",
+      },
+      {
+        messageId: randomUUID(),
+        sequence: 4,
+        role: "user" as const,
+        kind: "phase_request" as const,
+        taskId: "old-task",
+        turnId: "old-turn",
+        phase: "synopsis_discuss" as const,
+        content: "MANDATORY OUTPUT CONTRACT\n旧 schema",
+      },
     ]
 
     const execution = await adapter.execute(request, {
@@ -123,17 +153,18 @@ describe("DeepSeekAiModelAdapter", () => {
     })
 
     expect(promptReads).toEqual([])
-    expect(completionMessages.slice(0, 2)).toEqual(inheritedMessages.map(({ role, content }) => ({ role, content })))
-    expect(completionMessages).toHaveLength(6)
-    expect(completionMessages.slice(2).map((message) => message.role)).toEqual([
-      "user",
-      "user",
-      "user",
-      "user",
-    ])
-    const outputReminder = completionMessages.at(-1)?.content ?? ""
-    expect(outputReminder.indexOf("FINAL PHASE-SPECIFIC REQUIREMENTS FOR interpret:"))
-      .toBeGreaterThan(outputReminder.indexOf("complete model-facing result schema"))
+    expect(completionMessages.slice(0, 4).map((message) => message.role)).toEqual(["system", "system", "system", "system"])
+    expect(completionMessages[0]?.content).toBe("stable system rules")
+    expect(completionMessages[1]?.content).toBe("prepared phase instruction")
+    expect(completionMessages[2]?.content).toContain("Worldseed protocol")
+    expect(completionMessages[3]?.content).toContain("complete model-facing result schema")
+    expect(completionMessages[3]?.content).toContain('"outcome":"continue"')
+    expect(completionMessages.some((message) => message.content === "# synopsis_discuss\n旧阶段提示")).toBe(true)
+    expect(completionMessages.some((message) => message.content === "# 第一章 已提交正文")).toBe(true)
+    expect(completionMessages.some((message) => message.content.startsWith("Worldseed context delta JSON:"))).toBe(true)
+    const currentRequirements = completionMessages.at(-1)?.content ?? ""
+    expect(currentRequirements).toContain("CURRENT REQUEST REQUIREMENTS")
+    expect(currentRequirements).not.toContain("complete model-facing result schema")
     expect(execution.contextExchange?.requestMessages.map((message) => message.kind)).toEqual([
       "phase_request",
       "phase_instruction",
@@ -193,12 +224,10 @@ describe("DeepSeekAiModelAdapter", () => {
       phasePrompt: { ref: "phase://interpret", version: "test", digest: "interpret", text: "interpret" },
     })
 
-    expect(completionMessages.slice(0, 3)).toEqual([
-      { role: "system", content: "stable system rules" },
-      { role: "user", content: "legacy phase instruction" },
-      { role: "assistant", content: "legacy phase response" },
-    ])
-    expect(completionMessages.filter((message) => message.role === "system")).toHaveLength(1)
+    expect(completionMessages.slice(0, 4).map(({ role }) => role)).toEqual(["system", "system", "system", "system"])
+    expect(completionMessages[0]?.content).toBe("stable system rules")
+    expect(completionMessages.some((message) => message.role === "user" && message.content === "legacy phase instruction")).toBe(true)
+    expect(completionMessages.some((message) => message.role === "assistant" && message.content === "legacy phase response")).toBe(true)
   })
 
   it("keeps an exact message prefix and appends only newly visible evidence", async () => {
@@ -298,9 +327,10 @@ describe("DeepSeekAiModelAdapter", () => {
     })
     const secondDelta = secondExecution.contextExchange?.requestMessages[0]?.content ?? ""
 
-    expect(captured[1]?.slice(0, inherited.length)).toEqual(
-      inherited.map(({ role, content }) => ({ role, content })),
-    )
+    expect(captured[1]?.[0]).toEqual({ role: "system", content: "stable system rules" })
+    expect(captured[1]?.[3]?.content).toContain("complete model-facing result schema")
+    expect(captured[1]?.some((message) => message.content.includes("只在本轮第一次追加的用户输入"))).toBe(true)
+    expect(captured[1]?.some((message) => message.content.includes("Fake AI completed interpret"))).toBe(true)
     expect(secondDelta).toContain("evidence_2")
     expect(secondDelta).not.toContain("evidence_1")
     const secondDeltaInput = JSON.parse(
@@ -1654,9 +1684,9 @@ describe("DeepSeekAiModelAdapter", () => {
     await adapter.execute(request)
 
     expect(calls).toBe(2)
-    expect(repairInput?.messages).toHaveLength(6)
+    expect(repairInput?.messages).toHaveLength(7)
     expect(repairInput?.messages.filter((message) => message.role === "assistant")).toHaveLength(0)
-    expect(repairInput?.messages.at(-1)?.content).toContain("Regenerate the complete object")
+    expect(repairInput?.messages.at(-1)?.content).toContain("Regenerate one complete result")
     expect(repairInput?.messages.at(-1)?.content).toContain("provider's configured output limit")
   })
 
@@ -1686,8 +1716,9 @@ describe("DeepSeekAiModelAdapter", () => {
     await adapter.execute(request)
 
     expect(calls).toBe(2)
-    expect(repairInput?.messages.at(-1)?.content).toContain("Regenerate the complete object")
-    expect(repairInput?.messages.at(-1)?.content).toContain("Use compact JSON")
+    expect(repairInput?.messages.at(-1)?.content).toContain("Regenerate one complete result")
+    expect(repairInput?.messages.at(-1)?.content).toContain("compact JSON")
+    expect(repairInput?.messages.at(-1)?.content).toContain("provider's configured output limit")
   })
 
   it("repairs reasoning-only responses without parsing an empty final content string", async () => {
@@ -1696,7 +1727,7 @@ describe("DeepSeekAiModelAdapter", () => {
     const completionInputs: Parameters<DeepSeekCompletionClient["complete"]>[0][] = []
     const client: DeepSeekCompletionClient = {
       complete: (input) => {
-        completionInputs.push(input)
+        completionInputs.push({ ...input, messages: [...input.messages] })
         return Promise.resolve(completionInputs.length === 1
           ? { content: "", reasoningContent: "I should now return the final object.", usage: { prompt_tokens: 10, completion_tokens: 5 } }
           : { content: JSON.stringify(toModelResult(fake.result)), usage: { prompt_tokens: 10, completion_tokens: 5 } })
@@ -1782,13 +1813,13 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(execution.usage.reasoningKind).toBe("provider_reasoning")
   })
 
-  it("repeats the complete phase contract at the end of initial and repair requests", async () => {
+  it("keeps the complete phase contract in the initial request and uses a concise repair reminder", async () => {
     const request = createRequest()
     const fake = await new FakeAiModelAdapter(randomUUID).execute(request)
     const completionInputs: Parameters<DeepSeekCompletionClient["complete"]>[0][] = []
     const client: DeepSeekCompletionClient = {
       complete: (input) => {
-        completionInputs.push(input)
+        completionInputs.push({ ...input, messages: [...input.messages] })
         return Promise.resolve({
           content: completionInputs.length === 1
             ? JSON.stringify({
@@ -1814,16 +1845,21 @@ describe("DeepSeekAiModelAdapter", () => {
     await adapter.execute(request)
 
     expect(completionInputs).toHaveLength(2)
-    for (const input of completionInputs) {
-      const finalMessage = input.messages.at(-1)?.content ?? ""
-      expect(finalMessage).toContain('"sourceKinds"')
-      expect(finalMessage).toContain('"graph"')
-      expect(finalMessage).toContain('"reference"')
-      expect(finalMessage).toContain('"truthStatus"')
-      expect(finalMessage).toContain('"not_assumed"')
-      expect(finalMessage).toContain('"current_turn_new"')
-      expect(finalMessage).not.toContain('"$schema"')
-    }
+    const initialReminder = completionInputs[0]?.messages.at(-1)?.content ?? ""
+    const initialSchema = completionInputs[0]?.messages.find((message) => message.content.startsWith("MANDATORY OUTPUT SCHEMA"))?.content ?? ""
+    const repairReminder = completionInputs[1]?.messages.at(-1)?.content ?? ""
+    expect(initialSchema).toContain('"sourceKinds"')
+    expect(initialSchema).toContain('"graph"')
+    expect(initialSchema).toContain('"reference"')
+    expect(initialSchema).toContain('"truthStatus"')
+    expect(initialSchema).toContain('"not_assumed"')
+    expect(initialSchema).toContain('"current_turn_new"')
+    expect(initialSchema).not.toContain('"$schema"')
+    expect(initialReminder).toContain("CURRENT REQUEST REQUIREMENTS")
+    expect(repairReminder).toContain("original mandatory output contract is already in the preceding request message")
+    expect(repairReminder).toContain("Regenerate one complete result")
+    expect(repairReminder).not.toContain("complete model-facing result schema")
+    expect(repairReminder).not.toContain('"$schema"')
   })
 
   it("rejects Draft fields at the result top level instead of silently rewriting them", async () => {
@@ -1893,8 +1929,9 @@ describe("DeepSeekAiModelAdapter", () => {
 
     const finalMessage = input?.messages.at(-1)?.content ?? ""
     expect(input).not.toHaveProperty("maxTokens")
-    expect(finalMessage).toContain('"contentMarkdown"')
-    expect(finalMessage).toContain('"adoptedDecisionIndexes"')
+    const schemaMessage = input?.messages.find((message) => message.content.startsWith("MANDATORY OUTPUT SCHEMA"))?.content ?? ""
+    expect(schemaMessage).toContain('"contentMarkdown"')
+    expect(schemaMessage).toContain('"adoptedDecisionIndexes"')
     expect(finalMessage).not.toContain("Draft path rule")
   })
 
@@ -2016,7 +2053,8 @@ describe("DeepSeekAiModelAdapter", () => {
     await adapter.execute(request)
 
     const finalMessage = input?.messages.at(-1)?.content ?? ""
-    const messageLines = finalMessage.split("\n")
+    const schemaMessage = input?.messages.find((message) => message.content.startsWith("MANDATORY OUTPUT SCHEMA"))?.content ?? ""
+    const messageLines = schemaMessage.split("\n")
     const schemaMarkerIndex = messageLines.indexOf("The response must match this complete model-facing result schema:")
     const schema = JSON.parse(messageLines[schemaMarkerIndex + 1] ?? "") as {
       properties: Record<string, { properties?: Record<string, unknown> }>
@@ -2024,7 +2062,7 @@ describe("DeepSeekAiModelAdapter", () => {
 
     expect(finalMessage).toContain("FICTION DELIVERY")
     expect(finalMessage).not.toContain("The artifact must match this complete JSON Schema:")
-    expect(finalMessage.match(/The response must match this complete model-facing result schema:/gu)).toHaveLength(1)
+    expect(schemaMessage.match(/The response must match this complete model-facing result schema:/gu)).toHaveLength(1)
     expect(schema.properties.artifact?.properties).toHaveProperty("workflow")
     expect(schema.properties).not.toHaveProperty("workflow")
   })
@@ -3433,8 +3471,7 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(finalMessage).toContain('[1].frontierAnchorRef must be exactly "local:beta"')
     expect(finalMessage).toContain("Prior anchors for frontier local:alpha")
     expect(finalMessage).toContain("lastSceneAnchorRefs=[local:old-scene]")
-    expect(finalMessage.indexOf("FINAL PHASE-SPECIFIC REQUIREMENTS FOR frontier_settlement:"))
-      .toBeGreaterThan(finalMessage.indexOf("Required top-level shape:"))
+    expect(finalMessage).toContain("CURRENT REQUEST REQUIREMENTS FOR frontier_settlement:")
   })
 
 })

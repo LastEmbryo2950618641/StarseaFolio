@@ -43,7 +43,7 @@ describe("SQLite migrations", () => {
     await reopened.destroy()
   })
 
-  it("applies project migrations through 028 with required SQLite pragmas", async () => {
+  it("applies project migrations through 058 with required SQLite pragmas", async () => {
     const path = temporaryDatabasePath("project.sqlite")
     const database = await openProjectDatabase(path)
     const migrations = await database.selectFrom("schema_migrations").selectAll().orderBy("version").execute()
@@ -58,8 +58,9 @@ describe("SQLite migrations", () => {
     const sourceUnitColumns = await sql<{ name: string }>`PRAGMA table_info(source_units)`.execute(database)
     const chapterArtifactColumns = await sql<{ name: string }>`PRAGMA table_info(chapter_artifact_states)`.execute(database)
     const workStyleGateColumns = await sql<{ name: string }>`PRAGMA table_info(work_style_gate_states)`.execute(database)
+    const creativeSetupColumns = await sql<{ name: string; pk: number }>`PRAGMA table_info(creative_setup_states)`.execute(database)
 
-    expect(migrations.map((migration) => migration.version)).toEqual(Array.from({ length: 57 }, (_, index) => index + 1))
+    expect(migrations.map((migration) => migration.version)).toEqual(Array.from({ length: 58 }, (_, index) => index + 1))
     expect(tableNames).toEqual(expect.objectContaining(new Set([
       "projects",
       "project_manifests",
@@ -118,6 +119,7 @@ describe("SQLite migrations", () => {
       "evidence_objects",
       "synopsis_conversation_sessions",
       "work_style_gate_states",
+      "creative_setup_states",
       "synopsis_conversation_messages",
       "synopsis_discuss_context_messages",
       "chapter_synopsis",
@@ -135,9 +137,15 @@ describe("SQLite migrations", () => {
       "body_digest",
     ]))
     expect(workStyleGateColumns.rows.map((column) => column.name)).toEqual(expect.arrayContaining([
-      "novel_major_categories_json",
-      "novel_subcategories_json",
+      "novel_major_category_rule_path",
+      "novel_subcategory_rule_path",
     ]))
+    expect(creativeSetupColumns.rows.map(({ name, pk }) => ({ name, pk }))).toEqual([
+      { name: "project_id", pk: 1 },
+      { name: "scope", pk: 2 },
+      { name: "state_json", pk: 0 },
+      { name: "updated_at_ms", pk: 0 },
+    ])
     expect(frontierColumns.rows.map((column) => column.name)).toEqual([
       "id",
       "project_id",
@@ -193,9 +201,9 @@ describe("SQLite migrations", () => {
     }).execute()
     await database.destroy()
 
-    await expect(openProjectDatabase(path)).rejects.toMatchObject<Partial<SqliteMigrationError>>({
+    await expect(openProjectDatabase(path)).rejects.toMatchObject({
       code: "database_too_new",
-    })
+    } satisfies Partial<SqliteMigrationError>)
   })
 
   it("rejects an altered applied migration digest", async () => {
@@ -207,8 +215,8 @@ describe("SQLite migrations", () => {
       .execute()
     await database.destroy()
 
-    await expect(openProjectDatabase(path)).rejects.toMatchObject<Partial<SqliteMigrationError>>({
+    await expect(openProjectDatabase(path)).rejects.toMatchObject({
       code: "migration_mismatch",
-    })
+    } satisfies Partial<SqliteMigrationError>)
   })
 })

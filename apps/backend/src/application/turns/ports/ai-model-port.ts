@@ -165,6 +165,8 @@ export type TurnPhaseInput = Readonly<{
     proposedContent: string
   }>
   synopsisDiscuss?: Readonly<{
+    /** Ordinary autonomous discussion; distinct from the chapter-panel batch orchestrator. */
+    batchProceed?: boolean
     heading: string
     chapterSequence: number
     synopsisMarkdown?: string
@@ -180,6 +182,7 @@ export type TurnPhaseInput = Readonly<{
     userEditedOutlineSinceAgent?: boolean
     currentWorkDisplayName?: string
     synopsisConfirmed?: boolean
+    creativeSetup?: import("../../chapters/creative-setup-state.js").CreativeSetupState
     workStyleGate?: Readonly<{
       status: "awaiting_choice" | "style_selected"
       selectedProseStylePath?: string
@@ -194,6 +197,7 @@ export type TurnPhaseInput = Readonly<{
       synopsisWriteCount: number
       outlineWriteCount: number
       missing: readonly string[]
+      storyline?: Readonly<{ opening: string; climaxes: string; ending: string; subplots: string }>
     }>
     /** ChapterPanel 批量推演：允许同轮写梗概+细纲并驱动工具链。 */
     batchAutomation?: boolean

@@ -3,12 +3,12 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import Database from "better-sqlite3"
 
-import { PROTOCOL_VERSION, type PhaseRequestEnvelope } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type PhaseRequestEnvelope, type SynopsisConversationChoice } from "@worldseed/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
 import { assessWorkStyleMarkdown, WORK_STYLE_RULE_PATH } from "../src/core/workspace/work-style-gate.js"
 
-import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { confirmedVolumeStorylineFixture, openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 const harnesses: ChapterHarness[] = []
 
@@ -232,11 +232,29 @@ describe("cold-start style gate flow", () => {
 
   it("blocks formal chapter deduction until the volume first-write plan gate is ready", async () => {
     const delegate = new FakeAiModelAdapter(randomUUID)
+    let discussCalls = 0
     const model: AIModelPort = {
       info: delegate.info,
       execute: async (request, options) => {
         const execution = await delegate.execute(request, options)
         if (request.phase !== "synopsis_discuss") return execution
+        discussCalls += 1
+        if (discussCalls <= 2) {
+          return {
+            ...execution,
+            result: {
+              ...execution.result, outcome: "continue", requestedReads: [],
+              artifact: {
+                assistantMessage: "核对卷规划门禁。", finalSelfReview: "检查门禁，不写章节。",
+                toolRequest: discussCalls === 1
+                  ? { name: "todo_write", action: "describe" }
+                  : { name: "todo_write", action: "invoke", arguments: JSON.stringify({ merge: false,
+                      todos: [{ id: "gate", content: "核对卷规划状态并拒绝越级写章", status: "completed" }],
+                    }) },
+              },
+            },
+          }
+        }
         return {
           ...execution,
           result: {
@@ -315,6 +333,7 @@ describe("cold-start style gate flow", () => {
     expect(blockedSynopsis.content).not.toContain("这段内容必须被卷规划门禁拦截")
 
     const plan = {
+      ...confirmedVolumeStorylineFixture,
       volumeFolderName: "第一卷 待命名",
       startSequence: 1,
       targetChapterCount: 8,
@@ -386,7 +405,7 @@ describe("cold-start style gate flow", () => {
     expect(assessWorkStyleMarkdown(seededStyle).complete).toBe(false)
     const sent = await invoke<{
       session: { synopsisPath: string }
-      messages: Array<{ role: string; content: string; choices?: Array<{ label: string; action: string }> }>
+      messages: Array<{ role: string; content: string; choices?: SynopsisConversationChoice[] }>
     }>(harness, "synopsis.conversation.send", {
       ...base,
       message: "灾变来临前，主角发现自己能预知危险。",
@@ -447,7 +466,7 @@ describe("cold-start style gate flow", () => {
     const selectedPath = assistant!.choices![0]!.workStyleSelection?.proseStyleRulePath
     expect(selectedPath).toBeDefined()
     expect(selected.creationDeskSettings?.proseStyleRulePath).toBe(selectedPath)
-    expect(selected.autoContinue?.message).toContain("当前卷的章节数")
+    expect(selected.autoContinue?.message).toContain("主角罗盘")
     expect(styleMarkdown).toContain(selectedPath)
     expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, started.session.synopsisPath))
       .not.toContain("主角发现自己能预知危险")

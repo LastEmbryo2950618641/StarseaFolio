@@ -69,6 +69,13 @@ export type ProjectSettingsRow = {
   updated_at: Timestamp
 }
 
+export type CreativeSetupStateRow = {
+  project_id: string
+  scope: string
+  state_json: JsonText
+  updated_at_ms: Timestamp
+}
+
 export type IdCounterRow = {
   project_id: string
   prefix: string
@@ -944,6 +951,7 @@ export type ProjectDatabase = {
   projects: ProjectRow
   project_manifests: ProjectManifestRow
   project_settings: ProjectSettingsRow
+  creative_setup_states: CreativeSetupStateRow
   id_counters: IdCounterRow
   workspace_operations: WorkspaceOperationRow
   artifact_scopes: ArtifactScopeRow

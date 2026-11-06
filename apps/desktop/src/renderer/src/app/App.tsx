@@ -51,6 +51,7 @@ import { WorkspaceTree } from "../features/workspace/WorkspaceTree.js"
 import { WorkspaceNameDialog } from "../features/workspace/WorkspaceNameDialog.js"
 import { AUTO_DESCRIPTION_RULE_PATH, canCreateFolderInDirectory, findDuplicateVolumeSequence, isValidVolumeFolderName, isChapterVolumeContainerPath, isVolumeDirectoryPath, resolveCreateDestination } from "../features/workspace/workspace-locks.js"
 import { EditorArea } from "../features/editor/EditorArea.js"
+import { closeEditorDocument, MAX_OPEN_EDITOR_DOCUMENTS, openEditorDocument, saveEditorDocument, updateEditorDocument, type EditorDocument } from "../features/editor/editor-document-tabs.js"
 import { ChapterBrowseDetailRail } from "../features/editor/ChapterBrowseDetailRail.js"
 import { mapAiCreationDeskSettings, useCreationDeskPresentationPreferences, reconcileSelectedRulePath } from "../features/editor/creation-desk-presentation-preferences.js"
 import { SettingsLineagePanel } from "../features/settings/SettingsLineagePanel.js"
@@ -117,6 +118,7 @@ export function App(): React.JSX.Element {
   const [report, setReport] = useState<WorkspaceReport>({ inventory: [], issues: [] })
   const [workspaceFilePaths, setWorkspaceFilePaths] = useState<readonly string[]>([])
   const [selectedPath, setSelectedPath] = useState<string>()
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [lineageMode, setLineageMode] = useState(false)
   const [browseChapters, setBrowseChapters] = useState(false)
   const [browseChapterSequence, setBrowseChapterSequence] = useState<number>()
@@ -124,6 +126,14 @@ export function App(): React.JSX.Element {
   const [batchStatus, setBatchStatus] = useState<BatchDeductionStatus>(() => createIdleBatchStatus())
   const [volumeBatchPlan, setVolumeBatchPlan] = useState<ReturnType<typeof parseVolumeBatchPlan>>()
   const [openedDocumentPath, setOpenedDocumentPath] = useState<string>()
+  const [openedDocuments, setOpenedDocuments] = useState<readonly EditorDocument[]>([])
+  const [documentTabNotice, setDocumentTabNotice] = useState<string>()
+  const openedDocumentsRef = useRef<readonly EditorDocument[]>([])
+  const documentNavigationRef = useRef(0)
+  const documentLoadRequestsRef = useRef(new Map<string, number>())
+  const beforeDocumentLeaveRef = useRef<(() => Promise<void>) | undefined>(undefined)
+  const documentProjectRef = useRef(project?.projectId)
+  documentProjectRef.current = project?.projectId
   const [content, setContent] = useState("")
   const [chapterBody, setChapterBody] = useState("")
   const [savedContent, setSavedContent] = useState("")
@@ -160,6 +170,7 @@ export function App(): React.JSX.Element {
       agentMode?: "auto" | "plan" | "accept_edits"
       batchProceed?: boolean
       autoContinued?: boolean
+      setupAnswerTo?: string
     }>,
   ) => Promise<boolean>) | undefined>(undefined)
   const batchCancelRef = useRef(false)
@@ -216,6 +227,56 @@ export function App(): React.JSX.Element {
     && parsedMaximumWordCount !== undefined
     && parsedMinimumWordCount <= parsedMaximumWordCount
 
+  const replaceOpenedDocuments = useCallback((documents: readonly EditorDocument[]): void => {
+    openedDocumentsRef.current = documents
+    setOpenedDocuments(documents)
+  }, [])
+
+  const reserveDocument = (path: string): boolean => {
+    const opened = openEditorDocument(openedDocumentsRef.current, path)
+    if (!opened.accepted) {
+      setDocumentTabNotice(`最多同时打开 ${String(MAX_OPEN_EDITOR_DOCUMENTS)} 个文件，请先关闭部分文件标签后再打开。`)
+      return false
+    }
+    replaceOpenedDocuments(opened.documents)
+    setDocumentTabNotice(undefined)
+    return true
+  }
+
+  const registerBeforeDocumentLeave = useCallback((handler: (() => Promise<void>) | undefined): void => {
+    beforeDocumentLeaveRef.current = handler
+  }, [])
+
+  const beginDocumentNavigation = async (): Promise<number | undefined> => {
+    const requestId = ++documentNavigationRef.current
+    try {
+      await beforeDocumentLeaveRef.current?.()
+      return requestId === documentNavigationRef.current ? requestId : undefined
+    } catch (cause) {
+      setError(`无法切换文件，当前草稿尚未保存：${cause instanceof Error ? cause.message : String(cause)}`)
+      return undefined
+    }
+  }
+
+  const changeDocumentContent = (value: string): void => {
+    if (selectedPath === undefined || selectedPathRef.current !== selectedPath) return
+    setContent(value)
+    replaceOpenedDocuments(updateEditorDocument(openedDocumentsRef.current, selectedPath, { content: value }))
+  }
+
+  const showDocument = (path: string): void => {
+    chapterDraftVersionRequestRef.current += 1
+    selectedPathRef.current = path
+    setSelectedPath(path)
+    setOpenedDocumentPath(path)
+    setBrowseChapters(false)
+    setBrowseChapterSequence(undefined)
+    setBrowseVolumeFolderName(undefined)
+    setLineageMode(false)
+    setRelatedChapterArtifacts([])
+    setChapterSynopsis(undefined)
+  }
+
   const refreshSynopsisConversation = useCallback(async (): Promise<void> => {
     if (project === undefined) return
     const result = await invokeBackend<SynopsisConversationListResult>("synopsis.conversation.list", {
@@ -249,12 +310,13 @@ export function App(): React.JSX.Element {
 
   const refreshChapterSynopsis = useCallback(async (chapterId: string): Promise<void> => {
     if (project === undefined) return
+    const requestedPath = selectedPathRef.current
     const result = await invokeBackend<ChapterSynopsis | undefined>("chapter.synopsis.get", {
       projectId: project.projectId,
       workspaceRootRef: project.workspaceRootRef,
       chapterId,
     })
-    setChapterSynopsis(result)
+    if (documentProjectRef.current === project.projectId && selectedPathRef.current === requestedPath) setChapterSynopsis(result)
   }, [project])
 
   const loadRelatedChapterArtifacts = useCallback(async (path: string): Promise<void> => {
@@ -300,7 +362,7 @@ export function App(): React.JSX.Element {
         } satisfies RelatedChapterArtifact
       }
     }))
-    setRelatedChapterArtifacts(loaded)
+    if (documentProjectRef.current === project.projectId && selectedPathRef.current === path) setRelatedChapterArtifacts(loaded)
   }, [project, workspaceFilePaths])
 
   const refreshChapterDraftVersions = useCallback(async (revisionTaskId: string | undefined): Promise<void> => {
@@ -713,52 +775,68 @@ export function App(): React.JSX.Element {
     }
   })
 
-  const openDraftWorkspace = async (revisionTaskId: string): Promise<void> => {
+  const openDraftWorkspace = async (
+    revisionTaskId: string,
+    options?: Readonly<{ preserveView?: boolean }>,
+  ): Promise<void> => {
     if (project === undefined) return
+    const preserveView = options?.preserveView === true
+    const requestId = preserveView ? undefined : await beginDocumentNavigation()
+    if (!preserveView && requestId === undefined) return
+    let requestedPath: string | undefined
+    const isCurrentNavigation = (): boolean => documentProjectRef.current === project.projectId
+      && (preserveView || requestId === documentNavigationRef.current)
+      && (requestedPath === undefined || openedDocumentsRef.current.some((document) => document.path === requestedPath))
     const revision = await invokeBackend<ChapterRevisionReadResult>("chapter.readRevision", {
       projectId: project.projectId,
       workspaceRootRef: project.workspaceRootRef,
       revisionTaskId,
     })
+    if (!isCurrentNavigation()) return
+    if (!preserveView && (revision.publishPath === undefined || !reserveDocument(revision.publishPath))) return
+    if (!preserveView) requestedPath = revision.publishPath
     const drafts = await invokeBackend<RevisionDraftVersionListResult>("chapter.revision.draftVersion.list", {
       projectId: project.projectId, workspaceRootRef: project.workspaceRootRef, revisionTaskId, includeChapterHistory: true,
     })
+    const isDisplayed = (): boolean => selectedPathRef.current !== undefined
+      && selectedPathRef.current === revision.publishPath
+      && displayedRevisionRef.current === revisionTaskId
+    if (!isCurrentNavigation() || (preserveView && !isDisplayed())) return
     chapterDraftVersionRequestRef.current += 1
-    const stayInBatch = batchRunningRef.current
     if (revision.isInitialPublication !== true || revision.status === "completed") {
       const current = await invokeBackend<ChapterSummary & { content: string; body: string }>("chapter.read", {
         projectId: project.projectId,
         workspaceRootRef: project.workspaceRootRef,
         chapterId: revision.chapterId,
       })
-      if (!stayInBatch) {
-        setSelectedPath(current.publishPath)
-        setOpenedDocumentPath(current.publishPath)
-        setSelectedChapter(current)
-        setContent(current.content)
-        setChapterBody(current.body)
-        setSavedContent(current.content)
-        void loadRelatedChapterArtifacts(current.publishPath)
+      if (!isCurrentNavigation() || (preserveView && !isDisplayed())) return
+      if (!preserveView) {
+        showDocument(current.publishPath)
       }
+      setSelectedChapter(current)
+      setContent(current.content)
+      setChapterBody(current.body)
+      setSavedContent(current.content)
+      void loadRelatedChapterArtifacts(current.publishPath)
       setChapterRevision(revision)
       setChapterRevisionContent(revision.proposedBody)
       setChapterDraftVersions(drafts.versions)
       return
     }
-    if (!stayInBatch) {
-      setSelectedPath(revision.publishPath)
-      setOpenedDocumentPath(revision.publishPath)
-      setSelectedChapter(undefined)
-      setContent("")
-      setChapterBody("")
-      setSavedContent("")
-      setChapterSynopsis(undefined)
-      if (revision.publishPath !== undefined) void loadRelatedChapterArtifacts(revision.publishPath)
+    if (!preserveView) {
+      if (revision.publishPath === undefined) return
+      showDocument(revision.publishPath)
     }
+    setSelectedChapter(undefined)
+    setContent("")
+    setChapterBody("")
+    setSavedContent("")
+    setChapterSynopsis(undefined)
+    if (revision.publishPath !== undefined) void loadRelatedChapterArtifacts(revision.publishPath)
     setChapterRevision(revision)
     setChapterRevisionContent(revision.proposedBody)
     setChapterDraftVersions(drafts.versions)
-    if (!stayInBatch && shouldMonitorChapterRevision(revision.graphSyncStatus)) {
+    if (shouldMonitorChapterRevision(revision.graphSyncStatus)) {
       void monitorChapterRevision(revisionTaskId)
     }
   }
@@ -768,33 +846,69 @@ export function App(): React.JSX.Element {
       setError("无法打开文件：工作区文件路径为空或无效")
       return
     }
-    // Highlight selection immediately; content fills in after IPC.
-    setSelectedPath(path)
-    setBrowseChapters(false)
-    setBrowseChapterSequence(undefined)
-    setLineageMode(false)
-    setError(undefined)
-    setRelatedChapterArtifacts([])
-    try {
-      const unpublished = unpublishedDrafts.find((draft) => draft.publishPath === path)
-      if (unpublished !== undefined) {
+    const unpublished = unpublishedDrafts.find((draft) => draft.publishPath === path)
+    if (unpublished !== undefined) {
+      try {
         await openDraftWorkspace(unpublished.revisionTaskId)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+      }
+      return
+    }
+    const wasOpen = openedDocumentsRef.current.some((document) => document.path === path)
+    if (!reserveDocument(path)) return
+    const pendingNavigation = beginDocumentNavigation()
+    const navigationId = documentNavigationRef.current
+    documentLoadRequestsRef.current.set(path, navigationId)
+    const requestId = await pendingNavigation
+    if (requestId === undefined) {
+      if (!wasOpen && documentLoadRequestsRef.current.get(path) === navigationId) {
+        documentLoadRequestsRef.current.delete(path)
+        replaceOpenedDocuments(openedDocumentsRef.current.filter((document) => document.path !== path))
+      }
+      return
+    }
+    const isCurrentNavigation = (): boolean => requestId === documentNavigationRef.current
+      && documentProjectRef.current === project.projectId
+      && documentLoadRequestsRef.current.get(path) === requestId
+      && openedDocumentsRef.current.some((document) => document.path === path)
+    const showMarkdown = (openedPath: string, diskContent: string): void => {
+      if (!isCurrentNavigation()) return
+      if (openedPath !== path) {
+        replaceOpenedDocuments(openedDocumentsRef.current.filter((document) => document.path !== path))
+        if (!reserveDocument(openedPath)) return
+      }
+      const buffered = openedDocumentsRef.current.find((document) => document.path === openedPath)
+      const localChanges = buffered?.content !== undefined && buffered.content !== buffered.savedContent
+      const nextContent = localChanges ? buffered.content : diskContent
+      const nextSavedContent = localChanges ? buffered.savedContent ?? diskContent : diskContent
+      replaceOpenedDocuments(updateEditorDocument(openedDocumentsRef.current, openedPath, { content: nextContent, savedContent: nextSavedContent }))
+      showDocument(openedPath)
+      setSelectedChapter(undefined)
+      setChapterRevision(undefined)
+      setChapterRevisionContent(undefined)
+      setChapterDraftVersions([])
+      setContent(nextContent)
+      setChapterBody("")
+      setSavedContent(nextSavedContent)
+    }
+    setError(undefined)
+    try {
+      const buffered = openedDocumentsRef.current.find((document) => document.path === path)
+      if (buffered?.content !== undefined && buffered.content !== buffered.savedContent) {
+        showMarkdown(path, buffered.savedContent ?? "")
+        if (isChapterPlanningMarkdownPath(path)) {
+          void loadRelatedChapterArtifacts(path)
+          void syncDiscussFocus(path)
+        }
         return
       }
       // Synopsis/outline are planning markdown on disk; they are not committed chapter publish paths.
       if (isChapterPlanningMarkdownPath(path)) {
         const opened = await readWorkspaceFile(path)
+        if (!isCurrentNavigation()) return
         const openedPath = opened.path
-        setSelectedPath(openedPath)
-        setOpenedDocumentPath(openedPath)
-        setSelectedChapter(undefined)
-        setChapterRevision(undefined)
-        setChapterRevisionContent(undefined)
-        setChapterDraftVersions([])
-        setChapterSynopsis(undefined)
-        setContent(opened.content)
-        setChapterBody("")
-        setSavedContent(opened.content)
+        showMarkdown(openedPath, opened.content)
         void loadRelatedChapterArtifacts(openedPath)
         void syncDiscussFocus(openedPath)
         return
@@ -805,7 +919,8 @@ export function App(): React.JSX.Element {
           workspaceRootRef: project.workspaceRootRef,
           publishPath: path,
         })
-        setOpenedDocumentPath(path)
+        if (!isCurrentNavigation()) return
+        showDocument(path)
         setSelectedChapter(resolved.committed)
         setChapterRevision(resolved.activeRevision)
         setChapterRevisionContent(resolved.activeRevision?.proposedBody)
@@ -826,16 +941,11 @@ export function App(): React.JSX.Element {
         workspaceRootRef: project.workspaceRootRef,
         relativePath: path,
       })
-      setOpenedDocumentPath(path)
-      setSelectedChapter(undefined)
-      setChapterRevision(undefined)
-      setChapterRevisionContent(undefined)
-      setChapterDraftVersions([])
-      setContent(result.content)
-      setChapterBody("")
-      setSavedContent(result.content)
+      showMarkdown(path, result.content)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      if (documentLoadRequestsRef.current.get(path) !== requestId || documentProjectRef.current !== project.projectId) return
+      if (!wasOpen) replaceOpenedDocuments(openedDocumentsRef.current.filter((document) => document.path !== path))
+      if (requestId === documentNavigationRef.current) setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
 
@@ -954,14 +1064,16 @@ export function App(): React.JSX.Element {
           workspaceRootRef: project.workspaceRootRef,
           revisionTaskId,
         })
-        const isDisplayed = displayedRevisionRef.current === revisionTaskId
+        const isDisplayed = selectedPathRef.current !== undefined
+          && selectedPathRef.current === current.publishPath
+          && displayedRevisionRef.current === revisionTaskId
         if (isDisplayed) {
           setChapterRevision(current)
           setChapterRevisionContent(current.proposedBody)
         }
         if (current.graphSyncStatus === "completed") {
           setPostCommitNotice("图修订已完成，草稿已发布为正文。")
-          if (isDisplayed) await openDraftWorkspace(revisionTaskId)
+          if (isDisplayed) await openDraftWorkspace(revisionTaskId, { preserveView: true })
           await refreshWorkspace()
           await refreshHistory()
           return
@@ -1028,7 +1140,7 @@ export function App(): React.JSX.Element {
         setError(cause instanceof Error ? cause.message : String(cause))
       })
     } else if (revision.graphSyncStatus === "completed") {
-      await openDraftWorkspace(revision.revisionTaskId)
+      await openDraftWorkspace(revision.revisionTaskId, { preserveView: true })
       await refreshHistory()
     }
     return revision
@@ -1137,13 +1249,46 @@ export function App(): React.JSX.Element {
 
   const saveFile = async (): Promise<void> => {
     if (project === undefined || selectedPath === undefined) return
-    await invokeBackend("workspace.save", {
-      projectId: project.projectId,
-      workspaceRootRef: project.workspaceRootRef,
-      relativePath: selectedPath,
-      content,
-    })
-    setSavedContent(content)
+    const path = selectedPath
+    const submittedContent = content
+    try {
+      await invokeBackend("workspace.save", {
+        projectId: project.projectId,
+        workspaceRootRef: project.workspaceRootRef,
+        relativePath: path,
+        content: submittedContent,
+      })
+      if (documentProjectRef.current !== project.projectId) return
+      replaceOpenedDocuments(saveEditorDocument(openedDocumentsRef.current, path, submittedContent))
+      if (selectedPathRef.current === path) setSavedContent(submittedContent)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const closeDocument = async (path: string): Promise<void> => {
+    const document = openedDocumentsRef.current.find((item) => item.path === path)
+    if (document === undefined) return
+    if (document.content !== document.savedContent && !window.confirm(`「${path.split("/").at(-1) ?? path}」有未保存的修改，确定关闭并放弃这些修改？`)) return
+    const wasActive = selectedPathRef.current === path
+    if (wasActive && await beginDocumentNavigation() === undefined) return
+    documentLoadRequestsRef.current.delete(path)
+    const closed = closeEditorDocument(openedDocumentsRef.current, path, selectedPathRef.current)
+    setDocumentTabNotice(undefined)
+    replaceOpenedDocuments(closed.documents)
+    if (openedDocumentPath === path) setOpenedDocumentPath(closed.activePath ?? closed.documents.at(-1)?.path)
+    if (!wasActive) return
+    selectedPathRef.current = undefined
+    setSelectedPath(undefined)
+    setContent("")
+    setSavedContent("")
+    if (closed.activePath === undefined) {
+      setBrowseChapters(false)
+      setLineageMode(false)
+      return
+    }
+    beforeDocumentLeaveRef.current = undefined
+    await openFile(closed.activePath)
   }
 
   const createWorkspaceMarkdown = (destinationOverride?: string): void => {
@@ -1230,11 +1375,18 @@ export function App(): React.JSX.Element {
         workspaceRootRef: project.workspaceRootRef,
         relativePath: path,
       })
-      if (selectedPath === path || openedDocumentPath === path) {
+      const deletedPaths = openedDocumentsRef.current.filter((document) => document.path === path || document.path.startsWith(`${path}/`)).map((document) => document.path)
+      replaceOpenedDocuments(openedDocumentsRef.current.filter((document) => !deletedPaths.includes(document.path)))
+      for (const deletedPath of deletedPaths) documentLoadRequestsRef.current.delete(deletedPath)
+      if (selectedPath === path || selectedPath?.startsWith(`${path}/`) === true) {
+        documentNavigationRef.current += 1
+        selectedPathRef.current = undefined
         setSelectedPath(undefined)
         setOpenedDocumentPath(undefined)
         setContent("")
         setSavedContent("")
+      } else if (openedDocumentPath !== undefined && deletedPaths.includes(openedDocumentPath)) {
+        setOpenedDocumentPath(openedDocumentsRef.current.at(-1)?.path)
       }
       await refreshWorkspace()
     } catch (cause) {
@@ -1277,12 +1429,11 @@ export function App(): React.JSX.Element {
         setPrompt("")
         if (snapshot.result?.kind === "draft") {
           await refreshWorkspace()
-          await openDraftWorkspace(snapshot.result.revisionTaskId)
+          await openDraftWorkspace(snapshot.result.revisionTaskId, { preserveView: true })
           setPostCommitNotice("正文推演工具已生成新草稿。")
           void refreshSynopsisConversation()
           return
         }
-        openWorkspaceHome()
         if (!publishedChapterRefreshed) {
           try {
             await refreshWorkspace()
@@ -1335,6 +1486,7 @@ export function App(): React.JSX.Element {
       agentMode?: "auto" | "plan" | "accept_edits"
       batchProceed?: boolean
       autoContinued?: boolean
+      setupAnswerTo?: string
     }>,
   ): Promise<boolean> => {
     if (options?.autoContinued !== true) synopsisAutoContinueCountRef.current = 0
@@ -1487,6 +1639,8 @@ export function App(): React.JSX.Element {
         ...(options?.automation === undefined ? {} : { automation: options.automation }),
         ...(options?.batchProceed === undefined ? {} : { batchProceed: options.batchProceed }),
         ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
+        ...(options?.setupAnswerTo === undefined || options?.autoContinued === true || options?.automation !== undefined
+          ? {} : { setupAnswerTo: options.setupAnswerTo }),
       }, {
         waitTimeoutMs: projectSettings?.execution.backendRequestWaitTimeoutMs
           ?? 600_000,
@@ -1525,14 +1679,6 @@ export function App(): React.JSX.Element {
       } else if ((sent.rejectedCreationDeskRulePaths?.length ?? 0) > 0) {
         creationDeskSettingsNotice = `AI 选择的规则未能切换：${sent.rejectedCreationDeskRulePaths!.join("、")}。写作设置保持原样。`
       }
-      if (sent.volumePlanningStage === true) {
-        const volumeFolderName = sent.session.synopsisPath.replaceAll("\\", "/").split("/")[1]
-        if (volumeFolderName !== undefined && volumeFolderName.length > 0) {
-          setBrowseChapters(true)
-          setBrowseChapterSequence(undefined)
-          setBrowseVolumeFolderName(volumeFolderName)
-        }
-      }
       setPendingStagingPromotes(sent.pendingStagingPromotes ?? [])
       if (sent.workDisplayName !== undefined) {
         setProject((current) => current === undefined
@@ -1553,15 +1699,9 @@ export function App(): React.JSX.Element {
           draftVersionId: sent.appendedDraft.draftVersionId,
         })
         try {
-          const applied = await invokeBackend<ChapterRevisionReadResult>("chapter.readRevision", {
-            projectId: project.projectId,
-            workspaceRootRef: project.workspaceRootRef,
-            revisionTaskId: sent.appendedDraft.revisionTaskId,
-          })
-          await openDraftWorkspace(applied.revisionTaskId)
+          await openDraftWorkspace(sent.appendedDraft.revisionTaskId, { preserveView: true })
           setPostCommitNotice(`已写入草稿 ${sent.appendedDraft.draftLabel}。发布时将进行图修订。`)
         } catch {
-          await refreshChapterDraftVersions(sent.appendedDraft.revisionTaskId)
           setPostCommitNotice(`已写入草稿 ${sent.appendedDraft.draftLabel}。确认后才会覆盖正式正文。`)
         }
       }
@@ -1573,7 +1713,8 @@ export function App(): React.JSX.Element {
       void refreshWorkspace().catch(() => undefined)
       // Process gate (e.g. previous chapter still publishing): keep going without asking the user.
       // Runaway guard only; a multi-chapter Auto run legitimately needs dozens of continuations.
-      const willAutoContinue = sent.autoContinue !== undefined && synopsisAutoContinueCountRef.current < 40
+      const willAutoContinue = sent.awaitingSetupInput === undefined
+        && sent.autoContinue !== undefined && synopsisAutoContinueCountRef.current < 40
       setAgentAutoChainActive(willAutoContinue)
       if (willAutoContinue && sent.autoContinue !== undefined) {
         synopsisAutoContinueCountRef.current += 1
@@ -1585,6 +1726,10 @@ export function App(): React.JSX.Element {
             autoContinued: true,
           })
         }, 1_500)
+      }
+      if (sent.awaitingSetupInput !== undefined && options?.automation !== undefined) {
+        setPostCommitNotice("批量推进正在等待你确认主角罗盘或本卷主支线；请在对话中选择或填写后发送。")
+        return false
       }
       return true
     } catch (cause) {
@@ -2153,16 +2298,11 @@ export function App(): React.JSX.Element {
       batchPauseRequestedRef.current = false
       batchRunningRef.current = true
       setError(undefined)
-      setSelectedPath(undefined)
-      setBrowseChapters(true)
-      setBrowseVolumeFolderName(volumeFolderName)
-      setLineageMode(false)
       let lastSequence = sequence
       const chapterWorkflowEnabled = projectSettings?.creationDesk.chapterWorkflowEnabled === true
 
       try {
         if (mode === "volume_batch") {
-          setBrowseChapterSequence(sequence)
           updateBatchStatus("focus", sequence)
           try {
             await setDiscussFocus(sequence, "plot_synopsis")
@@ -2312,7 +2452,6 @@ export function App(): React.JSX.Element {
               if (batchCancelRef.current) updateBatchStatus("stopped", chapterSequence)
               return
             }
-            setBrowseChapterSequence(chapterSequence)
             const draft = drafts.find((item) => (
               item.chapterSequence === chapterSequence
               && item.status !== "completed"
@@ -2432,7 +2571,6 @@ export function App(): React.JSX.Element {
           }
           if (abort === "paused") return
 
-          setBrowseChapterSequence(sequence)
           updateBatchStatus("focus", sequence)
           try {
             await setDiscussFocus(sequence, "plot_synopsis")
@@ -2713,6 +2851,10 @@ export function App(): React.JSX.Element {
     }
     setSelectedPath(undefined)
     setOpenedDocumentPath(undefined)
+    documentNavigationRef.current += 1
+    documentLoadRequestsRef.current.clear()
+    replaceOpenedDocuments([])
+    setDocumentTabNotice(undefined)
     setContent("")
     setSavedContent("")
     setTask(undefined)
@@ -2847,7 +2989,13 @@ export function App(): React.JSX.Element {
   }, [synopsisUsage, synopsisStream])
 
   const resetWorkbenchForProject = useCallback((next: OpenProject | undefined): void => {
+    setDocumentTabNotice(undefined)
+    documentNavigationRef.current += 1
+    documentLoadRequestsRef.current.clear()
+    beforeDocumentLeaveRef.current = undefined
+    replaceOpenedDocuments([])
     setProject(next)
+    setRightPanelOpen(false)
     setReport({ inventory: [], issues: [] })
     setWorkspaceFilePaths([])
     setUnpublishedDrafts([])
@@ -2877,9 +3025,11 @@ export function App(): React.JSX.Element {
     useWorkbenchStore.getState().closeAllDialogs()
     setProjectSettings(undefined)
     setHistory(undefined)
-  }, [])
+  }, [replaceOpenedDocuments])
 
-  const openWorkspaceHome = (): void => {
+  const openWorkspaceHome = async (): Promise<void> => {
+    if (await beginDocumentNavigation() === undefined) return
+    selectedPathRef.current = undefined
     setSelectedPath(undefined)
     setBrowseChapters(false)
     setBrowseChapterSequence(undefined)
@@ -2887,14 +3037,18 @@ export function App(): React.JSX.Element {
     setLineageMode(false)
   }
 
-  const openChapterPanel = (): void => {
+  const openChapterPanel = async (): Promise<void> => {
+    if (await beginDocumentNavigation() === undefined) return
+    selectedPathRef.current = undefined
     setSelectedPath(undefined)
     setBrowseChapters(true)
     setLineageMode(false)
     setError(undefined)
   }
 
-  const openSettingsLineage = (): void => {
+  const openSettingsLineage = async (): Promise<void> => {
+    if (await beginDocumentNavigation() === undefined) return
+    selectedPathRef.current = undefined
     setLineageMode(true)
     setBrowseChapters(false)
     setBrowseChapterSequence(undefined)
@@ -2905,11 +3059,7 @@ export function App(): React.JSX.Element {
 
   const reopenOpenedDocument = (): void => {
     if (openedDocumentPath === undefined) return
-    setBrowseChapters(false)
-    setBrowseChapterSequence(undefined)
-    setBrowseVolumeFolderName(undefined)
-    setLineageMode(false)
-    setSelectedPath(openedDocumentPath)
+    void openFile(openedDocumentPath)
   }
 
   if (project === undefined) {
@@ -2961,11 +3111,12 @@ export function App(): React.JSX.Element {
       chapters: discussFocusChapters.filter((item) => item.volumeFolderName === browseVolumeFolderName),
     }
     : undefined
-  const showRightPanel = !lineageMode && (
+  const rightPanelAvailable = !lineageMode && (
     selectedPath === undefined
     || showChapterConversation
     || browseChapters
   )
+  const showRightPanel = rightPanelAvailable && rightPanelOpen
   const rightPanelChapterMode = showChapterConversation || browseChapters
   const relatedSynopsis = relatedChapterArtifacts.find((item) => item.kind === "plot_synopsis")
   const relatedOutline = relatedChapterArtifacts.find((item) => item.kind === "plot_outline")
@@ -3112,13 +3263,13 @@ export function App(): React.JSX.Element {
           }}
         />}
     <PanelGroup className="workbench-panels" direction="horizontal">
-      <Panel defaultSize={19} minSize={14} maxSize={28} collapsible>
+      <Panel id="workbench-files" order={0} defaultSize={19} minSize={14} maxSize={28} collapsible>
         <WorkspaceTree
           entries={report.inventory}
           selectedPath={selectedPath ?? openedDocumentPath}
           lineageActive={lineageMode}
           onSelect={(path) => void openFile(path)}
-          onSelectLineage={openSettingsLineage}
+          onSelectLineage={() => { void openSettingsLineage() }}
           onRefresh={() => void refreshWorkspace()}
           onCreateMarkdown={(destination) => { createWorkspaceMarkdown(destination) }}
           onCreateDirectory={(parentPath) => { createWorkspaceDirectory(parentPath) }}
@@ -3126,7 +3277,7 @@ export function App(): React.JSX.Element {
         />
       </Panel>
       <PanelResizeHandle className="resize-handle"><PanelLeftClose size={12} /></PanelResizeHandle>
-      <Panel minSize={42}>
+      <Panel id="workbench-editor" order={1} minSize={42}>
         {lineageMode
           ? <SettingsLineagePanel
               projectId={project.projectId}
@@ -3137,8 +3288,15 @@ export function App(): React.JSX.Element {
           workspaceRootRef={project.workspaceRootRef}
           selectedPath={selectedPath}
           openedDocumentPath={openedDocumentPath}
+          openedDocuments={openedDocuments.map((document) => ({ path: document.path, dirty: document.content !== document.savedContent }))}
+          {...(documentTabNotice === undefined ? {} : { documentTabNotice })}
+          onSelectDocument={(path) => { void openFile(path) }}
+          onCloseDocument={(path) => { void closeDocument(path) }}
+          onBeforeDocumentLeaveReady={registerBeforeDocumentLeave}
+          rightPanelOpen={showRightPanel}
+          {...(rightPanelAvailable ? { onToggleRightPanel: () => { setRightPanelOpen((open) => !open) } } : {})}
           browseChapters={browseChapters}
-          onBrowseChapters={openChapterPanel}
+          onBrowseChapters={() => { void openChapterPanel() }}
           {...(browseChapterSequence === undefined ? {} : { browseChapterSequence })}
           {...(browseVolumeFolderName === undefined ? {} : { browseVolumeFolderName })}
           onSelectBrowseChapter={(chapter) => {
@@ -3198,8 +3356,8 @@ export function App(): React.JSX.Element {
           novelSubcategoryRules={novelSubcategoryRules}
           boundaryPace={boundaryPace}
           causalityFocus={causalityFocus}
-          onContentChange={setContent}
-          onHome={openWorkspaceHome}
+          onContentChange={changeDocumentContent}
+          onHome={() => { void openWorkspaceHome() }}
           onOpenDocument={reopenOpenedDocument}
           onPromptChange={setPrompt}
           onDescriptionRuleChange={(value) => { updatePresentation({ descriptionRule: value }); }}
@@ -3255,7 +3413,7 @@ export function App(): React.JSX.Element {
           onOpenSynopsisFile={(path) => { void openFile(path); }}
           onSetFocus={(sequence, focusKind) => { void setDiscussFocus(sequence, focusKind); }}
           focusChapters={discussFocusChapters}
-          onOpenSettingsLineage={openSettingsLineage}
+          onOpenSettingsLineage={() => { void openSettingsLineage() }}
           requireCompleteHookSchedules={projectSettings?.creationDesk.requireCompleteHookSchedules !== false}
           chapterWorkflowEnabled={projectSettings?.creationDesk.chapterWorkflowEnabled === true}
         />}
@@ -3263,7 +3421,7 @@ export function App(): React.JSX.Element {
       {showRightPanel
         ? <>
       <PanelResizeHandle className="resize-handle"><PanelRightClose size={12} /></PanelResizeHandle>
-            <Panel defaultSize={25} minSize={20} maxSize={38} collapsible className="workbench-right-panel">
+            <Panel id="workbench-details" order={2} defaultSize={25} minSize={20} maxSize={38} collapsible onCollapse={() => { setRightPanelOpen(false) }} className="workbench-right-panel">
               <RightPanelViewport
                 chapterMode={rightPanelChapterMode}
                 chapterPanel={browseChapters

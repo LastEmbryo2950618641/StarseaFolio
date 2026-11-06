@@ -4,6 +4,41 @@ import type { PhaseRequestEnvelope } from "@worldseed/contracts"
 import { createModelReferenceView } from "../src/infrastructure/models/deepseek/model-reference-view.js"
 
 describe("model reference view", () => {
+  it.each(["protagonist", "volume:第一卷 待命名"])("keeps %s interview semantics but excludes human confirmation identities", (scope) => {
+    const request = createRequest({ readId: "evidence_1" })
+    const questionId = "5303f649-3e2b-4655-941a-a1c9d01becdb"
+    const answeredId = "11111111-1111-4111-8111-111111111111"
+    const input = request.input as Record<string, unknown>
+    input.synopsisDiscuss = { creativeSetup: {
+      version: 1, scope, status: "collecting", answers: { personality: "沉稳，热爱锻造" },
+      answeredQuestions: { [answeredId]: "personality" }, pendingQuestion: { id: questionId, field: "appearance" },
+      updatedAtMs: 100,
+    } }
+    const view = createModelReferenceView(request)
+    const modelInput = (view.request as { input: { synopsisDiscuss: { creativeSetup: unknown } } }).input
+    expect(modelInput.synopsisDiscuss.creativeSetup).toEqual({
+      scope, status: "collecting", answers: { personality: "沉稳，热爱锻造" }, pendingQuestion: { field: "appearance" },
+    })
+    const serialized = JSON.stringify(view.request)
+    expect(serialized).not.toContain(questionId)
+    expect(serialized).not.toContain(answeredId)
+    expect(input.synopsisDiscuss).toMatchObject({ creativeSetup: { pendingQuestion: { id: questionId } } })
+  })
+
+  it("omits persisted interview write metadata while retaining confirmed answers for AI supplementation", () => {
+    const request = createRequest({ readId: "evidence_1" })
+    const input = request.input as Record<string, unknown>
+    input.synopsisDiscuss = { creativeSetup: {
+      version: 1, scope: "protagonist", status: "awaiting_write", answers: { personality: "沉稳", age: "十七岁" },
+      answeredQuestions: { "11111111-1111-4111-8111-111111111111": "age" },
+      settingsPath: "设定集/人物/主角.md", settingsDigest: "internal-write-digest", updatedAtMs: 200,
+    } }
+    const modelInput = (createModelReferenceView(request).request as { input: { synopsisDiscuss: { creativeSetup: unknown } } }).input
+    expect(modelInput.synopsisDiscuss.creativeSetup).toEqual({
+      scope: "protagonist", status: "awaiting_write", answers: { personality: "沉稳", age: "十七岁" },
+    })
+  })
+
   it("keeps the canonical read reference and hides application-only aliases", () => {
     const request = createRequest({
       readId: "evidence_1",

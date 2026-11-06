@@ -4,6 +4,29 @@ import { digest } from "../../core/index.js"
 
 const OUTPUT_CONTRACT_PREFIX = "MANDATORY OUTPUT CONTRACT"
 
+type DiscussContextMessage = Pick<ModelContextMessage, "kind" | "content" | "role">
+  & Partial<Pick<ModelContextMessage, "taskId" | "turnId" | "phase" | "messageId">>
+
+function isEphemeralDiscussRequestMessage(message: DiscussContextMessage): boolean {
+  if (message.taskId === undefined || message.turnId === undefined || message.phase !== "synopsis_discuss") {
+    return false
+  }
+  if (message.kind === "phase_protocol") return true
+  if (message.kind === "phase_instruction" && message.role === "user") return true
+  return message.kind === "phase_request" && message.content?.startsWith(OUTPUT_CONTRACT_PREFIX) === true
+}
+
+/** Remove call-scoped prompt copies persisted by older versions of the discussion flow. */
+export function findEphemeralDiscussContextMessageIds(
+  messages: readonly ModelContextMessage[],
+): readonly string[] {
+  return messages.flatMap((message) => (
+    message.messageId !== undefined && isEphemeralDiscussRequestMessage(message)
+      ? [message.messageId]
+      : []
+  ))
+}
+
 /**
  * Static tail messages re-attached on every model call for the wire format.
  * Persisting every copy into the durable chain causes exact-duplicate bloat.

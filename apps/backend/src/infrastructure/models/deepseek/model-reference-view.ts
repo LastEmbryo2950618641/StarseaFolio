@@ -223,9 +223,10 @@ function createModelRevision(value: unknown): unknown {
 /** Keep goal IDs (aliased later); drop turn taskId which is application-only. */
 function createModelSynopsisDiscuss(value: unknown): unknown {
   if (!isRecord(value)) return value
-  const { turnMonitor, activeGoals, chapterProgress, ...rest } = value
+  const { turnMonitor, activeGoals, chapterProgress, creativeSetup, ...rest } = value
   const next: Record<string, unknown> = {
     ...rest,
+    ...(creativeSetup === undefined ? {} : { creativeSetup: createModelCreativeSetup(creativeSetup) }),
     ...(activeGoals === undefined
       ? {}
       : {
@@ -248,6 +249,17 @@ function createModelSynopsisDiscuss(value: unknown): unknown {
   return {
     ...next,
     turnMonitor: monitorRest,
+  }
+}
+
+/** Human-confirmation identities and replay/write metadata belong only to the host. */
+function createModelCreativeSetup(value: unknown): unknown {
+  if (!isRecord(value)) return value
+  return {
+    scope: value.scope,
+    status: value.status,
+    answers: value.answers,
+    ...(isRecord(value.pendingQuestion) ? { pendingQuestion: { field: value.pendingQuestion.field } } : {}),
   }
 }
 

@@ -1334,4 +1334,13 @@ export const projectMigrations = Object.freeze([
       novel_subcategory_rule_path = NULL
       WHERE status <> 'awaiting_choice'`,
   ]),
+  defineSqlMigration<ProjectDatabase>(58, "058_creative_setup_states", [
+    `CREATE TABLE creative_setup_states (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      scope TEXT NOT NULL,
+      state_json TEXT NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (project_id, scope)
+    )`,
+  ]),
 ])

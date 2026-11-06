@@ -24,6 +24,19 @@ export function readContextLengthError(error: unknown): { inputTokens?: number; 
   }
 }
 
+function isProtectedDiscussState(message: VisibleModelContextMessage): boolean {
+  if (message.kind !== "phase_instruction") return false
+  try {
+    const value: unknown = JSON.parse(message.content)
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+    const protocol = (value as Record<string, unknown>).protocol
+    return (message.role === "user" && protocol === "discuss-history-summary-v1")
+      || (message.role === "system" && (protocol === "discuss-step-failures-v1" || protocol === "discuss-progress-v1"))
+  } catch {
+    return false
+  }
+}
+
 // Provider usage decides when to compact. Text weights only choose how much old
 // history to remove; they are never reported as measured token counts.
 export async function executeWithContextCompaction(input: {
@@ -38,7 +51,11 @@ export async function executeWithContextCompaction(input: {
   let messages = [...(input.options.contextMessages ?? [])]
   let windowTokens = input.model.info?.contextWindowTokens ?? 64_000
   const compact = async (reason: ContextCompactionEvent["reason"], observedInputTokens?: number): Promise<boolean> => {
-    const removable = messages.filter((message) => message.kind !== "system_rules" && message.turnId !== input.request.turnId)
+    const removable = messages.filter((message) => (
+      message.kind !== "system_rules"
+      && !isProtectedDiscussState(message)
+      && message.turnId !== input.request.turnId
+    ))
     const narrative = (message: VisibleModelContextMessage): boolean => message.kind === "canonical_chapter" || message.kind === "chapter_revision"
     const hidden = new Set(removable.filter((message) => !narrative(message)).map((message) => message.messageId))
     const weights = new Map(messages.map((message) => [message.messageId, estimateModelMessageTokens(message.content)]))

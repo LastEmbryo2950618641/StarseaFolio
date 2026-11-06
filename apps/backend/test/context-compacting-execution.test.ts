@@ -27,6 +27,29 @@ describe("provider-measured context compaction", () => {
     expect(onCompacted).toHaveBeenCalledWith(expect.objectContaining({ reason: "usage_threshold", observedInputTokens: 900_000, thresholdTokens: 900_000 }))
     expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((m) => m.messageId)).toEqual(["system", "current"])
   })
+  it("preserves the lossless discuss history summary during later context compaction", async () => {
+    const { input, execute } = setup(900_000)
+    const summary = {
+      ...message("history-summary", "phase_instruction", "old", 1),
+      role: "user" as const,
+      content: JSON.stringify({ protocol: "discuss-history-summary-v1", userInputs: ["已确认设定"] }),
+    }
+    input.options.contextMessages = [messages[0]!, summary, messages[1]!, messages[2]!, messages[3]!]
+
+    await executeWithContextCompaction(input)
+
+    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId))
+      .toEqual(["system", "history-summary", "current"])
+  })
+  it.each(["discuss-step-failures-v1", "discuss-progress-v1"])("keeps %s counters across context compaction", async (protocol) => {
+    const { input, execute } = setup(900_000)
+    const retryState = { ...message("retry-state", "phase_instruction", "old", 1),
+      role: "system" as const, content: JSON.stringify({ protocol, failures: { "chapter:1:tool:memory_write:invoke": 2 }, consecutiveNoProgressTurns: 2 }) }
+    input.options.contextMessages = [messages[0]!, retryState, ...messages.slice(1)]
+    await executeWithContextCompaction(input)
+    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId))
+      .toEqual(["system", "retry-state", "current"])
+  })
   it.each([undefined, 899_999])("does not substitute estimates for provider usage (%s)", async (tokens) => {
     const { input, execute, onCompacted } = setup(tokens)
     input.options.contextMessages = messages.map((m) => ({ ...m, content: "世界".repeat(100_000) }))

@@ -18,7 +18,7 @@ import {
   isHookScheduleIncomplete,
   type VolumeChapterHookSummary,
 } from "./volume-hook-density.js"
-import { parseVolumeBatchPlan, volumeArtifactWriteStatus, volumeBatchPlanPath, volumeOutlinePath } from "./volume-batch-deduction.js"
+import { parseVolumePlanInfo, volumeArtifactWriteStatus, volumeBatchPlanPath, volumeOutlinePath, type VolumeBatchPlan } from "./volume-batch-deduction.js"
 
 export { isHookScheduleIncomplete } from "./volume-hook-density.js"
 
@@ -97,6 +97,9 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
   }, [props.chapter, props.unpublishedDrafts])
 
   const volumeFolderKey = props.volume?.folderName
+  // Parent streaming updates recreate the volume object without changing this selection.
+  const volumeBodyPathsKey = JSON.stringify(props.volume?.chapters
+    .flatMap((chapter) => chapter.bodyPath === undefined ? [] : [chapter.bodyPath]) ?? [])
   useEffect(() => {
     setExpandedChapters(new Set())
   }, [volumeFolderKey])
@@ -147,40 +150,71 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
 
   useEffect(() => {
     let cancelled = false
-    if (!volumeMode || props.volume === undefined) {
-      setVolumeSynopsis(undefined)
+    setVolumeSynopsis(undefined)
+    setVolumeOutline(undefined)
+    setVolumePlanMarkdown(undefined)
+    if (!volumeMode || volumeFolderKey === undefined) {
+      setSynopsisLoading(false)
       return
     }
-    const volume = props.volume
     setSynopsisLoading(true)
-    void (async () => {
-      try {
-        const [synopsis, outline, plan, wordCount] = await Promise.all([
-          readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, `大纲/${volume.folderName}.梗概.md`),
-          readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, volumeOutlinePath(volume.folderName)),
-          readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, volumeBatchPlanPath(volume.folderName)),
-          countVolumePublishedWords(props.projectId, props.workspaceRootRef, volume.chapters),
-        ])
+    let inFlight = false
+    const refresh = (): void => {
+      if (inFlight) return
+      inFlight = true
+      // Only the first load hides content. Background reads preserve the current view,
+      // including when a file is temporarily unavailable during a write.
+      void Promise.all([
+        `大纲/${volumeFolderKey}.梗概.md`,
+        volumeOutlinePath(volumeFolderKey),
+        volumeBatchPlanPath(volumeFolderKey),
+      ].map((path) => readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, path)
+        .catch(() => undefined))).then(([synopsis, outline, plan]) => {
         if (!cancelled) {
-          setVolumeSynopsis(synopsis)
-          setVolumeOutline(outline)
-          setVolumePlanMarkdown(plan)
-          setVolumeWordCount(wordCount)
+          if (synopsis !== undefined) setVolumeSynopsis(synopsis)
+          if (outline !== undefined) setVolumeOutline(outline)
+          if (plan !== undefined) setVolumePlanMarkdown(plan)
         }
-      } catch {
-        if (!cancelled) {
-          setVolumeSynopsis(undefined)
-          setVolumeOutline(undefined)
-          setVolumePlanMarkdown(undefined)
-        }
-      } finally {
+      }).finally(() => {
+        inFlight = false
         if (!cancelled) setSynopsisLoading(false)
-      }
-    })()
+      })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 2_000)
     return () => {
       cancelled = true
+      window.clearInterval(timer)
     }
-  }, [volumeMode, props.projectId, props.volume, props.workspaceRootRef])
+  }, [volumeMode, props.projectId, volumeFolderKey, props.workspaceRootRef])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!volumeMode || volumeFolderKey === undefined) {
+      setVolumeWordCount(0)
+      return
+    }
+    const bodyPaths = JSON.parse(volumeBodyPathsKey) as string[]
+    let inFlight = false
+    const refresh = (): void => {
+      if (inFlight) return
+      inFlight = true
+      void countVolumePublishedWords(props.projectId, props.workspaceRootRef, bodyPaths).then((wordCount) => {
+        if (!cancelled) setVolumeWordCount(wordCount)
+      }).catch(() => {
+        // Retain the last complete count on transient read errors.
+      }).finally(() => { inFlight = false })
+    }
+    refresh()
+    // Body files are much larger than planning files; also refresh after in-place edits.
+    const timer = window.setInterval(refresh, 10_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [volumeMode, props.projectId, volumeFolderKey, volumeBodyPathsKey, props.workspaceRootRef])
+
+  useEffect(() => { setVolumeWordCount(0) }, [volumeFolderKey, props.projectId, props.workspaceRootRef])
 
   useEffect(() => {
     let cancelled = false
@@ -231,7 +265,9 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
   if (volumeMode && props.volume !== undefined) {
     const synopsisText = volumeSynopsis?.trim() ?? ""
     const outlineText = volumeOutline?.trim() ?? ""
-    const plan = parseVolumeBatchPlan(volumePlanMarkdown)
+    const parsedPlan = parseVolumePlanInfo(volumePlanMarkdown)
+    const plan = parsedPlan?.volumeFolderName === props.volume.folderName ? parsedPlan : undefined
+    const planPath = volumeBatchPlanPath(props.volume.folderName)
     const report = volumeHookReport
     return <aside className="chapter-browse-rail" data-testid="chapter-browse-detail-rail" data-mode="volume">
       <header className="chapter-browse-rail-header">
@@ -245,7 +281,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
           {props.backLabel ?? "返回正文章节"}
         </button>}
         <h3>{props.volume.folderName}</h3>
-        <span className="chapter-browse-volume-meta">{plan === undefined ? "规划待完成" : `${String(plan.targetChapterCount)} 章目标`}</span>
+        <span className="chapter-browse-volume-meta">{plan === undefined || plan.targetChapterCount === 0 ? "规划待完成" : `${String(plan.targetChapterCount)} 章目标`}</span>
       </header>
 
       <div className="chapter-rail-tabs" data-testid="volume-detail-tabs" role="tablist" aria-label="卷详情">
@@ -264,15 +300,12 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       </div>
 
       {volumeTab === "info" ? <>
-      <section className="chapter-browse-section" data-testid="chapter-browse-volume-info">
-        <h4><Info size={13} aria-hidden="true" />卷规划</h4>
-        <ul className="chapter-workflow-stage-list" data-testid="volume-planning-status">
-          <li><span>章节进度</span><span>{plan === undefined ? "0/待规划" : `${String(Math.min(props.volume.chapters.filter((chapter) => chapter.bodyPath !== undefined).length, plan.targetChapterCount))}/${String(plan.targetChapterCount)}`}</span></li>
-          <li><span>已有字数 / 预计字数</span><span>{volumeWordCount.toLocaleString("zh-CN")} / {plan === undefined ? "待规划" : (plan.targetWordCount ?? 0).toLocaleString("zh-CN")}</span></li>
-          <li><span>梗概</span><span>{volumeArtifactWriteStatus(plan?.synopsisWriteCount)}</span></li>
-          <li><span>大纲</span><span>{volumeArtifactWriteStatus(plan?.outlineWriteCount)}</span></li>
-        </ul>
-      </section>
+      <VolumePlanningInfo
+        plan={plan}
+        publishedChapterCount={props.volume.chapters.filter((chapter) => chapter.bodyPath !== undefined).length}
+        wordCount={volumeWordCount}
+        onOpenPlan={() => { props.onOpenBody(planPath) }}
+      />
       <section className="chapter-browse-section" data-testid="chapter-browse-volume-hooks">
         <h4>
           <Link2 size={13} aria-hidden="true" />
@@ -493,6 +526,59 @@ export async function loadChapterDraftHistory(input: Readonly<{
     ...scope, revisionTaskId, includeChapterHistory: true,
   })
   return result.versions
+}
+
+export function VolumePlanningInfo(props: Readonly<{
+  plan: VolumeBatchPlan | undefined
+  publishedChapterCount: number
+  wordCount: number
+  onOpenPlan(): void
+}>): React.JSX.Element {
+  const { plan } = props
+  const targetChapterCount = plan?.targetChapterCount ?? 0
+  const targetWordCount = plan?.targetWordCount ?? 0
+  const storyline = plan?.storyline
+  const confirmed = plan?.storylineConfirmedAtMs !== undefined
+    && storyline !== undefined
+    && Object.values(storyline).every((text) => text.trim().length > 0)
+  const sections = [
+    { key: "opening", label: "主线开场", text: storyline?.opening },
+    { key: "climaxes", label: "主线高潮（可多个）", text: storyline?.climaxes },
+    { key: "ending", label: "主线结局", text: storyline?.ending },
+    { key: "subplots", label: "支线时机与事件", text: storyline?.subplots },
+  ]
+
+  return <>
+    <section className="chapter-browse-section" data-testid="chapter-browse-volume-info">
+      <h4><Info size={13} aria-hidden="true" />卷规划</h4>
+      <ul className="chapter-workflow-stage-list" data-testid="volume-planning-status">
+        <li><span>章节进度</span><span>{targetChapterCount === 0
+          ? `${String(props.publishedChapterCount)}/待规划`
+          : `${String(Math.min(props.publishedChapterCount, targetChapterCount))}/${String(targetChapterCount)}`}</span></li>
+        <li><span>已有字数 / 预计字数</span><span>{props.wordCount.toLocaleString("zh-CN")} / {targetWordCount === 0 ? "待规划" : targetWordCount.toLocaleString("zh-CN")}</span></li>
+        <li><span>梗概</span><span>{volumeArtifactWriteStatus(plan?.synopsisWriteCount)}</span></li>
+        <li><span>大纲</span><span>{volumeArtifactWriteStatus(plan?.outlineWriteCount)}</span></li>
+      </ul>
+    </section>
+    <section className="chapter-browse-section" data-testid="chapter-browse-volume-storyline">
+      <h4><BookOpenText size={13} aria-hidden="true" />主线与支线</h4>
+      <p className="chapter-browse-muted" data-testid="volume-storyline-status" data-status={confirmed ? "confirmed" : "pending"}>
+        {confirmed ? "用户已确认" : "待用户确认"}
+      </p>
+      {sections.map((section) => <div key={section.key} data-testid={`volume-storyline-${section.key}`}>
+        <p className="chapter-browse-muted"><strong>{section.label}</strong></p>
+        {section.text?.trim()
+          ? <pre className="chapter-browse-markdown">{section.text.trim()}</pre>
+          : <p className="chapter-browse-muted">待用户确认</p>}
+      </div>)}
+      {plan === undefined ? null : <button
+        type="button"
+        className="chapter-browse-open-body"
+        data-testid="volume-edit-plan"
+        onClick={props.onOpenPlan}
+      ><FileText size={14} aria-hidden="true" />编辑卷规划</button>}
+    </section>
+  </>
 }
 
 export function ChapterDraftDetailPanel(props: Readonly<{
@@ -721,19 +807,24 @@ async function readWorkspaceMarkdown(
       relativePath,
     })
     return result.content
-  } catch {
-    return ""
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("ENOENT:")) return ""
+    throw error
   }
 }
 
 async function countVolumePublishedWords(
   projectId: string,
   workspaceRootRef: string,
-  chapters: readonly DiscussFocusChapterOption[],
+  bodyPaths: readonly string[],
 ): Promise<number> {
-  const bodies = await Promise.all(chapters
-    .filter((chapter) => chapter.bodyPath !== undefined)
-    .map((chapter) => readWorkspaceMarkdown(projectId, workspaceRootRef, chapter.bodyPath!)))
+  // Wait for every read even on failure, so the next poll cannot overlap this one.
+  const results = await Promise.allSettled(bodyPaths
+    .map((path) => readWorkspaceMarkdown(projectId, workspaceRootRef, path)))
+  const bodies = results.map((result) => {
+    if (result.status === "rejected") throw result.reason
+    return result.value
+  })
   return bodies.reduce((total, body) => total + countChapterCharacters(stripLeadingHeadingKeepBody(body)), 0)
 }
 

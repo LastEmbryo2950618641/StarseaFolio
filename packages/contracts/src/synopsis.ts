@@ -22,6 +22,8 @@ export type DiscussFocusKind = z.infer<typeof discussFocusKindSchema>
 
 export const synopsisConversationChoiceSchema = z.object({
   label: z.string().min(1),
+  /** Server-issued question identity; only an explicit user send may answer it. */
+  setupQuestionId: z.string().min(1).optional(),
   workStyleSelection: z.object({
     proseStyleRulePath: z.string().trim().regex(/^表现输出\/笔风规则\/[^/]+\.md$/u),
     novelMajorCategoryRulePath: z.string().trim().regex(/^表现输出\/小说大类规则\/[^/]+\.md$/u),
@@ -289,6 +291,12 @@ export type CreationDeskSettingsUpdate = z.infer<typeof creationDeskSettingsUpda
 export const synopsisConversationSendResultSchema = z.object({
   session: synopsisConversationSessionSchema,
   messages: z.array(synopsisConversationMessageSchema),
+  /** Human decisions cannot be auto-selected by ordinary or batch continuation. */
+  awaitingSetupInput: z.object({
+    questionId: z.string().min(1),
+    scope: z.string().min(1),
+    field: z.string().min(1),
+  }).optional(),
   /** The current send began in first-write volume planning; the client should show that volume's planning panel. */
   volumePlanningStage: z.boolean().optional(),
   pendingProposals: z.array(deductionGoalProposalSchema).optional(),

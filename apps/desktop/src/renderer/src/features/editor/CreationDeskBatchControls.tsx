@@ -139,12 +139,12 @@ export function CreationDeskBatchControls(props: CreationDeskBatchControlsProps)
             {props.batchStatus.volumeFolderName === undefined
               ? null
               : <small>{props.batchStatus.volumeFolderName}</small>}
+            <span className="creation-desk-batch-progress-count">{`章节 ${String(doneCount)}/${String(total)}`}</span>
           </header>
           <div className="creation-desk-batch-progress-summary" data-testid="creation-desk-batch-progress-summary">
             <div className="creation-desk-batch-progress-bar" aria-hidden="true">
               <span style={{ width: `${String(Math.round((doneCount / total) * 100))}%` }} />
             </div>
-            <span>{`章节 ${String(doneCount)}/${String(total)}`}</span>
           </div>
           {collapsed
             ? null

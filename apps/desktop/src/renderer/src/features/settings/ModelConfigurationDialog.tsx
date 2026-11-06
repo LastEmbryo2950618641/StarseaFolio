@@ -157,14 +157,14 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
     setMessage("新配置尚未保存")
   }
 
-  const removeSelected = (): void => {
-    if (selectedProfile === undefined || drafts.length <= 1) return
-    const remaining = drafts.filter((profile) => profile.id !== selectedProfile.id)
+  const removeProfile = (profileId: string): void => {
+    if (drafts.length <= 1) return
+    const remaining = drafts.filter((profile) => profile.id !== profileId)
     const fallback = remaining[0]
     setDrafts(remaining)
-    setCatalogs((current) => Object.fromEntries(Object.entries(current).filter(([profileId]) => profileId !== selectedProfile.id)))
-    setSelectedId(fallback?.id ?? "")
-    if (nextActiveId === selectedProfile.id) setNextActiveId(fallback?.id ?? "")
+    setCatalogs((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== profileId)))
+    if (selectedId === profileId) setSelectedId(fallback?.id ?? "")
+    if (nextActiveId === profileId) setNextActiveId(fallback?.id ?? "")
     setTestState("idle")
     setMessage("配置已删除，尚未保存")
   }
@@ -225,11 +225,15 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
       <div className="model-dialog-layout">
         <aside className="model-profile-panel">
           <div className="model-profile-heading"><span>模型列表<small>{String(drafts.length)} 个配置</small></span><UiTooltip label="新增模型配置"><button data-testid="add-model-profile" aria-label="新增模型配置" onClick={addProfile}><Plus size={15} /></button></UiTooltip></div>
-          <div className="model-profile-list">{drafts.map((profile) => <button className={`${profile.id === selectedProfile?.id ? "selected" : ""} ${profile.id === nextActiveId ? "active" : ""}`} key={profile.id} onClick={() => { setSelectedId(profile.id); setTestState("idle"); setMessage("选择一个配置进行编辑"); }}>
-            <span className="profile-state">{profile.id === nextActiveId ? <Check size={12} /> : null}</span>
-            <span><strong>{profile.name || "未命名配置"}</strong><small>{profile.model || "未选择模型"}</small></span>
-          </button>)}</div>
-          <button className="remove-profile" disabled={drafts.length <= 1} onClick={removeSelected}><Trash2 size={13} />删除选中配置</button>
+          <div className="model-profile-list">{drafts.map((profile) => <div className={`model-profile-row${profile.id === selectedProfile?.id ? " selected" : ""}${profile.id === nextActiveId ? " active" : ""}`} key={profile.id}>
+            <button type="button" className="model-profile-select" onClick={() => { setSelectedId(profile.id); setTestState("idle"); setMessage("选择一个配置进行编辑"); }}>
+              <span className="profile-state">{profile.id === nextActiveId ? <Check size={12} /> : null}</span>
+              <span><strong>{profile.name || "未命名配置"}</strong><small>{profile.model || "未选择模型"}</small></span>
+            </button>
+            <UiTooltip label={drafts.length <= 1 ? "至少保留一个配置" : "删除此配置"}>
+              <button type="button" className="model-profile-delete" aria-label={`删除配置 ${profile.name || "未命名配置"}`} disabled={drafts.length <= 1} onClick={() => { removeProfile(profile.id); }}><Trash2 size={13} /></button>
+            </UiTooltip>
+          </div>)}</div>
         </aside>
         <div className="model-editor">
           {selectedProfile === undefined ? <div className="empty-model-editor">请先新增一个模型配置</div> : <>

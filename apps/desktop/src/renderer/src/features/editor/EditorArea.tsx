@@ -7,7 +7,7 @@ import { SynopsisConversationComposer } from "./SynopsisConversationComposer.js"
 import type { BatchDeductionPhase } from "./batch-chapter-deduction.js"
 import { ChapterPanel } from "./ChapterPanel.js"
 import { isChapterPlanningMarkdownPath, type DiscussFocusChapterOption } from "./synopsis-path.js"
-import { AlertTriangle, BookOpenText, FilePlus2, LayoutList, RotateCcw, Save, Sparkles } from "lucide-react"
+import { AlertTriangle, BookOpenText, FilePlus2, LayoutList, PanelRightClose, PanelRightOpen, RotateCcw, Save, Sparkles, X } from "lucide-react"
 import { ChapterDraftDiffView } from "./ChapterDraftDiffView.js"
 import { ChapterDraftVersionsPrototype, type DraftDisplayMode } from "./ChapterDraftVersionsPrototype.js"
 import { ChapterWorkspaceToolbar } from "./ChapterWorkspaceToolbar.js"
@@ -61,6 +61,13 @@ function syncChapterEditorWrap(
 type Props = Readonly<{
   selectedPath: string | undefined
   openedDocumentPath: string | undefined
+  openedDocuments?: readonly Readonly<{ path: string; dirty: boolean }>[]
+  documentTabNotice?: string
+  onSelectDocument?(path: string): void
+  onCloseDocument?(path: string): void
+  onBeforeDocumentLeaveReady?(handler: (() => Promise<void>) | undefined): void
+  rightPanelOpen?: boolean
+  onToggleRightPanel?(): void
   browseChapters?: boolean
   onBrowseChapters?(): void
   browseChapterSequence?: number
@@ -150,6 +157,7 @@ type Props = Readonly<{
   onSynopsisSend(message: string, options?: Readonly<{
     agentMode?: "auto" | "plan" | "accept_edits"
     batchProceed?: boolean
+    setupAnswerTo?: string
   }>): Promise<void>
   onSynopsisStop?(): Promise<void>
   onSynopsisRefreshChoices(messageId: string): Promise<void>
@@ -195,7 +203,7 @@ export function EditorArea(props: Props): React.JSX.Element {
           ? "chapter"
           : "markdown"
   const dockChapterToolbar = mode === "chapter"
-  const canCreateFirstDraft = (mode === "home" || mode === "synopsis")
+  const canCreateFirstDraft = mode === "synopsis"
     && props.onCreateDraft !== undefined
     && !props.persistedDraftVersions?.some((version) => version.source !== "baseline")
   const createFirstDraft = async (): Promise<void> => {
@@ -302,8 +310,9 @@ export function EditorArea(props: Props): React.JSX.Element {
         onReasoningEffortChange={props.onReasoningEffortChange}
       />
     : mode === "synopsis"
-      ? <MarkdownEditor content={props.content} readOnly={false} onContentChange={props.onContentChange} />
+      ? <MarkdownEditor key={props.selectedPath} content={props.content} readOnly={false} onContentChange={props.onContentChange} />
     : mode === "chapter" ? <ChapterRevisionEditor
+    key={props.selectedPath}
     path={props.selectedPath}
     content={props.content}
     body={props.chapterBody}
@@ -319,9 +328,11 @@ export function EditorArea(props: Props): React.JSX.Element {
     onSubmitRevision={props.onSubmitRevision}
     onRetireRevision={props.onRetireRevision}
     onSaveReady={registerChapterSave}
+    {...(props.onBeforeDocumentLeaveReady === undefined ? {} : { onBeforeLeaveReady: props.onBeforeDocumentLeaveReady })}
     {...(props.onAppendPersistedDraft === undefined ? {} : { onAppendPersistedDraft: props.onAppendPersistedDraft })}
     {...(props.onRestorePersistedDraft === undefined ? {} : { onRestorePersistedDraft: props.onRestorePersistedDraft })}
   /> : <MarkdownEditor
+    key={props.selectedPath}
     content={props.content}
     readOnly={props.readOnly}
     onContentChange={props.onContentChange}
@@ -349,7 +360,19 @@ export function EditorArea(props: Props): React.JSX.Element {
             data-testid="editor-tab-chapters"
             onClick={props.onBrowseChapters}
           ><LayoutList size={15} /> 章节面板</button>}
-      {props.openedDocumentPath === undefined ? null : (
+      {props.openedDocuments !== undefined ? <div className="editor-file-tabs" role="group" aria-label="已打开文件">
+        {props.openedDocuments.map((document) => <div
+          key={document.path}
+          className={`editor-file-tab${props.selectedPath === document.path && mode !== "chapters" ? " active" : ""}`}
+          data-testid="editor-file-tab"
+        >
+          <button type="button" className="editor-file-tab-select" title={document.path} aria-label={`打开 ${document.path}`} onClick={() => { props.onSelectDocument?.(document.path) }}>
+            <span>{document.path.split("/").at(-1)}</span>
+            {document.dirty ? <i aria-label="未保存" /> : null}
+          </button>
+          <button type="button" className="editor-file-tab-close" title="关闭文件" aria-label={`关闭 ${document.path}`} onClick={() => { props.onCloseDocument?.(document.path) }}><X size={13} /></button>
+        </div>)}
+      </div> : props.openedDocumentPath === undefined ? null : (
         <button
           type="button"
           className={props.selectedPath === props.openedDocumentPath && mode !== "chapters" ? "active" : ""}
@@ -367,9 +390,19 @@ export function EditorArea(props: Props): React.JSX.Element {
           disabled={creatingDraft || props.running || props.synopsisBusy}
           onClick={() => { void createFirstDraft() }}
         ><FilePlus2 size={14} />{creatingDraft ? "创建中…" : "新建草稿"}</button> : null}
-        <UiTooltip label="保存"><button aria-label="保存" disabled={saveDisabled} onClick={handleSave}><Save size={15} /></button></UiTooltip>
+        {mode === "home" ? null : <UiTooltip label="保存"><button aria-label="保存" disabled={saveDisabled} onClick={handleSave}><Save size={15} /></button></UiTooltip>}
+        {props.onToggleRightPanel === undefined ? null : <UiTooltip label={props.rightPanelOpen ? "收起右侧栏" : "展开右侧栏"}>
+          <button
+            type="button"
+            aria-label={props.rightPanelOpen ? "收起右侧栏" : "展开右侧栏"}
+            aria-expanded={props.rightPanelOpen === true}
+            data-testid="editor-toggle-right-panel"
+            onClick={props.onToggleRightPanel}
+          >{props.rightPanelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button>
+        </UiTooltip>}
       </div>
     </div>
+    {props.documentTabNotice === undefined ? null : <div className="editor-document-notice" role="status">{props.documentTabNotice}</div>}
     {createDraftError === undefined ? null : <div className="chapter-revision-error" role="alert">{createDraftError}</div>}
     <div className="editor-document">{documentPane}</div>
   </section>
@@ -445,6 +478,7 @@ function ChapterRevisionEditor(props: {
   onSubmitRevision(input: Readonly<{ revisionTaskId: string; mode: "direct" | "reviewed"; forced: boolean; reviewId?: string }>): Promise<ChapterRevision>
   onRetireRevision(revisionTaskId: string): Promise<ChapterRevision>
   onSaveReady?: (handler: (() => Promise<void>) | undefined, available: boolean) => void
+  onBeforeLeaveReady?: (handler: (() => Promise<void>) | undefined) => void
   onAppendPersistedDraft?(input: Readonly<{ heading: string; body: string }>): Promise<RevisionDraftVersion | undefined>
   onRestorePersistedDraft?(versionId: string): Promise<void>
 }): React.JSX.Element {
@@ -500,6 +534,9 @@ function ChapterRevisionEditor(props: {
   const [draftSaveState, setDraftSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const previousVersionCountRef = useRef(0)
   const ensuringRevisionRef = useRef(false)
+  const ensuringRevisionPromiseRef = useRef<Promise<void> | undefined>(undefined)
+  const beforeLeaveHandlerRef = useRef<(() => Promise<void>) | undefined>(undefined)
+  const beforeLeaveInFlightRef = useRef<Promise<void> | undefined>(undefined)
   const chapterEditorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<Monaco | null>(null)
   const chapterEditorLayoutCleanupRef = useRef<(() => void) | null>(null)
@@ -653,13 +690,16 @@ function ChapterRevisionEditor(props: {
     if (props.chapterIsUnpublished || props.chapter === undefined || ensuringRevisionRef.current) return
     if (!shouldAutoEnsureChapterRevision(props.revision)) return
     ensuringRevisionRef.current = true
-    void props.onEnsureRevision(committedHeading, props.body)
+    const operation = props.onEnsureRevision(committedHeading, props.body)
+      .then(() => undefined)
       .catch((error: unknown) => {
         setActionError(error instanceof Error ? error.message : String(error))
       })
       .finally(() => {
         ensuringRevisionRef.current = false
+        if (ensuringRevisionPromiseRef.current === operation) ensuringRevisionPromiseRef.current = undefined
       })
+    ensuringRevisionPromiseRef.current = operation
   }, [committedHeading, props.body, props.chapter, props.chapterIsUnpublished, props.onEnsureRevision, props.revision])
 
   const changed = draft !== props.body || heading !== committedHeading
@@ -752,6 +792,35 @@ function ChapterRevisionEditor(props: {
     setRevision(next)
     return next
   }
+
+  beforeLeaveHandlerRef.current = async (): Promise<void> => {
+    if (ensuringRevisionPromiseRef.current !== undefined) await ensuringRevisionPromiseRef.current
+    if (autosaveInFlightRef.current !== undefined) await autosaveInFlightRef.current
+    if (pane !== "draft" || displayMode !== "edit") return
+    if (draft === autosaveSnapshotRef.current.body && heading === autosaveSnapshotRef.current.heading) return
+    if (busy || !revisionWritable) throw new Error("草稿正在处理，请稍后再切换")
+    autosaveRequestRef.current += 1
+    const current = revisionRef.current ?? await props.onEnsureRevision(committedHeading, props.body)
+    if (current === undefined) throw new Error("无法保存当前章节草稿")
+    const next = await props.onUpdateRevision(current.revisionTaskId, heading, draft, selectedWorkingDraftId)
+    setRevision(next)
+    autosaveSnapshotRef.current = { heading, body: draft }
+    setLastSavedAtMs(next.updatedAtMs)
+    setDraftSaveState("saved")
+  }
+  const flushBeforeLeave = useCallback((): Promise<void> => {
+    if (beforeLeaveInFlightRef.current !== undefined) return beforeLeaveInFlightRef.current
+    const operation = (beforeLeaveHandlerRef.current?.() ?? Promise.resolve()).finally(() => {
+      if (beforeLeaveInFlightRef.current === operation) beforeLeaveInFlightRef.current = undefined
+    })
+    beforeLeaveInFlightRef.current = operation
+    return operation
+  }, [])
+
+  useEffect(() => {
+    props.onBeforeLeaveReady?.(flushBeforeLeave)
+    return () => { props.onBeforeLeaveReady?.(undefined) }
+  }, [flushBeforeLeave, props.onBeforeLeaveReady])
 
   const createNewDraftVersion = async (): Promise<void> => {
     if (busy || !revisionWritable || displayMode === "diff") return

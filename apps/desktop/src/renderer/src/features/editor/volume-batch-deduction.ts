@@ -16,6 +16,13 @@ export function volumeBatchPlanPath(volumeFolderName: string): string {
   return `${VOLUME_OUTLINE_ROOT}/${volumeFolderName}.批量计划.md`
 }
 
+export type VolumeStoryline = Readonly<{
+  opening: string
+  climaxes: string
+  ending: string
+  subplots: string
+}>
+
 export type VolumeBatchPlan = Readonly<{
   volumeFolderName: string
   startSequence?: number
@@ -23,9 +30,17 @@ export type VolumeBatchPlan = Readonly<{
   targetWordCount?: number
   synopsisWriteCount: number
   outlineWriteCount: number
+  storyline?: VolumeStoryline
+  storylineConfirmedAtMs?: number
 }>
 
 export function parseVolumeBatchPlan(markdown: string | undefined): VolumeBatchPlan | undefined {
+  const plan = parseVolumePlanInfo(markdown)
+  return plan === undefined || plan.targetChapterCount < 1 ? undefined : plan
+}
+
+/** Story planning can precede numerical targets; zero targets are display-only. */
+export function parseVolumePlanInfo(markdown: string | undefined): VolumeBatchPlan | undefined {
   if (markdown === undefined) return undefined
   const match = markdown.match(/```json\s*([\s\S]*?)\s*```/u)
   if (match?.[1] === undefined) return undefined
@@ -35,8 +50,9 @@ export function parseVolumeBatchPlan(markdown: string | undefined): VolumeBatchP
     const record = value as Record<string, unknown>
     if (typeof record.volumeFolderName !== "string"
       || !Number.isInteger(record.targetChapterCount)
-      || (record.targetChapterCount as number) < 1
+      || (record.targetChapterCount as number) < 0
       || (record.targetChapterCount as number) > 50) return undefined
+    const storyline = parseVolumeStoryline(record.storyline)
     return {
       volumeFolderName: record.volumeFolderName,
       ...(Number.isInteger(record.startSequence) && (record.startSequence as number) > 0
@@ -47,12 +63,31 @@ export function parseVolumeBatchPlan(markdown: string | undefined): VolumeBatchP
         ? record.synopsisWriteCount as number : 0,
       outlineWriteCount: Number.isInteger(record.outlineWriteCount) && (record.outlineWriteCount as number) >= 0
         ? record.outlineWriteCount as number : 0,
-      ...(Number.isInteger(record.targetWordCount) && (record.targetWordCount as number) > 0
+      ...(Number.isInteger(record.targetWordCount) && (record.targetWordCount as number) >= 0
         ? { targetWordCount: record.targetWordCount as number }
+        : {}),
+      ...(storyline === undefined ? {} : { storyline }),
+      ...(Number.isSafeInteger(record.storylineConfirmedAtMs) && (record.storylineConfirmedAtMs as number) > 0
+        ? { storylineConfirmedAtMs: record.storylineConfirmedAtMs as number }
         : {}),
     }
   } catch {
     return undefined
+  }
+}
+
+function parseVolumeStoryline(value: unknown): VolumeStoryline | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record.opening !== "string"
+    || typeof record.climaxes !== "string"
+    || typeof record.ending !== "string"
+    || typeof record.subplots !== "string") return undefined
+  return {
+    opening: record.opening,
+    climaxes: record.climaxes,
+    ending: record.ending,
+    subplots: record.subplots,
   }
 }
 
@@ -86,6 +121,7 @@ export function isVolumeBatchComplete(
   targetChapterCount: number,
   startSequence?: number,
 ): boolean {
+  if (!Number.isInteger(targetChapterCount) || targetChapterCount <= 0) return false
   const rows = buildTargetVolumeChapters(chapters, volumeFolderName, targetChapterCount, startSequence)
   return rows.length === targetChapterCount && rows.every((chapter) => chapter.bodyPath !== undefined)
 }

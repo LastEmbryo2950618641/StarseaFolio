@@ -601,6 +601,7 @@ export class BackendFacade {
           projectId: payload.projectId,
           workspaceRootRef: payload.workspaceRootRef,
           message: payload.message,
+          ...(payload.setupAnswerTo === undefined ? {} : { setupAnswerTo: payload.setupAnswerTo }),
           model: this.resolveModel(payload.model),
           ...(payload.presentation === undefined ? {} : { presentation: payload.presentation }),
           ...(payload.chapterIntent === undefined ? {} : { chapterIntent: payload.chapterIntent }),

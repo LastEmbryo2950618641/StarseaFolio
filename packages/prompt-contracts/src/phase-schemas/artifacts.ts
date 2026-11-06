@@ -624,6 +624,8 @@ export const synopsisPresentationWriteSchema = z.object({
 
 export const synopsisDiscussArtifactSchema = z.object({
   assistantMessage: z.string().min(1),
+  /** Supplemental details only; confirmed protagonist core is written by the server. */
+  protagonistSupplementMarkdown: z.string().trim().min(1).max(6_000).optional(),
   /** Parameters and writing guidance are disclosed only by a successful describe. */
   toolRequest: z.object({
     name: z.enum(["chapter_workflow", "publish_draft", "restage_chapter", "bash", "todo_write", "memory_write"]),

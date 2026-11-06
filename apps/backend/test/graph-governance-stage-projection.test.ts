@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { graphGovernanceReviewProjectionSchema } from "@worldseed/prompt-contracts"
 
 import {
   buildCommitReviewProjection,
@@ -56,6 +57,41 @@ describe("graph governance stage projections", () => {
 
     expect(withProbe.projectionDigest).toBe(withoutProbe.projectionDigest)
     expect(withProbe.verificationProbeExecutions).toEqual([])
+  })
+
+  it("stores repeated source graph references once while preserving every source mapping", () => {
+    const graphRefs = Array.from({ length: 101 }, (_, index) => ({
+      targetKind: "node" as const,
+      targetRef: `node_${String(index + 1)}`,
+    }))
+    const retrieval = {
+      projections: [],
+      sourceSettlements: [0, 1, 2].map((sourceUnitIndex) => ({
+        sourceUnitIndex,
+        graphRefs,
+        reason: `source ${String(sourceUnitIndex)} returns through established owners`,
+        status: "bound",
+      })),
+    }
+    const projection = buildGraphGovernanceReviewProjection({
+      scopeId: "scope_repeated_refs",
+      artifacts: { ...stagedArtifacts(), graph_retrieval_design: retrieval },
+      sourceUnitCount: 3,
+      verificationProbeExecutions: [],
+    })
+
+    expect(projection.sourceSettlementReferenceSets).toEqual([{ graphRefs }])
+    expect(projection.sourceSettlements).toEqual([
+      { sourceUnitIndex: 0, graphRefSetIndex: 0, reason: "source 0 returns through established owners", status: "bound" },
+      { sourceUnitIndex: 1, graphRefSetIndex: 0, reason: "source 1 returns through established owners", status: "bound" },
+      { sourceUnitIndex: 2, graphRefSetIndex: 0, reason: "source 2 returns through established owners", status: "bound" },
+    ])
+    expect(JSON.stringify({ sourceSettlements: projection.sourceSettlements, sets: projection.sourceSettlementReferenceSets }).length)
+      .toBeLessThan(JSON.stringify(retrieval.sourceSettlements).length / 2)
+    expect(() => graphGovernanceReviewProjectionSchema.parse({
+      ...projection,
+      sourceSettlements: [{ ...projection.sourceSettlements[0], graphRefSetIndex: 1 }],
+    })).toThrow(/graphRefSetIndex must reference an existing/)
   })
 
   it("builds minimal settlement and frontier responsibility projections", () => {

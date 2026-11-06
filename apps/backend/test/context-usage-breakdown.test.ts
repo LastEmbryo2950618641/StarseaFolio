@@ -96,6 +96,25 @@ describe("buildContextUsageBreakdown", () => {
     expect(byId.tools).toBeGreaterThan(0)
   })
 
+  it("classifies lossless discuss history summaries as conversation history", () => {
+    const result = buildContextUsageBreakdown({
+      contextWindowTokens: 100_000,
+      messages: [message({
+        kind: "phase_instruction",
+        sequence: 0,
+        role: "user",
+        content: JSON.stringify({
+          protocol: "discuss-history-summary-v1",
+          userInputs: ["保留已确认设定。"],
+        }),
+      })],
+    })
+    const summary = result.categories.find((category) => category.id === "conversation")
+    expect(summary?.tokens).toBeGreaterThan(0)
+    expect(summary?.compressible).toBe(true)
+    expect(result.categories.find((category) => category.id === "phase_prompt")).toBeUndefined()
+  })
+
   it("splits latest phase_request delta into presentation and evidence", () => {
     const delta = {
       phase: "synopsis_discuss",

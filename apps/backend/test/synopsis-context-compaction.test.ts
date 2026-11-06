@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import { PROTOCOL_VERSION } from "@worldseed/contracts"
 import type { AIModelPort, TurnPhaseInput } from "../src/application/turns/ports/ai-model-port.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
+import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
 import { openChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 describe("synopsis context compaction integration", () => {
@@ -19,6 +20,8 @@ describe("synopsis context compaction integration", () => {
     const model: AIModelPort = {
       info: { ...fake.info, contextWindowTokens: 1_000_000 },
       execute: async (request, options) => {
+        synopsisConversationStreamHub.setTodos(request.projectId,
+          [{ id: "planning", content: "检查本章讨论上下文", status: "completed" }], Date.now())
         const phaseInput = request.input as TurnPhaseInput
         if (!secondSend) originalTurnId = request.turnId
         if (secondSend) {

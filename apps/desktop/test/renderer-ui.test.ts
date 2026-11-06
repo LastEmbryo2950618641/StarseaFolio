@@ -213,7 +213,9 @@ describe("renderer workbench UI contract", () => {
     expect(html).toContain('data-mode="volume"')
     expect(html).toContain("第一卷 待命名")
     expect(html).toContain('data-testid="chapter-browse-volume-hooks"')
-    expect(html).toContain('data-testid="chapter-browse-volume-synopsis"')
+    expect(html).toContain('data-testid="chapter-browse-volume-info"')
+    expect(html).toContain('data-testid="chapter-browse-volume-storyline"')
+    expect(html).toContain('data-testid="volume-detail-tab-synopsis"')
     expect(html).toContain('data-testid="chapter-browse-back"')
     expect(html).toContain("返回章节列表")
   })
@@ -279,10 +281,39 @@ describe("renderer workbench UI contract", () => {
     expect(html).not.toContain("proto-v0")
   })
 
-  it.each([undefined, "章节正文/第一章 [剧情梗概].md", "章节正文/第一章 [剧情细纲].md"])("offers first manual draft creation on %s", (selectedPath) => {
+  it("hides document editing actions in the conversation toolbar", () => {
+    const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({ onCreateDraft: vi.fn(async () => {}) })))
+    expect(html).not.toContain('data-testid="editor-create-first-draft"')
+    expect(html).not.toContain('aria-label="保存"')
+  })
+
+  it("shows every opened file with an independent close control and unsaved indicator", () => {
+    const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({
+      selectedPath: "设定集/甲.md",
+      openedDocuments: [{ path: "设定集/甲.md", dirty: true }, { path: "参考文件/乙.md", dirty: false }],
+      onSelectDocument: vi.fn(),
+      onCloseDocument: vi.fn(),
+    })))
+    expect(html).toContain('aria-label="打开 设定集/甲.md"')
+    expect(html).toContain('aria-label="打开 参考文件/乙.md"')
+    expect(html).toContain('aria-label="关闭 设定集/甲.md"')
+    expect(html).toContain('aria-label="关闭 参考文件/乙.md"')
+    expect(html).toContain('aria-label="未保存"')
+    expect(html).toContain('class="editor-file-tab active"')
+  })
+
+  it.each([false, true])("shows the right sidebar toggle with expanded=%s", (rightPanelOpen) => {
+    const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({ rightPanelOpen, onToggleRightPanel: vi.fn() })))
+    expect(html).toContain('data-testid="editor-toggle-right-panel"')
+    expect(html).toContain(`aria-expanded="${String(rightPanelOpen)}"`)
+    expect(html).toContain(`aria-label="${rightPanelOpen ? "收起右侧栏" : "展开右侧栏"}"`)
+  })
+
+  it.each(["章节正文/第一章 [剧情梗概].md", "章节正文/第一章 [剧情细纲].md"])("offers first manual draft creation on %s", (selectedPath) => {
     const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({ selectedPath, onCreateDraft: vi.fn(async () => {}) })))
     expect(html).toContain('data-testid="editor-create-first-draft"')
     expect(html).toContain("新建草稿")
+    expect(html).toContain('aria-label="保存"')
   })
 
   it("hides first draft creation when actual drafts already exist", () => {

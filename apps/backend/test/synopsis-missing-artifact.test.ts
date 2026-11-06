@@ -1,291 +1,62 @@
 import { randomUUID } from "node:crypto"
+import { rmSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { PROTOCOL_VERSION } from "@worldseed/contracts"
 
-import {
-  PROTOCOL_VERSION,
-  SCHEMA_VERSION,
-  type PhaseRequestEnvelope,
-  type PhaseResultEnvelope,
-} from "@worldseed/contracts"
-
-import {
-  SynopsisConversationService,
-  type SynopsisConversationServiceDependencies,
-} from "../src/application/chapters/synopsis-conversation-service.js"
-import type { AIModelPort, PhaseModelExecution } from "../src/application/turns/ports/ai-model-port.js"
-import type { WorkspaceCatalogPort } from "../src/application/retrieval/ports/workspace-catalog.js"
-import type { WorkspacePort } from "../src/application/workspace/index.js"
-import type { PromptResourcePort } from "../src/application/turns/ports/ai-model-port.js"
-
-function emptyCatalog(projectId: string) {
-  return {
-    snapshotId: randomUUID(),
-    projectId,
-    generatedAtMs: Date.now(),
-    entries: [
-      {
-        relativePath: "设定集/readme.md",
-        entryKind: "file" as const,
-        role: "settings" as const,
-        version: "v1",
-        digest: "d1",
-        size: 12,
-      },
-      ...[
-        "表现输出/描写规则/自动.md",
-        "表现输出/描写规则/感官描写.md",
-        "表现输出/描写规则/去AI味.md",
-      ].map((relativePath) => ({
-        relativePath,
-        entryKind: "file" as const,
-        role: "presentation" as const,
-        version: "v1",
-        digest: "d1",
-        size: 12,
-      })),
-    ],
-    digest: "catalog",
-  }
-}
+import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
+import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
+import { serializeVolumePlanningState } from "../src/application/chapters/volume-planning-gate.js"
+import { confirmedVolumeStorylineFixture, openChapterHarness, prepareChapterPlanning } from "./helpers/chapter-coordination-harness.js"
 
 describe("synopsis discuss missing artifact recovery", () => {
-  it("retries when continue omits artifact, then accepts a valid artifact", async () => {
-    const projectId = randomUUID()
-    const sessionId = randomUUID()
+  it.each(["missing_artifact", "repeated_contract_failure", "recovered_contract"] as const)("bounds %s with the actual service and repositories", async (mode) => {
     let calls = 0
     const model: AIModelPort = {
-      info: {
-        provider: "fake",
-        model: "missing-artifact",
-        available: true,
-        contextWindowTokens: 8_000,
-      },
-      async execute(request: PhaseRequestEnvelope): Promise<PhaseModelExecution> {
+      info: { provider: "test", model: "contract-retry", available: true, contextWindowTokens: 64_000 },
+      async execute(request) {
         calls += 1
-        const base = {
-          schemaVersion: SCHEMA_VERSION,
-          envelopeId: request.envelopeId,
-          contextId: request.contextId,
-          phase: request.phase,
-          requestedReads: [],
-          citedReadIds: [...request.committedReadIds],
-          producedArtifactIds: [],
-          decisionRecordIds: [],
-          unresolvedDependencies: [],
-        } as const
-        const result: PhaseResultEnvelope = calls === 1
-          ? {
-              ...base,
-              outcome: "continue",
-              reason: "omit artifact",
-              selfReview: "first pass",
-            }
-          : {
-              ...base,
-              outcome: "continue",
-              artifact: {
-                assistantMessage: "已根据设定索引整理第一章方向。",
-                finalSelfReview: "Recovered after missing artifact.",
-              },
-              reason: "complete",
-              selfReview: "second pass",
-            }
+        if (mode === "repeated_contract_failure" || (mode === "recovered_contract" && calls < 3)) {
+          throw new Error("phase contract: toolRequest 不可与章节写入同回")
+        }
+        synopsisConversationStreamHub.setTodos(request.projectId,
+          [{ id: "check", content: "检查设定索引", status: "completed" }], Date.now())
         return {
-          result,
-          usage: { modelCalls: 1, inputTokens: 1, outputTokens: 1, latencyMs: 1 },
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [], reason: "Regression", selfReview: "Regression",
+            ...(mode === "missing_artifact" && calls === 1 ? {} : { artifact: {
+              assistantMessage: "已根据设定索引整理第一章方向。", finalSelfReview: "Recovered after contract repair.",
+              choices: [{ label: "继续完善当前规划", action: "continue_discuss" }],
+            } }),
+          },
+          usage: { inputTokens: 100, outputTokens: 20, latencyMs: 0, modelCalls: 1 },
         }
       },
     }
-    const storedMessages: Array<{
-      messageId: string
-      sessionId: string
-      projectId: string
-      role: "user" | "assistant" | "system"
-      content: string
-      createdAtMs: number
-      reasoningContent?: string
-      searching?: unknown
-      choices?: unknown
-    }> = []
-    const discussContext: Array<{
-      messageId: string
-      chainId: string
-      projectId: string
-      sequence: number
-      role: "system" | "user" | "assistant"
-      kind: "system_rules" | "phase_request" | "phase_response" | "phase_instruction" | "phase_protocol"
-      content: string
-      contentDigest: string
-      tokenEstimate: number
-      createdAtMs: number
-      taskId?: string
-      turnId?: string
-      phase?: "synopsis_discuss"
-    }> = []
-    const conversation = {
-      async findActiveSession() {
-        return {
-          sessionId,
-          projectId,
-          chapterSequence: 1,
-          synopsisPath: "章节正文/第一卷 待命名/第一章 待命名 [剧情梗概].md",
-          title: "第一章 待命名",
-          status: "active" as const,
-          createdAtMs: 1,
-          updatedAtMs: 1,
-        }
-      },
-      async listMessages() {
-        return [...storedMessages]
-      },
-      async listMessagesForProject() {
-        return [...storedMessages]
-      },
-      async appendMessage(input: (typeof storedMessages)[number]) {
-        storedMessages.push({ ...input })
-        return input
-      },
-      async updateSession() {
-        return undefined
-      },
-      async findSession() {
-        return {
-          sessionId,
-          projectId,
-          chapterSequence: 1,
-          synopsisPath: "章节正文/第一卷 待命名/第一章 待命名 [剧情梗概].md",
-          title: "第一章 待命名",
-          status: "active" as const,
-          createdAtMs: 1,
-          updatedAtMs: 1,
-        }
-      },
-      async loadDiscussUsage() {
-        return undefined
-      },
-      loadDiscussContextInputTokens() {
-        return Promise.resolve(undefined)
-      },
-      async saveDiscussUsage() {
-        return undefined
-      },
-      async listDiscussContextMessages() {
-        return [...discussContext]
-      },
-      async appendDiscussContextMessages(input: {
-        sessionId: string
-        projectId: string
-        createdAtMs: number
-        messages: Array<{
-          role: "system" | "user" | "assistant"
-          kind: "system_rules" | "phase_request" | "phase_response" | "phase_instruction" | "phase_protocol"
-          content?: string
-          taskId?: string
-          turnId?: string
-          phase?: "synopsis_discuss"
-        }>
-      }) {
-        for (const message of input.messages) {
-          if (message.content === undefined) continue
-          discussContext.push({
-            messageId: randomUUID(),
-            chainId: input.sessionId,
-            projectId: input.projectId,
-            sequence: discussContext.length,
-            role: message.role,
-            kind: message.kind,
-            content: message.content,
-            contentDigest: "d",
-            tokenEstimate: 1,
-            createdAtMs: input.createdAtMs,
-            ...(message.taskId === undefined ? {} : { taskId: message.taskId }),
-            ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
-            ...(message.phase === undefined ? {} : { phase: message.phase }),
-          })
-        }
-      },
-      async hideDiscussContextMessages() {
-        return undefined
-      },
-      async readDiscussContextDigests() {
-        return {}
-      },
-      async saveDiscussContextDigests() {
-        return undefined
-      },
+    const harness = await openChapterHarness("Contract retries", { model })
+    try {
+      await harness.container.workspace.saveUserMarkdown(harness.workspaceRootRef, "大纲/第一卷 待命名.批量计划.md",
+        serializeVolumePlanningState({ volumeFolderName: "第一卷 待命名", startSequence: 1,
+          ...confirmedVolumeStorylineFixture,
+          targetChapterCount: 8, targetWordCount: 24000, synopsisWriteCount: 1, outlineWriteCount: 1 }))
+      await prepareChapterPlanning(harness)
+      const response = await harness.facade.handle({
+        protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method: "synopsis.conversation.send",
+        payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+          message: "检查设定索引", maxModelCalls: 12 },
+      })
+      if (mode === "repeated_contract_failure") {
+        expect(response.ok).toBe(false)
+        if (!response.ok) expect(response.error.message).toMatch(/model_contract.*3.*停止/)
+        expect(calls).toBe(3)
+      } else {
+        expect(response.ok).toBe(true)
+        expect(calls).toBe(mode === "missing_artifact" ? 2 : 3)
+      }
+    } finally {
+      await harness.container.close()
+      rmSync(harness.root, { recursive: true, force: true })
     }
-    const workspace: WorkspacePort = {
-      async validate() {
-        return { workspaceRootRef: "ws", inventory: [], issues: [] }
-      },
-      async readMarkdown() {
-        return "# 设定集索引\n"
-      },
-      async saveSynopsisMarkdown() {
-        return undefined
-      },
-      async removeSynopsisMarkdown() {
-        return undefined
-      },
-    } as unknown as WorkspacePort
-    const catalog: WorkspaceCatalogPort = {
-      async createSnapshot() {
-        return emptyCatalog(projectId)
-      },
-    }
-    const prompts: PromptResourcePort = {
-      async loadPhase() {
-        return { ref: "synopsis_discuss", digest: "d", text: "phase" }
-      },
-      async loadSynopsisDiscussSystemRules() {
-        return { ref: "rules", digest: "d", text: "rules" }
-      },
-    } as unknown as PromptResourcePort
-    const dependencies = {
-      chapterIndex: {
-        findBySequence() {
-          return Promise.resolve(undefined)
-        },
-      },
-      chapters: {
-        async nextChapterSequence() {
-          return 1
-        },
-      },
-      chapterSynopsis: {
-        async detectTitleAlignmentIssue() {
-          return undefined
-        },
-      },
-      conversation,
-      goals: {
-        async list() {
-          return { goals: [], progress: [], proposals: [] }
-        },
-        async auditHookSchedules() {
-          return { incomplete: [], complete: [], warnings: [] }
-        },
-        async createProposalsFromArtifact() {
-          return []
-        },
-      },
-      workspace,
-      catalog,
-      prompts,
-      createId: randomUUID,
-      now: () => Date.now(),
-    } as unknown as SynopsisConversationServiceDependencies
-    const service = new SynopsisConversationService(dependencies)
-    const sent = await service.send({
-      projectId,
-      workspaceRootRef: "ws",
-      message: "我想写修仙小说",
-      model,
-      maxModelCalls: 4,
-    })
-    expect(calls).toBe(2)
-    expect(sent.messages.some((message) => (
-      message.role === "assistant" && message.content.includes("设定索引")
-    ))).toBe(true)
   })
 })

@@ -56,7 +56,7 @@ export function WorldGraph({ slice, settings = defaultProjectSettings.graph }: P
       graph.addNode(node.id, {
         x,
         y,
-        size: depth === 0 ? 18 : depth === 1 ? 14 : 12,
+        size: depth === 0 ? 1.45 : depth === 1 ? 1.15 : 0.95,
         color: depth === 0 ? "#5865f2" : depth === 1 ? "#00a8fc" : "#f0b232",
         highlighted: false,
       })
@@ -74,6 +74,7 @@ export function WorldGraph({ slice, settings = defaultProjectSettings.graph }: P
       renderEdgeLabels: false,
       defaultEdgeType: "arrow",
       stagePadding: 54,
+      itemSizesReference: "positions",
       defaultDrawNodeHover: drawNodeSelectionRing,
     })
     graphRef.current = graph

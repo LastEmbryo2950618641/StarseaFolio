@@ -6,7 +6,23 @@ import { describe, expect, it } from "vitest"
 import { PROTOCOL_VERSION, type BackendMethod, type RevisionDraftVersion, type ChapterRevision, type ChapterRevisionReadResult } from "@worldseed/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
-import { openChapterHarness, prepareChapterPlanning, waitForTask, waitForRevisionGraphSync } from "./helpers/chapter-coordination-harness.js"
+import { serializeVolumePlanningState } from "../src/application/chapters/volume-planning-gate.js"
+import { confirmedVolumeStorylineFixture, openChapterHarness as openBaseChapterHarness, prepareChapterPlanning, waitForTask, waitForRevisionGraphSync } from "./helpers/chapter-coordination-harness.js"
+
+async function openChapterHarness(...args: Parameters<typeof openBaseChapterHarness>) {
+  const harness = await openBaseChapterHarness(...args)
+  await harness.container.workspace.saveUserMarkdown(harness.workspaceRootRef,
+    "大纲/第一卷 待命名.梗概.md", "# 卷梗概\n\n主角从旧站台发现线索，沿途追查失踪者。")
+  await harness.container.workspace.saveUserMarkdown(harness.workspaceRootRef,
+    "大纲/第一卷 待命名.md", "# 卷大纲\n\n前四章发现线索，后四章揭示失踪原因。")
+  await harness.container.workspace.saveUserMarkdown(harness.workspaceRootRef,
+    "大纲/第一卷 待命名.批量计划.md", serializeVolumePlanningState({
+      ...confirmedVolumeStorylineFixture,
+      volumeFolderName: "第一卷 待命名", startSequence: 1, targetChapterCount: 8, targetWordCount: 24000,
+      synopsisWriteCount: 1, outlineWriteCount: 1,
+    }))
+  return harness
+}
 
 describe("workflow drafts and publication", () => {
   it("returns chapter artifact contents and counts each first write and later content change", async () => {
@@ -314,7 +330,9 @@ describe("workflow drafts and publication", () => {
           }) }
           : undefined
         return { usage: execution.usage, result: { ...execution.result, outcome: "continue", requestedReads: [],
-          artifact: { assistantMessage: "Done", finalSelfReview: "OK", ...(toolRequest === undefined ? {} : { toolRequest }) } } }
+          artifact: { assistantMessage: "Done", finalSelfReview: "OK", ...(toolRequest === undefined
+            ? { choices: [{ label: "检查草稿", action: "continue_discuss" }] }
+            : { toolRequest }) } } }
       },
     }
     const harness = await openChapterHarness("Workflow discussion", { model })
@@ -408,7 +426,8 @@ describe("workflow drafts and publication", () => {
         creationDesk: { ...settings.creationDesk, chapterWorkflowEnabled: true },
       })
       await call("synopsis.conversation.start")
-      await call("synopsis.conversation.send", { message: "直接进入正文推演", maxModelCalls: 20 })
+      await expect(call("synopsis.conversation.send", { message: "直接进入正文推演", maxModelCalls: 20 }))
+        .rejects.toThrow(/todo_incomplete.*3.*停止/)
       expect(discussCalls).toBeGreaterThanOrEqual(4)
       expect(nestedDraftModelCalls).toBe(0)
       expect(await call("chapter.draft.list")).toEqual([])

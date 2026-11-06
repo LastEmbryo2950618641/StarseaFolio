@@ -1,11 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react"
-import { Bot, ChevronDown, ChevronRight, Ellipsis, FileText, Globe, ListTodo, Loader2, Play, RefreshCw, Send, Settings2, Sparkles, Square, Terminal, UserRound } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight, Ellipsis, FileText, Globe, ListTodo, Loader2, Play, Send, Settings2, Sparkles, Square, Terminal, UserRound } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type {
   DiscussAgentMode,
   DiscussFocusKind,
-  SynopsisConversationChoice,
   SynopsisConversationMessage,
   SynopsisConversationSession,
   SynopsisConversationStreamSnapshot,
@@ -65,6 +64,9 @@ import {
 import { CreationDeskFocusBar } from "./CreationDeskFocusBar.js"
 import { type DiscussFocusChapterOption } from "./synopsis-path.js"
 import { useDeductionGoals } from "./use-deduction-goals.js"
+import { SynopsisChoiceComposerProvider, useChoiceDraft } from "./SynopsisChoiceComposerContext.js"
+import { SynopsisChoiceGroup } from "./SynopsisChoiceGroup.js"
+import { latestSetupQuestionId } from "./synopsis-choice-state.js"
 
 type PresentationProps = Readonly<{
   descriptionRule: string
@@ -120,7 +122,7 @@ type Props = Readonly<{
   draftRestore?: { text: string; token: number } | undefined
   running: boolean
   pendingStagingPromotes?: readonly SynopsisStagingPromoteProposal[]
-  onSend(message: string, options?: Readonly<{ agentMode?: DiscussAgentMode; batchProceed?: boolean }>): Promise<void>
+  onSend(message: string, options?: Readonly<{ agentMode?: DiscussAgentMode; batchProceed?: boolean; setupAnswerTo?: string }>): Promise<void>
   onStop?(): Promise<void>
   onRefreshChoices(messageId: string): Promise<void>
   onPromoteStaging(): Promise<void>
@@ -155,7 +157,6 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const [focusUnfilled, setFocusUnfilled] = useState(false)
   const [choicesRefreshing, setChoicesRefreshing] = useState(false)
   const [footerCollapse, setFooterCollapse] = useState<CreationDeskFooterCollapse>(() => loadCreationDeskFooterCollapse())
-  const [choicePrefill, setChoicePrefill] = useState<Readonly<{ text: string; token: number }> | undefined>()
   const footerDragRef = useRef<Readonly<{ startY: number, startLevel: CreationDeskFooterCollapse }> | null>(null)
   const todoMenuRef = useRef<HTMLDivElement>(null)
   const goals = useDeductionGoals({
@@ -193,9 +194,13 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const sendMessage = useCallback(async (message: string): Promise<void> => {
     stickToLatestRef.current = true
     setShowJumpToLatest(false)
-    await props.onSend(message, { agentMode, batchProceed })
+    const setupAnswerTo = latestSetupQuestionId(props.messages)
+    await props.onSend(message, {
+      agentMode, batchProceed,
+      ...(setupAnswerTo === undefined ? {} : { setupAnswerTo }),
+    })
     await goals.refresh()
-  }, [agentMode, batchProceed, goals.refresh, props.onSend])
+  }, [agentMode, batchProceed, goals.refresh, props.messages, props.onSend])
 
   const visibleTodos = resolveDiscussTodos(props.stream, props.messages)
 
@@ -330,7 +335,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
     }
   }
 
-  return <div
+  return <SynopsisChoiceComposerProvider scope={JSON.stringify([props.workspaceRootRef, props.projectId, props.session?.sessionId])}><div
     className={`creation-desk-workspace${isRail ? " creation-desk-workspace--rail" : ""}`}
     data-testid={isRail ? "chapter-conversation" : "synopsis-conversation"}
   >
@@ -388,6 +393,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                 {visibleMessages.map((message) => <CreationDeskMessage
                   key={message.messageId}
                   message={message}
+                  workspaceRootRef={props.workspaceRootRef}
                   running={props.running}
                   busy={props.busy}
                   choicesRefreshing={choicesRefreshing}
@@ -397,24 +403,8 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   novelMajorCategoryRules={props.novelMajorCategoryRules}
                   novelSubcategoryRules={props.novelSubcategoryRules}
                   proseRules={props.proseRules}
-                  onSend={sendMessage}
-                  onPromoteStaging={props.onPromoteStaging}
-                  onStartTurn={props.onStartTurn}
                   onRefreshChoices={refreshChoices}
                   onFocusComposer={() => composerInputRef.current?.focus()}
-                  onPrefillChoice={(text) => {
-                    setChoicePrefill((current) => ({ text, token: (current?.token ?? 0) + 1 }))
-                  }}
-                  {...(props.onPromoteDraftToBody === undefined
-                    ? {}
-                    : { onPromoteDraftToBody: props.onPromoteDraftToBody })}
-                  {...(props.onSetFocus === undefined ? {} : { onSetFocus: props.onSetFocus })}
-                  {...(props.pendingStagingPromotes === undefined
-                    ? {}
-                    : { pendingStagingPromotes: props.pendingStagingPromotes })}
-                  {...(props.onRejectStagingPromote === undefined
-                    ? {}
-                    : { onRejectStagingPromote: props.onRejectStagingPromote })}
                   {...(props.onOpenSettingsLineage === undefined
                     ? {}
                     : { onOpenSettingsLineage: props.onOpenSettingsLineage })}
@@ -606,7 +596,6 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
           workspaceRootRef={props.workspaceRootRef}
           sessionId={props.session?.sessionId}
           inputRef={composerInputRef}
-          {...(choicePrefill === undefined ? {} : { choicePrefill })}
           busy={props.busy}
           running={props.running}
           showStop={showStop}
@@ -638,7 +627,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
         />
       </footer>
     </div>
-  </div>
+  </div></SynopsisChoiceComposerProvider>
 }
 
 type ComposerInputProps = Readonly<{
@@ -648,7 +637,6 @@ type ComposerInputProps = Readonly<{
   workspaceRootRef: string | undefined
   sessionId: string | undefined
   inputRef: React.RefObject<HTMLTextAreaElement | null>
-  choicePrefill?: Readonly<{ text: string; token: number }>
   busy: boolean
   running: boolean
   showStop: boolean
@@ -676,14 +664,15 @@ type ComposerInputProps = Readonly<{
   chapterWorkflowEnabled?: boolean
 }>
 
-/** Owns draft text so keystrokes do not re-render the markdown message thread. */
+/** Subscribe to draft text here so keystrokes do not re-render the markdown message thread. */
 function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element {
-  const [draft, setDraft] = useState("")
+  const { composer, draft } = useChoiceDraft()
   const [ideaPromptIndex, setIdeaPromptIndex] = useState(0)
   const [catalogModels, setCatalogModels] = useState<readonly string[]>([])
   const [catalogStatus, setCatalogStatus] = useState<"idle" | "loading" | "ready" | "error">("idle")
   const [contextUsageOpen, setContextUsageOpen] = useState(false)
   const loadedCatalogSigRef = useRef("")
+  const appliedDraftRestoreRef = useRef<Props["draftRestore"]>(undefined)
 
   useEffect(() => {
     if (bookIdeaPrompts.length < 2) return
@@ -694,19 +683,10 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
   }, [])
 
   useEffect(() => {
-    if (props.draftRestore === undefined) return
-    setDraft(typeof props.draftRestore.text === "string" ? props.draftRestore.text : "")
-  }, [props.draftRestore])
-
-  useEffect(() => {
-    if (props.choicePrefill === undefined) return
-    const text = props.choicePrefill.text
-    setDraft((current) => {
-      const withoutPreviousSelection = current.replace(/我选择的风格组合是：小说大类规则「[^」]+」、小说次大类规则「[^」]+」、笔风规则「[^」]+」。请按这三份规则继续。/gu, "").trimEnd()
-      return withoutPreviousSelection.trim().length === 0 ? text : `${withoutPreviousSelection}\n${text}`
-    })
-    props.inputRef.current?.focus()
-  }, [props.choicePrefill, props.inputRef])
+    if (props.draftRestore === undefined || props.draftRestore === appliedDraftRestoreRef.current) return
+    appliedDraftRestoreRef.current = props.draftRestore
+    composer.reset(typeof props.draftRestore.text === "string" ? props.draftRestore.text : "")
+  }, [props.draftRestore, composer])
 
   const activeProfile = props.modelProfiles.find((profile) => profile.id === props.activeModelProfileId)
     ?? props.modelProfiles[0]
@@ -777,8 +757,8 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
 
   const submit = async (): Promise<void> => {
     const message = (draft ?? "").trim()
-    if (message.length === 0 || props.busy) return
-    setDraft("")
+    if (message.length === 0 || props.busy || props.running) return
+    composer.reset()
     await props.onSend(message)
   }
 
@@ -830,9 +810,9 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
       disabled={props.busy || props.running}
       placeholder={bookIdeaPrompts[ideaPromptIndex] ?? bookIdeaPrompts[0]}
       rows={isMinimal ? 1 : props.compact === true ? 2 : 3}
-      onChange={(event) => { setDraft(event.target.value); }}
+      onChange={(event) => { composer.editDraft(event.target.value, event.target.selectionStart); }}
       onKeyDown={(event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
+        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
           event.preventDefault()
           void submit()
         }
@@ -1011,31 +991,21 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
 
 const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
   message: SynopsisConversationMessage
+  workspaceRootRef: string | undefined
   running: boolean
   busy: boolean
   choicesRefreshing: boolean
   isLatestChoiceMessage: boolean
   focusLocked: boolean
-  pendingStagingPromotes?: readonly SynopsisStagingPromoteProposal[]
   chapterWorkflowEnabled?: boolean
   novelMajorCategoryRules: readonly string[]
   novelSubcategoryRules: readonly string[]
   proseRules: readonly string[]
-  onSend(message: string): Promise<void>
-  onPrefillChoice(message: string): void
-  onPromoteStaging(): Promise<void>
-  onRejectStagingPromote?(proposalIds: readonly string[]): Promise<void>
-  onStartTurn(): void
-  onSetFocus?(sequence: number, focusKind: DiscussFocusKind): void
-  onPromoteDraftToBody?(): Promise<void>
   onRefreshChoices(messageId: string): Promise<void>
   onFocusComposer(): void
   onOpenSettingsLineage?(): void
 }>): React.JSX.Element {
   const { message } = props
-  const [selectedMajorCategory, setSelectedMajorCategory] = useState("")
-  const [selectedSubcategory, setSelectedSubcategory] = useState("")
-  const [selectedProseStyle, setSelectedProseStyle] = useState("")
   const choices = (message.choices ?? []).filter((choice) => (
     (!props.focusLocked || choice.action !== "set_focus")
     && (props.chapterWorkflowEnabled === true || choice.action !== "start_turn")
@@ -1065,149 +1035,24 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
         ? <p className="creation-desk-message-error" role="status">{message.error}</p>
         : null}
       {message.role === "assistant"
-        ? <div className="synopsis-conversation-choices">
-            {choices.some((choice) => choice.workStyleSelection !== undefined)
-              ? <div className="synopsis-style-picker" data-testid="synopsis-style-picker">
-                  <select
-                    aria-label="选择小说大类"
-                    data-testid="style-picker-major"
-                    value={selectedMajorCategory}
-                    disabled={props.running || props.busy || props.choicesRefreshing}
-                    onChange={(event) => {
-                      setSelectedMajorCategory(event.target.value)
-                      setSelectedSubcategory("")
-                      setSelectedProseStyle("")
-                    }}
-                  >
-                    <option value="">选择大类</option>
-                    {props.novelMajorCategoryRules.map((path) => <option key={path} value={path}>{path.split("/").at(-1)?.replace(/\.md$/u, "")}</option>)}
-                  </select>
-                  <select
-                    aria-label="选择小说次大类"
-                    data-testid="style-picker-subcategory"
-                    value={selectedSubcategory}
-                    disabled={selectedMajorCategory.length === 0 || props.running || props.busy || props.choicesRefreshing}
-                    onChange={(event) => {
-                      setSelectedSubcategory(event.target.value)
-                      setSelectedProseStyle("")
-                    }}
-                  >
-                    <option value="">选择次大类</option>
-                    {props.novelSubcategoryRules.map((path) => <option key={path} value={path}>{path.split("/").at(-1)?.replace(/\.md$/u, "")}</option>)}
-                  </select>
-                  <select
-                    aria-label="选择笔风"
-                    data-testid="style-picker-prose"
-                    value={selectedProseStyle}
-                    disabled={selectedSubcategory.length === 0 || props.running || props.busy || props.choicesRefreshing}
-                    onChange={(event) => { setSelectedProseStyle(event.target.value); }}
-                  >
-                    <option value="">选择笔风</option>
-                    {props.proseRules.map((path) => <option key={path} value={path}>{path.split("/").at(-1)?.replace(/\.md$/u, "")}</option>)}
-                  </select>
-                  <button
-                    type="button"
-                    className="synopsis-choice synopsis-style-picker-insert"
-                    data-testid="style-picker-insert"
-                    aria-label="将风格组合填入对话框"
-                    title="将风格组合填入对话框"
-                    disabled={selectedMajorCategory.length === 0 || selectedSubcategory.length === 0 || selectedProseStyle.length === 0 || props.running || props.busy || props.choicesRefreshing}
-                    onClick={() => {
-                      props.onPrefillChoice(formatStyleSelectionMessage({
-                        novelMajorCategoryRulePath: selectedMajorCategory,
-                        novelSubcategoryRulePath: selectedSubcategory,
-                        proseStyleRulePath: selectedProseStyle,
-                      }))
-                    }}
-                  >
-                    <Send size={14} aria-hidden="true" />
-                  </button>
-                </div>
-              : null}
-            {choices.map((choice) => <button
-              key={choice.label}
-              type="button"
-              className="synopsis-choice"
-              {...(choice.workStyleSelection === undefined ? {} : {
-                "data-testid": "style-choice-use",
-                title: "将此组合填入对话框",
-                "aria-label": `填入对话框：${choice.label}`,
-              })}
-              disabled={props.running || props.busy || props.choicesRefreshing}
-              onClick={() => {
-                if (choice.action === "start_turn") {
-                  props.onStartTurn()
-                  return
-                }
-                if (choice.action === "promote_staging") {
-                  void props.onPromoteStaging()
-                  return
-                }
-                if (choice.action === "confirm_synopsis") {
-                  void props.onSend("用这份梗概写细纲")
-                  return
-                }
-                if (choice.action === "promote_draft_to_body") {
-                  void props.onPromoteDraftToBody?.()
-                  return
-                }
-                if (choice.action === "set_focus" && choice.chapterSequence !== undefined) {
-                  props.onSetFocus?.(choice.chapterSequence, "plot_synopsis")
-                  return
-                }
-                if (choice.workStyleSelection !== undefined) {
-                  props.onPrefillChoice(formatStyleSelectionMessage(choice.workStyleSelection))
-                  return
-                }
-                if (
-                  choice.label.includes("暂不落盘")
-                  && props.onRejectStagingPromote !== undefined
-                  && (props.pendingStagingPromotes?.length ?? 0) > 0
-                ) {
-                  void props.onRejectStagingPromote(
-                    props.pendingStagingPromotes!.map((proposal) => proposal.proposalId),
-                  )
-                }
-                void props.onSend(choice.label)
-              }}
-            >
-              <span>{choice.action === "start_turn" ? "调用正文推演工具" : choice.label}</span>
-              {choice.workStyleSelection !== undefined ? <Send size={13} aria-hidden="true" /> : null}
-            </button>)}
-            <button
-              type="button"
-              className="synopsis-choice synopsis-choice-idea"
-              data-testid="synopsis-choice-your-idea"
-              disabled={props.running || props.busy}
-              onClick={props.onFocusComposer}
-            >
-              你的想法
-            </button>
-            {props.isLatestChoiceMessage
-              ? <button
-                  type="button"
-                  className={`synopsis-choice-refresh${props.choicesRefreshing ? " is-spinning" : ""}`}
-                  data-testid="synopsis-choice-refresh"
-                  title="换一批不同选项"
-                  aria-label="换一批不同选项"
-                  disabled={props.running || props.busy || props.choicesRefreshing}
-                  onClick={() => {
-                    void props.onRefreshChoices(message.messageId)
-                  }}
-                >
-                  <RefreshCw size={14} aria-hidden="true" />
-                </button>
-              : null}
-          </div>
+        ? <SynopsisChoiceGroup
+            key={JSON.stringify([props.workspaceRootRef, message.projectId, message.sessionId, message.messageId])}
+            message={message}
+            workspaceRootRef={props.workspaceRootRef}
+            choices={choices}
+            disabled={props.running || props.busy || props.choicesRefreshing}
+            refreshing={props.choicesRefreshing}
+            latest={props.isLatestChoiceMessage}
+            novelMajorCategoryRules={props.novelMajorCategoryRules}
+            novelSubcategoryRules={props.novelSubcategoryRules}
+            proseRules={props.proseRules}
+            onRefresh={() => { void props.onRefreshChoices(message.messageId) }}
+            onFocusComposer={props.onFocusComposer}
+          />
         : null}
     </div>
   </article>
 })
-
-function formatStyleSelectionMessage(selection: SynopsisConversationChoice["workStyleSelection"]): string {
-  if (selection === undefined) return ""
-  return `我选择的风格组合是：小说大类规则「${selection.novelMajorCategoryRulePath}」、小说次大类规则「${selection.novelSubcategoryRulePath}」、笔风规则「${selection.proseStyleRulePath}」。请按这三份规则继续。`
-}
 
 const PROCESS_SEGMENT_KINDS = new Set(["thinking", "searching", "running", "editing"])
 

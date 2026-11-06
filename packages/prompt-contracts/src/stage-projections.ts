@@ -31,7 +31,19 @@ export const graphGovernanceReviewProjectionSchema = z.object({
   sceneSpacetimeBindings: graphSpacetimeSettlementArtifactSchema.shape.sceneSpacetimeBindings,
   proposalSettlements: graphSpacetimeSettlementArtifactSchema.shape.proposalSettlements,
   retrievalProjections: z.array(z.unknown()),
-  sourceSettlements: z.array(z.unknown()),
+  sourceSettlementReferenceSets: z.array(z.object({
+    graphRefs: z.array(z.object({
+      targetKind: z.enum(["node", "link"]),
+      targetRef: referenceSchema,
+      proposalRef: referenceSchema.optional(),
+    })),
+  })),
+  sourceSettlements: z.array(z.object({
+    sourceUnitIndex: indexSchema,
+    graphRefSetIndex: indexSchema,
+    reason: z.string().min(1),
+    status: z.string().min(1),
+  })),
   affectedFrontierRefs: z.array(referenceSchema),
   archiveOutletRefs: z.array(referenceSchema),
   temporalClaims: z.array(temporalClaimSchema),
@@ -42,6 +54,16 @@ export const graphGovernanceReviewProjectionSchema = z.object({
     sourceReturnComplete: z.boolean(),
     referenceIntegrity: z.boolean(),
   }),
+}).superRefine((projection, context) => {
+  projection.sourceSettlements.forEach((settlement, index) => {
+    if (settlement.graphRefSetIndex >= projection.sourceSettlementReferenceSets.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["sourceSettlements", index, "graphRefSetIndex"],
+        message: "graphRefSetIndex must reference an existing sourceSettlementReferenceSets entry",
+      })
+    }
+  })
 })
 
 const coverageEntrySchema = z.object({

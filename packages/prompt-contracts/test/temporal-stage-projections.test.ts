@@ -220,6 +220,7 @@ function governanceProjection() {
     sceneSpacetimeBindings: [],
     proposalSettlements: [],
     retrievalProjections: [],
+    sourceSettlementReferenceSets: [],
     sourceSettlements: [],
     affectedFrontierRefs: [],
     archiveOutletRefs: [],
