@@ -149,7 +149,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: worldseed-windows-${{ steps.version.outputs.version }}-b${{ steps.version.outputs.buildNumber }}
+          name: starseafolio-windows-${{ steps.version.outputs.version }}-b${{ steps.version.outputs.buildNumber }}
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
