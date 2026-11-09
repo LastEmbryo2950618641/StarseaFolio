@@ -36,7 +36,11 @@ describe("ProjectLauncher", () => {
 
     expect(first).toBe(second)
     expect(first).toMatch(/^data:image\/svg\+xml;charset=utf-8,/u)
-    expect(decodeURIComponent(first)).toContain("万炉纪")
+    const svg = decodeURIComponent(first)
+    expect(svg).toContain("万炉纪")
+    expect(svg).toContain("StarseaFolio")
+    expect(svg).toMatch(/#(?:f3c744|ffd34f|ffb83f|ffbd45)/iu)
+    expect(svg).not.toMatch(/linearGradient|pattern|<circle/iu)
     expect(defaultBookCoverSrc("另一部作品")).not.toBe(first)
   })
 })

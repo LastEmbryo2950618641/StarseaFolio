@@ -79,9 +79,9 @@ const WRITE_LIKE_TODO = /写|草稿|落盘|发布|推演|焦点|梗概|细纲|�
 const TOOL_LIKE_TODO = /工具|读取|request_read|bash|todo|describe|invoke|列目录|本机/iu
 const CHAPTER_SEQ_IN_TODO = /第\s*(\d+)\s*章/u
 
-/** Tools that may run before a todo list exists (bootstrap the list itself). */
+/** Todo bootstrap and read-only reference retrieval do not authorize story writes. */
 export function isDiscussTodoBootstrapTool(name: string): boolean {
-  return name === "todo_write"
+  return name === "todo_write" || name === "original_work_search" || name === "original_work_crawl"
 }
 
 /**

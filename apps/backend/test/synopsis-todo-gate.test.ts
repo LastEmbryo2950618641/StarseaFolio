@@ -17,8 +17,11 @@ import {
 } from "../src/application/chapters/synopsis-todo-gate.js"
 
 describe("synopsis todo gate", () => {
-  it("only allows todo_write before a list exists", () => {
+  it("allows todo bootstrap and isolated reference retrieval without opening chapter writes", () => {
     expect(isDiscussTodoBootstrapTool("todo_write")).toBe(true)
+    expect(isDiscussTodoBootstrapTool("original_work_search")).toBe(true)
+    expect(isDiscussTodoBootstrapTool("original_work_crawl")).toBe(true)
+    expect(isDiscussTodoBootstrapTool("publish_draft")).toBe(false)
     expect(isDiscussTodoBootstrapTool("bash")).toBe(false)
     expect(discussTurnHasTodos([])).toBe(false)
     expect(discussTurnHasTodos([{ id: "1", content: "读本机目录", status: "in_progress" }])).toBe(true)

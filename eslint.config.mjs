@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/out/**", "**/coverage/**", "**/node_modules/**"],
+    ignores: ["**/dist/**", "**/out/**", "**/coverage/**", "**/node_modules/**", "apps/desktop/resources/lncrawl*/**"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked.map((config) => ({

@@ -110,6 +110,16 @@ export type SynopsisLoadSkillResult = Readonly<{
   text: string
   digest: string
 }>
+export type SynopsisReferenceSearchInput = SynopsisToolContext & Readonly<{ title: string; source?: string }>
+export type SynopsisReferenceCrawlInput = SynopsisToolContext & Readonly<{ url: string; title: string; chapterLimit?: number }>
+export type SynopsisReferenceCandidate = Readonly<{ title: string; url: string; synopsis?: string }>
+export type SynopsisReferenceResult = Readonly<{
+  title: string
+  output: string
+  candidates?: readonly SynopsisReferenceCandidate[]
+  importedFiles?: readonly string[]
+  candidateUrls?: readonly string[]
+}>
 export type SynopsisWorkflowToolCallbacks = Readonly<{
   executeWorkflowTool?: (input: SynopsisWorkflowToolInput) => Promise<SynopsisWorkflowToolResult>
   publishDraft?: (input: SynopsisPublishDraftInput) => Promise<SynopsisPublishDraftResult>
@@ -118,6 +128,8 @@ export type SynopsisWorkflowToolCallbacks = Readonly<{
   writeTodos?: (input: SynopsisTodoWriteInput) => Promise<SynopsisTodoWriteResult>
   writeMemory?: (input: SynopsisMemoryWriteInput) => Promise<SynopsisMemoryWriteResult>
   loadSkill?: (input: SynopsisLoadSkillInput) => Promise<SynopsisLoadSkillResult>
+  searchOriginalWork?: (input: SynopsisReferenceSearchInput) => Promise<SynopsisReferenceResult>
+  crawlOriginalWork?: (input: SynopsisReferenceCrawlInput) => Promise<SynopsisReferenceResult>
 }>
 export type SynopsisToolName =
   | "chapter_workflow"
@@ -127,6 +139,8 @@ export type SynopsisToolName =
   | "todo_write"
   | "memory_write"
   | "load_skill"
+  | "original_work_search"
+  | "original_work_crawl"
 export type SynopsisToolRequest = Readonly<{
   name: SynopsisToolName
   action: "describe" | "invoke"
@@ -236,6 +250,23 @@ const descriptions = {
       "描写场面卡不在本工具：用 request_read + sourceKinds:[\"rule\"] 读 表现输出/描写规则/。",
     ].join(""),
   },
+  original_work_search: {
+    parameters: { title: "string (required；从对话上下文推断的原作标题)", source: "string (optional；已知站点名时过滤来源以减少等待；否则跨站搜索)" },
+    writingGuide: [
+      "默认搜索用户提到作品的原作/正史资料；只有用户明确要求同人、二创、AU 或特定衍生版本时，才搜索该衍生作品。标题相似或含原作名的其他网文/同人文不得冒充原作。",
+      "搜索 LNCrawl 支持的原作来源并返回候选标题、站点简介与 URL。逐个核对简介是否对应目标原作、角色和世界观；简介不符即判错，马上用更具体的作品名/别名/原作系列重新搜索，不得抓取错作。状态词（如 completed/连载中）、作者/标签等元数据不算作品简介；缺少至少一句可辨认剧情介绍时，先用网络搜索或读取候选详情页补查介绍，不能直接抓章节。多个候选仍有歧义时先询问用户。",
+      "先确认原作媒介与版本。若目标是视觉小说、漫画、动画等非小说作品，或 LNCrawl 没有能核验的原作文本，就用公开网络核实正史资料；不得为了调用抓取工具而改抓同名网文。",
+      "应用已内置官方 LNCrawl CLI 与依赖，后台直接执行；无需下载运行时、安装 Python 或启动服务。仅用于用户有权访问的内容。",
+    ].join(""),
+  },
+  original_work_crawl: {
+    parameters: { title: "string (required；确认后的原作标题)", url: "string (required；必须来自 original_work_search 且已有简介的候选)", chapterLimit: "integer (required；1..20000，必须显式限定下载章节数)" },
+    writingGuide: [
+      "只有候选具备可核验的剧情简介且与目标原作吻合后才抓取；首次只抓 1-3 章核验标题、角色和设定，核验不符就停止使用该候选并立刻重新搜索，不得导入错误来源。",
+      "每次都必须显式设置 chapterLimit；本工具不会默认抓取全本。结果索引注明抓取范围；不要声称未下载章节已经核实。",
+      "只抓取支持来源；遵守站点条款与个人使用限制，不分发抓取文本。",
+    ].join(""),
+  },
 } as const
 
 function callbackForTool(
@@ -249,7 +280,8 @@ function callbackForTool(
   if (name === "todo_write") return callbacks.writeTodos as ((input: never) => Promise<unknown>) | undefined
   if (name === "memory_write") return callbacks.writeMemory as ((input: never) => Promise<unknown>) | undefined
   if (name === "load_skill") return callbacks.loadSkill as ((input: never) => Promise<unknown>) | undefined
-  return undefined
+  if (name === "original_work_search") return callbacks.searchOriginalWork
+  return callbacks.crawlOriginalWork
 }
 
 export function synopsisToolCatalog(callbacks: SynopsisWorkflowToolCallbacks): string {
@@ -301,6 +333,16 @@ export function synopsisToolCatalog(callbacks: SynopsisWorkflowToolCallbacks): s
         displayName: "加载 Skill",
         definition: "按需注入平台 skill 正文（去味/对话/人味/情绪/讨论指南等）。",
         scenario: "索引不够、默认包未覆盖、或需要 references 细则时。",
+      }]),
+      ...(callbacks.searchOriginalWork === undefined ? [] : [{
+        name: "original_work_search", displayName: "同人原作资料搜索",
+        definition: "根据上下文推断作品名，搜索原作资料候选并核对版本。",
+        scenario: "创作同人或需要核实现实原作设定时；先查本地资料，缺失时搜索。",
+      }]),
+      ...(callbacks.crawlOriginalWork === undefined ? [] : [{
+        name: "original_work_crawl", displayName: "同人原作资料抓取",
+        definition: "抓取选定的原作来源并导入当前项目的本地参考资料库。",
+        scenario: "搜索结果已确认唯一匹配后，按需抓取章节用于后续查证。",
       }]),
     ],
   })
@@ -519,6 +561,19 @@ export async function executeSynopsisTool(input: Readonly<{
         result,
       }
     }
+    if (request.name === "original_work_search") {
+      const args = parseArguments(request.arguments, ["title", "source"])
+      if (callbacks.searchOriginalWork === undefined) throw new Error("原作搜索不可用")
+      const result = await callbacks.searchOriginalWork({ ...context, title: requiredText(args, "title"), ...(args.source === undefined ? {} : { source: requiredText(args, "source") }) })
+      return { ...envelope, status: result.candidateUrls?.length === 0 ? "reference_search_empty" : "reference_candidates_found", result }
+    }
+    if (request.name === "original_work_crawl") {
+      const args = parseArguments(request.arguments, ["title", "url", "chapterLimit"])
+      if (typeof args.chapterLimit !== "number" || !Number.isSafeInteger(args.chapterLimit) || args.chapterLimit < 1 || args.chapterLimit > 20_000) throw new Error("chapterLimit 必须为 1..20000 的整数；禁止省略后默认抓取全本")
+      if (callbacks.crawlOriginalWork === undefined) throw new Error("原作抓取不可用")
+      const result = await callbacks.crawlOriginalWork({ ...context, title: requiredText(args, "title"), url: requiredText(args, "url"), chapterLimit: args.chapterLimit })
+      return { ...envelope, status: "reference_imported", result }
+    }
     const args = parseArguments(request.arguments, ["revisionTaskId", "draftVersionId"])
     const revisionTaskId = requiredText(args, "revisionTaskId")
     const draftVersionId = requiredText(args, "draftVersionId")
@@ -532,6 +587,11 @@ export async function executeSynopsisTool(input: Readonly<{
     return { ...envelope, status: "publication_submitted", result }
   } catch (error) {
     context.signal?.throwIfAborted()
-    return { ...envelope, status: "error", code: "tool_failed", message: error instanceof Error ? error.message : String(error) }
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    if (request.name === "original_work_crawl"
+      && /只能抓取本次原作搜索返回|没有可核对的作品简介|原作候选 URL 无效/iu.test(errorMessage)) {
+      return { ...envelope, status: "reference_candidate_rejected", code: "candidate_not_verified", message: errorMessage }
+    }
+    return { ...envelope, status: "error", code: "tool_failed", message: errorMessage }
   }
 }

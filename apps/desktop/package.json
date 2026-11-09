@@ -7,7 +7,7 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node ../../scripts/packaging/prepare-lncrawl.mjs && electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit --pretty false",
     "preview": "electron-vite preview",

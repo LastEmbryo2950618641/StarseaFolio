@@ -57,8 +57,8 @@ export function parseBingChinaHits(html: string, maxResults: number): readonly W
     const normalized = normalizeHitUrl(url)
     if (seen.has(normalized)) continue
     seen.add(normalized)
-    const snippetMatch = body.match(/class="[^"]*\bb_lineclamp\d*\b[^"]*"[^>]*>([\s\S]*?)<\//iu)
-      ?? body.match(/<p[^>]*>([\s\S]*?)<\/p>/iu)
+    const snippetMatch = body.match(/<p[^>]*>([\s\S]*?)<\/p>/iu)
+      ?? body.match(/class="[^"]*\bb_lineclamp\d*\b[^"]*"[^>]*>([\s\S]*?)<\/(?:div|p)>/iu)
       ?? body.match(/class="[^"]*\bb_caption\b[^"]*"[^>]*>([\s\S]*?)<\//iu)
     const snippet = snippetMatch?.[1] === undefined
       ? ""

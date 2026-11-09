@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/lncrawl/lightnovel-crawler",
+  "releaseApi": "https://api.github.com/repos/lncrawl/lightnovel-crawler/releases",
+  "version": "v4.14.0",
+  "platform": "win32",
+  "arch": "x64",
+  "assetUrl": "https://api.github.com/repos/lncrawl/lightnovel-crawler/releases/assets/500108810",
+  "assetSha256": "a6bc251c839b664c7829c3a80ab0f2e6603be627483efa79ec1080332d6e1961",
+  "sourceUrl": "https://api.github.com/repos/lncrawl/lightnovel-crawler/zipball/v4.14.0"
+}

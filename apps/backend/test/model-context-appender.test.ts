@@ -4,6 +4,36 @@ import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@worldsee
 import { ModelContextAppender } from "../src/index.js"
 
 describe("ModelContextAppender", () => {
+  it("does not discard a newly read web body when an older request reused its local read alias", () => {
+    const appender = new ModelContextAppender()
+    const previous = { ...evidence("read-1"), ownerKind: "web:search", ownerId: "https://example.com/old", digest: "search-summary" }
+    const body = { ...evidence("read-1"), ownerKind: "web:page", ownerId: "https://example.com/article", semanticText: "Actual character article", digest: "article-body" }
+    const message = visibleMessage({ messageId: "old", sequence: 1, role: "user", kind: "phase_request", phase: "interpret",
+      content: appender.formatDelta(appender.createDelta(createRequest(), createModelRequest([previous], {}), [])) })
+    const delta = appender.createDelta(createRequest(), createModelRequest([body], {}), [message]) as { input: { readEvidence?: unknown[] }; committedReadIds: string[] }
+    expect(delta.input.readEvidence).toEqual([body])
+    expect(delta.committedReadIds).toEqual(["read-1"])
+  })
+
+  it("still deduplicates the same web content after its request-local read alias changes", () => {
+    const appender = new ModelContextAppender()
+    const body = { ...evidence("read-1"), ownerKind: "web:page", ownerId: "https://example.com/article", digest: "article-body" }
+    const message = visibleMessage({ messageId: "old", sequence: 1, role: "user", kind: "phase_request", phase: "interpret",
+      content: appender.formatDelta(appender.createDelta(createRequest(), createModelRequest([body], {}), [])) })
+    const delta = appender.createDelta(createRequest(), createModelRequest([{ ...body, readId: "read-2" }], {}), [message]) as { input: { readEvidence?: unknown[] } }
+    expect(delta.input.readEvidence).toBeUndefined()
+  })
+
+  it("appends a changed fact version even if its local alias was previously used for another version", () => {
+    const appender = new ModelContextAppender()
+    const previous = { ...evidence("read-1"), ownerKind: "node", ownerId: "node-1", versionKey: "version-1" }
+    const updated = { ...previous, digest: "updated", versionKey: "version-2", semanticText: "Updated fact" }
+    const message = visibleMessage({ messageId: "old", sequence: 1, role: "user", kind: "phase_request", phase: "interpret",
+      content: appender.formatDelta(appender.createDelta(createRequest(), createModelRequest([previous], {}), [])) })
+    const delta = appender.createDelta(createRequest(), createModelRequest([updated], {}), [message]) as { input: { readEvidence?: unknown[] } }
+    expect(delta.input.readEvidence).toEqual([updated])
+  })
+
   it("appends each consumer phase's dependencies once while preserving the stable chain prefix", () => {
     const appender = new ModelContextAppender()
     const request = createRequest()

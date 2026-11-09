@@ -116,6 +116,23 @@ describe("prompt contracts", () => {
     expect(stylePack).not.toContain("题材默认")
   })
 
+  it("infers fanfiction source titles and checks local chapter references before LNCrawl", () => {
+    const packageRoot = resolve(process.cwd(), "packages/prompt-contracts")
+    const readResource = (resource: string): string => readFileSync(resolve(packageRoot, resource), "utf8")
+    const referenceGuide = readResource(SETTINGS_QUERY_GUIDE_RESOURCE)
+    const discussWorkflow = readResource("resources/v1/discuss-creation-desk-workflow.md")
+
+    for (const text of [referenceGuide, discussWorkflow]) {
+      expect(text).toContain("参考文件/原作资料/")
+      expect(text).toContain("original_work_search")
+      expect(text).toContain("不要要求用户先")
+      expect(text).toContain("request_read")
+      expect(text).toContain("AU")
+    }
+    expect(referenceGuide).toContain("original_work_crawl")
+    expect(discussWorkflow).toContain("应用负责抓取、校验和导入")
+  })
+
   it("ships chinese-webnovel-skills vendor write rules verbatim-ish (MIT attribution header)", () => {
     const packageRoot = resolve(process.cwd(), "packages/prompt-contracts")
     for (const resource of WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES) {

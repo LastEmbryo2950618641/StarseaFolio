@@ -13,6 +13,7 @@ import type { RuntimeDiagnosticsConfig } from "@worldseed/config"
 export type BackendProcessOptions = Readonly<{
   applicationDataRoot: string
   promptPackageRoot: string
+  lncrawlRuntimeDirectory?: string
   diagnostics: RuntimeDiagnosticsConfig
 }>
 

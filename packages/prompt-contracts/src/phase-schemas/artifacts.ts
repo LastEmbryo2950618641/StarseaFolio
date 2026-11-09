@@ -628,7 +628,16 @@ export const synopsisDiscussArtifactSchema = z.object({
   protagonistSupplementMarkdown: z.string().trim().min(1).max(6_000).optional(),
   /** Parameters and writing guidance are disclosed only by a successful describe. */
   toolRequest: z.object({
-    name: z.enum(["chapter_workflow", "publish_draft", "restage_chapter", "bash", "todo_write", "memory_write"]),
+    name: z.enum([
+      "chapter_workflow",
+      "publish_draft",
+      "restage_chapter",
+      "bash",
+      "todo_write",
+      "memory_write",
+      "original_work_search",
+      "original_work_crawl",
+    ]),
     action: z.enum(["describe", "invoke"]),
     arguments: z.string().max(200_000).optional(),
   }).strict().optional(),

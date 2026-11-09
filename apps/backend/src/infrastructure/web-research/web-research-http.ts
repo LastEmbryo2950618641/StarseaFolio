@@ -1,6 +1,6 @@
 import { fetch } from "undici"
 
-import type { WebPageContent } from "../../application/retrieval/ports/web-research-port.js"
+import type { WebPageContent, WebResearchFetchDetail } from "../../application/retrieval/ports/web-research-port.js"
 import {
   assertPublicHttpUrl,
   assertPublicHttpUrlResolved,
@@ -42,11 +42,13 @@ export class WebResearchHttpClient {
   ): Promise<string> {
     let current = assertPublicHttpUrl(rawUrl).toString()
     for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+      outerSignal?.throwIfAborted()
       await assertPublicHttpUrlResolved(current)
       const controller = new AbortController()
       const timer = setTimeout(() => { controller.abort() }, this.timeoutMs)
       const onAbort = (): void => { controller.abort() }
       outerSignal?.addEventListener("abort", onAbort, { once: true })
+      if (outerSignal?.aborted === true) controller.abort()
       try {
         const response = await this.fetchImpl(current, {
           method: "GET",
@@ -94,8 +96,12 @@ export class WebResearchHttpClient {
   }
 
   public async fetchPage(input: Readonly<{ url: string; signal?: AbortSignal }>): Promise<WebPageContent | undefined> {
+    return (await this.fetchPageDetailed(input)).page
+  }
+
+  public async fetchPageDetailed(input: Readonly<{ url: string; signal?: AbortSignal }>): Promise<WebResearchFetchDetail> {
     const raw = input.url.trim()
-    if (!isHttpUrl(raw)) return undefined
+    if (!isHttpUrl(raw)) return { attempts: [{ provider: "HTTP", status: "error", message: "URL 不是有效的 HTTP(S) 页面地址" }] }
     try {
       await assertPublicHttpUrlResolved(raw)
       const html = await this.readText(raw, input.signal, { followRedirects: true })
@@ -104,10 +110,18 @@ export class WebResearchHttpClient {
         ? raw
         : decodeHtmlEntities(htmlToPlainText(titleMatch[1])).slice(0, 200) || raw
       const text = htmlToPlainText(html).slice(0, 24_000)
-      if (text.length === 0) return undefined
-      return { url: raw, title, text }
-    } catch {
-      return undefined
+      if (text.length === 0) return { attempts: [{ provider: "HTTP", status: "empty", message: "页面没有可读正文" }] }
+      if (/^(?:安全验证|访问验证|人机验证|just a moment[.!…]*|attention required!?|access denied|403 forbidden)(?:\s*[|｜-].*)?$/iu.test(title.trim())
+        || (text.length < 2_000 && /请完成.{0,12}(?:验证|验证码)|verify you are human|enable javascript and cookies to continue/iu.test(text))) {
+        return { attempts: [{ provider: "HTTP", status: "error", message: "站点返回访问验证或拦截页面，未取得正文" }] }
+      }
+      return { page: { url: raw, title, text }, attempts: [{ provider: "HTTP", status: "ok" }] }
+    } catch (error) {
+      const message = input.signal?.aborted === true
+        ? "网页读取超时或已取消"
+        : error instanceof Error ? error.message : String(error)
+      const cause = error instanceof Error && error.cause instanceof Error ? `：${error.cause.message}` : ""
+      return { attempts: [{ provider: "HTTP", status: "error", message: `${message}${cause}` }] }
     }
   }
 }

@@ -34,6 +34,11 @@ export type WebResearchSearchDetail = Readonly<{
   attempts: readonly WebResearchProviderAttempt[]
 }>
 
+export type WebResearchFetchDetail = Readonly<{
+  page?: WebPageContent
+  attempts: readonly WebResearchProviderAttempt[]
+}>
+
 /**
  * Sandboxed public-internet research used by `sourceKinds: ["web"]` reads.
  * Implementations must enforce SSRF limits and size/time caps.
@@ -43,4 +48,6 @@ export interface WebResearchPort {
   fetchPage(input: WebResearchFetchInput): Promise<WebPageContent | undefined>
   /** Optional detailed search; defaults to `{ hits, attempts: [] }` when absent. */
   searchDetailed?(input: WebResearchSearchInput): Promise<WebResearchSearchDetail>
+  /** Page failures remain visible without turning access-denied screens into evidence. */
+  fetchPageDetailed?(input: WebResearchFetchInput): Promise<WebResearchFetchDetail>
 }

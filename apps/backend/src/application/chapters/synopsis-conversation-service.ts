@@ -208,6 +208,12 @@ import {
 import { CreativeSetupCoordinator } from "./creative-setup-coordinator.js"
 import { buildCreativeSetupPrompt, type CreativeSetupState } from "./creative-setup-state.js"
 import type { SqliteCreativeSetupRepository } from "../../infrastructure/sqlite/repositories/sqlite-creative-setup-repository.js"
+import {
+  detectsOriginalWorkContext,
+  hasOriginalWorkEvidence,
+  originalWorkEvidenceRepairHint,
+  readOriginalWorkEvidenceStage,
+} from "./original-work-evidence-gate.js"
 
 export class SynopsisInvalidStateError extends Error {}
 
@@ -2560,7 +2566,7 @@ export class SynopsisConversationService {
     const maxRetrievalRounds = settings?.execution.maxRetrievalRounds
       ?? defaultProjectSettings.execution.maxRetrievalRounds
     const maxModelCalls = Math.max(1, input.maxModelCalls ?? (maxRetrievalRounds + 3))
-    const catalog = await this.dependencies.catalog.createSnapshot({
+    let catalog = await this.dependencies.catalog.createSnapshot({
       snapshotId: this.dependencies.createId(),
       projectId: input.projectId,
       workspaceRootRef: input.workspaceRootRef,
@@ -2766,9 +2772,19 @@ export class SynopsisConversationService {
     let missingVolumePlanRetries = 0
     let missingCreationDeskSettingsRetries = 0
     let missingChoicesRetries = 0
+    let originalWorkGateRepairs = 0
     let goalScheduleRepairs = 0
     let pendingWrites: PendingDiscussWrites | undefined
     const repairHints: string[] = []
+    const originalWorkContext = detectsOriginalWorkContext({
+      userMessage: input.userMessage,
+      heading: input.heading,
+      synopsisMarkdown: input.synopsisMarkdown,
+      outlineMarkdown: input.outlineMarkdown,
+      ...(input.currentWorkDisplayName === undefined ? {} : { currentWorkDisplayName: input.currentWorkDisplayName }),
+      ...(input.chapterBodyMarkdown === undefined ? {} : { chapterBodyMarkdown: input.chapterBodyMarkdown }),
+      ...(input.latestDraftMarkdown === undefined ? {} : { latestDraftMarkdown: input.latestDraftMarkdown }),
+    })
     if (input.batchAutomation === true) {
       repairHints.push(
         "【批量推演模式】卷规划用 volumeChapterPlans 一次写齐多章 synopsisBody+outlineBody；正文默认用 chapterDraftProposals（或焦点章 chapterDraftProposal）写草稿，禁止优先 chapter_workflow；勿 publish_draft（图治理由前端按章串行）；少给需点击的 choices；禁止输出 set_focus / focusChange（焦点由前端推进）；不要停在等待用户确认梗概。",
@@ -2838,7 +2854,13 @@ export class SynopsisConversationService {
     const allowChapterWorkflowTools = input.allowChapterWorkflowTools
       ?? input.allowWorkflowTools === true
     const toolCallbacks: SynopsisWorkflowToolCallbacks = input.allowWorkflowTools !== true
-      ? {}
+      ? {
+          // External reference research cannot confirm style or write story artifacts.
+          ...(input.creativeSetup !== undefined || this.dependencies.searchOriginalWork === undefined
+            ? {} : { searchOriginalWork: this.dependencies.searchOriginalWork }),
+          ...(input.creativeSetup !== undefined || this.dependencies.crawlOriginalWork === undefined
+            ? {} : { crawlOriginalWork: this.dependencies.crawlOriginalWork }),
+        }
       : {
           ...(allowChapterWorkflowTools && chapterWorkflowEnabled && this.dependencies.executeWorkflowTool !== undefined
             ? { executeWorkflowTool: this.dependencies.executeWorkflowTool }
@@ -2852,6 +2874,12 @@ export class SynopsisConversationService {
           ...(!allowChapterWorkflowTools || this.dependencies.runBash === undefined
             ? {}
             : { runBash: this.dependencies.runBash }),
+          ...(this.dependencies.searchOriginalWork === undefined
+            ? {}
+            : { searchOriginalWork: this.dependencies.searchOriginalWork }),
+          ...(this.dependencies.crawlOriginalWork === undefined
+            ? {}
+            : { crawlOriginalWork: this.dependencies.crawlOriginalWork }),
           ...(this.dependencies.writeTodos === undefined
             ? {}
             : { writeTodos: this.dependencies.writeTodos }),
@@ -2873,6 +2901,16 @@ export class SynopsisConversationService {
             }
           },
         }
+
+    if (originalWorkContext) {
+      runtimeLog("info", "synopsis-conversation", "original_work_reference.capability", {
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        webResearch: this.dependencies.webResearch !== undefined,
+        lncrawlSearch: toolCallbacks.searchOriginalWork !== undefined,
+        lncrawlCrawl: toolCallbacks.crawlOriginalWork !== undefined,
+      })
+    }
 
     for (;;) {
       input.signal?.throwIfAborted()
@@ -3296,6 +3334,56 @@ export class SynopsisConversationService {
             ? {} : { protagonistSupplementMarkdown: toolArtifact.data.protagonistSupplementMarkdown }),
         }
       }
+      const originalWorkStage = readOriginalWorkEvidenceStage(storedContext)
+      const originalWorkHasEvidence = hasOriginalWorkEvidence(readEvidence)
+      const originalToolRequest = toolArtifact.success ? toolArtifact.data.toolRequest : undefined
+      const originalToolRequested = originalToolRequest?.name === "original_work_search"
+        || originalToolRequest?.name === "original_work_crawl"
+      const originalWorkToolsAvailable = toolCallbacks.searchOriginalWork !== undefined
+        || toolCallbacks.crawlOriginalWork !== undefined
+      const originalWorkWebResearchAvailable = this.dependencies.webResearch !== undefined
+      let originalWorkFallbackNotice: string | undefined
+      if (originalWorkContext && !originalWorkHasEvidence && parsedResult.outcome !== "request_read") {
+        const canBootstrapTodo = originalToolRequest?.name === "todo_write"
+        const canUseOriginalTool = originalToolRequested
+        const mustReadImportedReference = originalWorkStage === "lncrawl_imported"
+          && originalWorkGateRepairs < 3
+        const shouldRequireEvidenceStep = !canBootstrapTodo && !canUseOriginalTool
+          && (mustReadImportedReference
+            || (originalWorkStage === "none"
+              && (originalWorkWebResearchAvailable || originalWorkToolsAvailable)
+              && originalWorkGateRepairs === 0)
+            || (originalWorkStage === "none" && originalWorkToolsAvailable && originalWorkGateRepairs === 1)
+            || (originalWorkStage === "web_attempted" && originalWorkToolsAvailable)
+            || (originalWorkStage === "lncrawl_searched" && originalWorkToolsAvailable))
+        if (shouldRequireEvidenceStep && remainingCalls > 0) {
+          originalWorkGateRepairs += 1
+          runtimeLog("info", "synopsis-conversation", "original_work_reference.gate_step", {
+            projectId: input.projectId,
+            sessionId: input.sessionId,
+            stage: originalWorkStage,
+            repair: originalWorkGateRepairs,
+            hasEvidence: originalWorkHasEvidence,
+          })
+          const repairStage = originalWorkStage === "none" && originalWorkGateRepairs > 1
+            ? "web_attempted"
+            : originalWorkStage
+          repairHints.push(
+            originalWorkStage === "lncrawl_imported"
+              ? "【同人原作核验·读取结果】LNCrawl 已导入资料，但本轮尚未把本地索引/章节读入 readEvidence。请 outcome=request_read，exactKeys 指向 参考文件/原作资料/ 下与当前问题相关的 Markdown，只读所需片段后再作答。"
+              : originalWorkEvidenceRepairHint({
+                  stage: repairStage,
+                  hasWebResearch: this.dependencies.webResearch !== undefined,
+                  hasLncrawl: originalWorkToolsAvailable,
+                }),
+          )
+          attempt += 1
+          continue
+        }
+        // Public references can be unavailable or incomplete. The final fallback
+        // keeps writing usable while explicitly separating inference from canon.
+        originalWorkFallbackNotice = "原作资料未完成核验；以下内容仅按当前上下文与模型常识合理推演，不代表已确认的原作事实。"
+      }
       if (toolArtifact.success && toolArtifact.data.toolRequest !== undefined) {
         if (parsedResult.outcome !== "continue" || requestedReads.length > 0) {
           await recordStepOutcome("tool_contract", "工具调用必须单独返回，不能与读取请求混合")
@@ -3419,6 +3507,18 @@ export class SynopsisConversationService {
             createdAtMs: this.dependencies.now(),
             messages: [{ role: "system", kind: "phase_instruction", content: JSON.stringify(toolResult) }],
           })
+          // The next model round must see the result it is expected to act on.
+          storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
+          if (toolResult.status === "reference_imported") {
+            // Imports add files mid-send. Both the next model request and the
+            // read executor must use the refreshed inventory, not the bootstrap snapshot.
+            catalog = await this.dependencies.catalog.createSnapshot({
+              snapshotId: this.dependencies.createId(),
+              projectId: input.projectId,
+              workspaceRootRef: input.workspaceRootRef,
+              generatedAtMs: this.dependencies.now(),
+            })
+          }
           if (!toolFailed && toolRequest.action === "describe") {
             const previousDescription = visibleMessages.flatMap((message) => {
               if (message.role !== "system" || message.kind !== "phase_instruction") return []
@@ -3817,7 +3917,7 @@ export class SynopsisConversationService {
         }
         const finalAssistantMessage = missingSynopsisNotice !== undefined
           ? missingSynopsisNotice
-          : [artifact.data.assistantMessage, deferredDraftNotice, missingDraftNotice]
+          : [originalWorkFallbackNotice, artifact.data.assistantMessage, deferredDraftNotice, missingDraftNotice]
               .filter((part): part is string => part !== undefined)
               .join("\n\n")
         synopsisConversationStreamHub.setContent(input.projectId, finalAssistantMessage, this.dependencies.now())
@@ -3984,7 +4084,7 @@ export class SynopsisConversationService {
             ? missingSynopsisNotice
           : missingOutlineNotice !== undefined
             ? missingOutlineNotice
-            : [artifact.data.assistantMessage, gateNotice, missingDraftNotice]
+            : [originalWorkFallbackNotice, artifact.data.assistantMessage, gateNotice, missingDraftNotice]
                 .filter((part): part is string => part !== undefined)
                 .join("\n\n")
           synopsisConversationStreamHub.setContent(input.projectId, finalAssistantMessage, this.dependencies.now())
@@ -4111,26 +4211,20 @@ export class SynopsisConversationService {
 
       const webReads = requestedReads.filter((read) => read.query.sourceKinds.includes("web"))
       let webEvidence: TurnReadEvidence[] = []
-      if (webReads.length > 0 && this.dependencies.webResearch !== undefined) {
+      if (webReads.length > 0) {
         webEvidence = [...await executeSynopsisWebReads({
           requests: webReads,
           existingEvidence: readEvidence,
           createId: this.dependencies.createId,
-          webResearch: this.dependencies.webResearch,
+          ...(this.dependencies.webResearch === undefined ? {} : { webResearch: this.dependencies.webResearch }),
+          localReferences: {
+            workspace: this.dependencies.workspace,
+            workspaceRootRef: input.workspaceRootRef,
+            catalog,
+            now: this.dependencies.now,
+          },
           ...(settings === undefined ? {} : { settings }),
         })]
-      } else if (webReads.length > 0) {
-        for (const read of webReads) {
-          const query = [...read.query.exactKeys, ...read.query.semanticTexts]
-            .map((term) => term.trim())
-            .find((term) => term.length > 0) ?? "web"
-          synopsisConversationStreamHub.upsertSearch(input.projectId, {
-            query: `web: ${query}`,
-            status: "failed",
-            resultSummary: "联网检索端口未配置",
-            round: searchRound,
-          }, this.dependencies.now())
-        }
       }
 
       const temporalReads = requestedReads
@@ -4173,6 +4267,24 @@ export class SynopsisConversationService {
       readEvidence = [...readEvidence, ...workspaceEvidence]
       const newEvidence = [...temporalEvidence, ...webEvidence, ...workspaceEvidence]
 
+      if (originalWorkContext && webEvidence.some((item) => item.ownerKind.startsWith("web:"))) {
+        await this.dependencies.conversation.appendDiscussContextMessages({
+          sessionId: input.sessionId,
+          projectId: input.projectId,
+          createdAtMs: this.dependencies.now(),
+          messages: [{
+            role: "system",
+            kind: "phase_instruction",
+            content: JSON.stringify({
+              protocol: "original-work-evidence-gate-v1",
+              stage: "web_attempted",
+              matchedEvidenceCount: webEvidence.filter((item) => item.ownerKind === "web:page").length,
+            }),
+          }],
+        })
+        storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
+      }
+
       for (const read of requestedReads) {
         const label = synopsisSearchLabel(read)
         const matched = newEvidence.filter((item) => evidenceMatchesRead(item, read))
@@ -4180,6 +4292,7 @@ export class SynopsisConversationService {
         const summary = matched.length === 0
           ? (isWeb ? "联网检索无可用证据" : "未命中可读内容")
           : matched.map((item) => {
+              if (item.ownerKind === "web:diagnostic") return item.semanticText.slice(0, 2_000)
               if (item.ownerKind.startsWith("web:")) {
                 const preview = item.semanticText.split("\n").slice(0, 4).join("\n")
                 return `${item.ownerId}（${String(item.semanticText.length)} 字）\n${preview}`
@@ -4191,7 +4304,7 @@ export class SynopsisConversationService {
             }).join("\n")
         synopsisConversationStreamHub.upsertSearch(input.projectId, {
           query: label,
-          status: matched.length === 0 && !isWeb ? "failed" : "completed",
+          status: matched.length === 0 || matched.every((item) => item.ownerKind === "web:diagnostic") ? "failed" : "completed",
           resultSummary: summary,
           round: searchRound,
           ...temporalSearchMeta(read),

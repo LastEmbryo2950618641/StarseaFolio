@@ -16,3 +16,5 @@ apps/mobile/.expo/
 .playwright-cli/
 .runtime-logs/
 output/
+apps/desktop/resources/lncrawl/
+apps/desktop/resources/lncrawl.staging/

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { resolve } from "node:path"
 
 import type {
   AIPhase,
@@ -81,6 +82,7 @@ import { protagonistCreativeSetupMarkdownHasContent } from "../application/chapt
 import { runtimeLog } from "../infrastructure/diagnostics/index.js"
 import { graphRevisionProgress } from "../application/chapters/graph-revision-progress.js"
 import { createGraphRevisionModel } from "../application/chapters/graph-revision-model.js"
+import { LncrawlReferenceService } from "../infrastructure/web-research/lncrawl-reference-service.js"
 import { deductionTaskProgress } from "../application/turns/deduction-task-progress.js"
 import type { HistoryBranchSummary, HistoryCheckoutResult, HistoryEntrySummary, HistoryOverview, HistoryRetentionPreview } from "@worldseed/contracts"
 
@@ -92,6 +94,7 @@ export class ProjectRuntime {
     done: Promise<void>
     activity?: GraphRevisionTask["activity"]
   }>()
+  private readonly lncrawl: LncrawlReferenceService
 
   public async assertWorkStyleGateReady(): Promise<void> {
     const conversation = new SqliteSynopsisConversationRepository(this.database)
@@ -377,7 +380,13 @@ export class ProjectRuntime {
     private readonly workspace: WorkspacePort,
     private readonly internalStorePort: InternalStorePort,
     private readonly promptPackageRoot: string,
-  ) {}
+    applicationDataRoot: string,
+    lncrawlRuntimeDirectory?: string,
+  ) {
+    this.lncrawl = new LncrawlReferenceService(applicationDataRoot, {
+      ...(lncrawlRuntimeDirectory === undefined ? {} : { runtimeDirectory: lncrawlRuntimeDirectory }),
+    })
+  }
 
   public isClosed(): boolean {
     return this.closed
@@ -390,6 +399,8 @@ export class ProjectRuntime {
     internalStorePort: InternalStorePort,
     promptPackageRoot: string,
     workspace: WorkspacePort = new NodeWorkspaceAdapter(),
+    applicationDataRoot = resolve(internalStore.projectDatabaseRef, "..", "..", ".."),
+    lncrawlRuntimeDirectory?: string,
   ): Promise<ProjectRuntime> {
     const database = await openProjectDatabase(internalStore.projectDatabaseRef)
     const runtime = new ProjectRuntime(
@@ -400,6 +411,8 @@ export class ProjectRuntime {
       workspace,
       internalStorePort,
       promptPackageRoot,
+      applicationDataRoot,
+      lncrawlRuntimeDirectory,
     )
     await runtime.ensureCommittedSourceUnitIndexes()
     return runtime
@@ -968,6 +981,15 @@ export class ProjectRuntime {
   public createSynopsisConversationService(): SynopsisConversationService {
     return new SynopsisConversationService({
       creativeSetup: new SqliteCreativeSetupRepository(this.database),
+      searchOriginalWork: async (input) => this.lncrawl.search(input.title, input.workspaceRootRef, input.signal, input.source),
+      crawlOriginalWork: async (input) => this.lncrawl.crawl({
+        url: input.url,
+        title: input.title,
+        workspaceRootRef: input.workspaceRootRef,
+        workspace: this.workspace,
+        ...(input.chapterLimit === undefined ? {} : { chapterLimit: input.chapterLimit }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      }),
       executeWorkflowTool: async (input) => {
         await this.assertWorkStyleGateReady()
         await this.assertVolumePlanningGateReady(input.chapterSequence)

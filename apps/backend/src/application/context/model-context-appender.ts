@@ -182,9 +182,20 @@ function evidenceReadIds(value: unknown): string[] {
 
 function evidenceIdentities(value: unknown): string[] {
   const evidence = asRecord(value)
+  // read-N is allocated anew for every model request, so it cannot identify a
+  // fact across requests. Reusing that alias used to silently drop new web bodies.
+  const readIds = evidenceReadIds(evidence)
+  const versionKey = typeof evidence.versionKey === "string" ? evidence.versionKey : undefined
+  const content = evidence.digest ?? evidence.semanticText
+  const contentIdentity = versionKey === undefined
+    && readIds.some((readId) => /^read-\d+$/u.test(readId))
+    && typeof content === "string"
+    ? [`content:${JSON.stringify([evidence.ownerKind, evidence.ownerId, content])}`]
+    : []
   return [
-    ...(typeof evidence.versionKey === "string" ? [`version:${evidence.versionKey}`] : []),
-    ...evidenceReadIds(evidence).map((readId) => `read:${readId}`),
+    ...(versionKey === undefined ? [] : [`version:${versionKey}`]),
+    ...contentIdentity,
+    ...readIds.filter((readId) => !/^read-\d+$/u.test(readId)).map((readId) => `read:${readId}`),
   ]
 }
 

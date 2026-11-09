@@ -1,12 +1,14 @@
 import type {
   WebPageContent,
   WebResearchFetchInput,
+  WebResearchFetchDetail,
   WebResearchPort,
   WebResearchProviderAttempt,
   WebResearchSearchDetail,
   WebResearchSearchInput,
   WebSearchHit,
 } from "../../application/retrieval/ports/web-research-port.js"
+import { scoreWebSearchHit } from "../../application/retrieval/web-search-relevance.js"
 import { BingChinaWebResearchAdapter } from "./bing-china-web-research-adapter.js"
 import { DuckDuckGoWebResearchAdapter } from "./duckduckgo-web-research-adapter.js"
 import { WebResearchHttpClient } from "./web-research-http.js"
@@ -18,7 +20,7 @@ export type CompositeWebResearchProvider = Readonly<{
 
 export type CompositeWebResearchAdapterOptions = Readonly<{
   providers: readonly (WebResearchPort | CompositeWebResearchProvider)[]
-  /** Extra page fetcher when providers' fetchPage are unavailable; defaults to shared HTTP client. */
+  /** Shared page reader; when configured, search providers must not refetch the same URL. */
   pageFetcher?: WebResearchPort
 }>
 
@@ -28,7 +30,7 @@ export type CompositeWebResearchAdapterOptions = Readonly<{
  */
 export class CompositeWebResearchAdapter implements WebResearchPort {
   private readonly providers: readonly CompositeWebResearchProvider[]
-  private readonly pageFetcher: WebResearchPort
+  private readonly pageFetchers: readonly WebResearchPort[]
 
   public constructor(options: CompositeWebResearchAdapterOptions) {
     if (options.providers.length === 0) {
@@ -37,12 +39,15 @@ export class CompositeWebResearchAdapter implements WebResearchPort {
     this.providers = options.providers.map((entry, index) => (
       "port" in entry ? entry : { name: `provider-${String(index)}`, port: entry }
     ))
-    this.pageFetcher = options.pageFetcher ?? this.providers[0]!.port
+    const firstProvider = this.providers[0]
+    if (firstProvider === undefined) throw new Error("CompositeWebResearchAdapter requires at least one provider")
+    this.pageFetchers = options.pageFetcher === undefined
+      ? [...new Set(this.providers.map((entry) => entry.port))]
+      : [options.pageFetcher]
   }
 
-  public async search(input: WebResearchSearchInput): Promise<readonly WebSearchHit[]> {
-    const detail = await this.searchDetailed(input)
-    return detail.hits
+  public search(input: WebResearchSearchInput): Promise<readonly WebSearchHit[]> {
+    return this.searchDetailed(input).then((detail) => detail.hits)
   }
 
   public async searchDetailed(input: WebResearchSearchInput): Promise<WebResearchSearchDetail> {
@@ -59,12 +64,13 @@ export class CompositeWebResearchAdapter implements WebResearchPort {
       }).then((hits) => ({ name, hits }))),
     )
     const attempts: WebResearchProviderAttempt[] = []
-    const ranked: WebSearchHit[] = []
+    const ranked: Array<{ hit: WebSearchHit; score: number; providerIndex: number }> = []
     const seen = new Set<string>()
-    for (const result of settled) {
+    for (const [providerIndex, result] of settled.entries()) {
       if (result.status === "rejected") {
+        const provider = this.providers[providerIndex]
         attempts.push({
-          provider: providerNameFromRejection(result.reason),
+          provider: provider?.name ?? "unknown",
           status: "error",
           message: errorMessage(result.reason),
         })
@@ -77,35 +83,37 @@ export class CompositeWebResearchAdapter implements WebResearchPort {
       for (const hit of hits) {
         const key = normalizeHitUrl(hit.url)
         if (seen.has(key)) continue
-        seen.add(key)
-        ranked.push(hit)
-        if (ranked.length >= input.maxResults) {
-          return { hits: ranked, attempts }
+        const score = scoreWebSearchHit(query, hit)
+        if (score > 0) {
+          seen.add(key)
+          ranked.push({ hit, score, providerIndex })
         }
       }
     }
-    return { hits: ranked, attempts }
+    ranked.sort((left, right) => right.score - left.score || left.providerIndex - right.providerIndex)
+    return { hits: ranked.slice(0, input.maxResults).map(({ hit }) => hit), attempts }
   }
 
   public async fetchPage(input: WebResearchFetchInput): Promise<WebPageContent | undefined> {
-    for (const provider of [this.pageFetcher, ...this.providers.map((entry) => entry.port)]) {
+    return (await this.fetchPageDetailed(input)).page
+  }
+
+  public async fetchPageDetailed(input: WebResearchFetchInput): Promise<WebResearchFetchDetail> {
+    const attempts: WebResearchProviderAttempt[] = []
+    for (const provider of this.pageFetchers) {
+      if (input.signal?.aborted === true) break
       try {
-        const page = await provider.fetchPage(input)
-        if (page !== undefined) return page
-      } catch {
-        // try next
+        const detail = provider.fetchPageDetailed === undefined
+          ? { page: await provider.fetchPage(input), attempts: [] }
+          : await provider.fetchPageDetailed(input)
+        attempts.push(...detail.attempts)
+        if (detail.page !== undefined) return { page: detail.page, attempts }
+      } catch (error) {
+        attempts.push({ provider: "page", status: "error", message: errorMessage(error) })
       }
     }
-    return undefined
+    return { attempts: attempts.length > 0 ? attempts : [{ provider: "page", status: "empty", message: "页面未返回可读正文，或读取已超时" }] }
   }
-}
-
-function providerNameFromRejection(reason: unknown): string {
-  if (typeof reason === "object" && reason !== null && "name" in reason) {
-    const name = (reason as { name?: unknown }).name
-    if (typeof name === "string" && name.length > 0) return name
-  }
-  return "unknown"
 }
 
 function errorMessage(error: unknown): string {
@@ -124,8 +132,9 @@ export function createDefaultWebResearchPort(): WebResearchPort {
       { name: "DuckDuckGo", port: duck },
     ],
     pageFetcher: {
-      search: async () => [],
+      search: () => Promise.resolve([]),
       fetchPage: (input) => http.fetchPage(input),
+      fetchPageDetailed: (input) => http.fetchPageDetailed(input),
     },
   })
 }

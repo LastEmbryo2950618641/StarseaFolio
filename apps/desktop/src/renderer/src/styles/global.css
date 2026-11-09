@@ -832,6 +832,11 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   flex: 0 0 auto;
   transition: border-radius .15s ease, background .15s ease, color .15s ease;
 }
+.project-rail-item:hover .project-rail-icon,
+.project-rail-item:focus-visible .project-rail-icon,
+.project-rail-item.active .project-rail-icon {
+  border-radius: 12px;
+}
 .project-rail-icon--image {
   background: #111214;
 }
@@ -845,19 +850,15 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   user-select: none;
   -webkit-user-drag: none;
 }
-.project-rail-item:hover .project-rail-icon,
-.project-rail-item:focus-visible .project-rail-icon,
-.project-rail-item.active .project-rail-icon {
-  border-radius: 12px;
-}
 .project-rail-icon--action {
-  background: #313338;
-  color: #23a559;
+  background: var(--success);
+  color: #123b2a;
 }
 .project-rail-action:hover .project-rail-icon--action,
 .project-rail-action:focus-visible .project-rail-icon--action {
-  background: #23a559;
-  color: #ffffff;
+  background: var(--success);
+  color: #123b2a;
+  filter: brightness(1.12);
   border-radius: 12px;
 }
 .project-rail-error {
