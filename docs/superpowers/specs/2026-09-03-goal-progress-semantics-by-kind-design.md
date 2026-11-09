@@ -108,9 +108,9 @@
 
 ## 7. 实施触点
 
-- `packages/contracts`：共享文案 helper（section title、status/chip 标签）
-- `apps/desktop`：`creation-desk-goals`、popover、章后复盘按钮文案
-- `packages/prompt-contracts`：`synopsis-discuss` / `plot-synopsis-guide`
+- `common/packages/contracts`：共享文案 helper（section title、status/chip 标签）
+- `win/desktop`：`creation-desk-goals`、popover、章后复盘按钮文案
+- `common/packages/prompt-contracts`：`synopsis-discuss` / `plot-synopsis-guide`
 - 测试：desktop helpers；可选 contracts 单测
 - 交叉引用：更新 taxonomy 规格 §4「进度语义不变」为「枚举不变、读法按 kind 映射」
 

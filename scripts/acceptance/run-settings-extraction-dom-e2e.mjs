@@ -61,19 +61,19 @@ if (process.env.WORLDSEED_SKIP_BUILD !== "1") {
   await run("pnpm", ["--filter", "@worldseed/desktop", "build"])
 }
 
-const electronVite = join(repoRoot, "apps/desktop/node_modules/.bin/electron-vite.CMD")
+const electronVite = join(repoRoot, "win/desktop/node_modules/.bin/electron-vite.CMD")
 const electronEnv = {
   ...process.env,
   WORLDSEED_FAKE_MODEL: "1",
   WORLDSEED_FAKE_SETTINGS_EXTRACTION: "1",
   WORLDSEED_CDP_PORT: cdpPort,
-  WORLDSEED_PROMPT_ROOT: join(repoRoot, "packages/prompt-contracts"),
+  WORLDSEED_PROMPT_ROOT: join(repoRoot, "common/packages/prompt-contracts"),
   WORLDSEED_LOG_LEVEL: process.env.WORLDSEED_LOG_LEVEL ?? "warn",
 }
 
 console.log(`Launching Electron (fake settings extraction, CDP ${resolvedCdpUrl})…`)
 const electron = spawn(electronVite, ["dev", "--remoteDebuggingPort", String(cdpPort)], {
-  cwd: join(repoRoot, "apps/desktop"),
+  cwd: join(repoRoot, "win/desktop"),
   env: electronEnv,
   stdio: "inherit",
   shell: true,

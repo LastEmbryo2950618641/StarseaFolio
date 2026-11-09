@@ -62,7 +62,7 @@ if (!aggregateOnly && !prerequisiteFailed) {
 if (!aggregateOnly && (longrunStep?.status === "paused"
   || process.env.WORLDSEED_ACCEPTANCE_RECOVERY_TASK_ID !== undefined
   || await readJson(recoveryPath) !== undefined)) {
-  steps.push(await runStep("recovery-audit", process.execPath, ["apps/backend/acceptance/audit-recovery.mjs"], {
+  steps.push(await runStep("recovery-audit", process.execPath, ["common/backend/acceptance/audit-recovery.mjs"], {
     WORLDSEED_ACCEPTANCE_RECOVERY_REPORT: recoveryPath,
     WORLDSEED_ACCEPTANCE_FULL_REPORT: fullChainPath,
     WORLDSEED_ACCEPTANCE_DB: databasePath,
@@ -93,7 +93,7 @@ if (!aggregateOnly && longrunStep?.status === "pass" && historyStep?.status === 
 }
 
 if (!aggregateOnly) {
-  steps.push(await runStep("audit", process.execPath, ["apps/backend/acceptance/audit-project.mjs"], {
+  steps.push(await runStep("audit", process.execPath, ["common/backend/acceptance/audit-project.mjs"], {
     WORLDSEED_ACCEPTANCE_AUDIT_REPORT: auditPath,
     WORLDSEED_ACCEPTANCE_MIN_CHAPTERS: "20",
   }))

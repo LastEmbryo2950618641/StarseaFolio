@@ -5,14 +5,14 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { createRequire } from "node:module"
 import { _electron as electron } from "playwright-core"
-import { BackendContainer, BackendFacade, FakeAiModelAdapter } from "../../apps/backend/dist/index.js"
-import { PROTOCOL_VERSION } from "../../packages/contracts/dist/index.js"
+import { BackendContainer, BackendFacade, FakeAiModelAdapter } from "../../common/backend/dist/index.js"
+import { PROTOCOL_VERSION } from "../../common/packages/contracts/dist/index.js"
 
 const root = await mkdtemp(join(tmpdir(), "worldseed-workflow-ui-"))
 const applicationDataRoot = join(root, "runtime")
 const workspaceRootRef = join(root, "book")
 const projectId = randomUUID()
-const container = await BackendContainer.open({ applicationDataRoot, promptPackageRoot: resolve("packages/prompt-contracts"), model: new FakeAiModelAdapter() })
+const container = await BackendContainer.open({ applicationDataRoot, promptPackageRoot: resolve("common/packages/prompt-contracts"), model: new FakeAiModelAdapter() })
 const facade = new BackendFacade(container, { automaticEvolutionEnabled: false })
 const request = async (method, payload = {}) => {
   const response = await facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method,
@@ -31,9 +31,9 @@ const draft = (await request("chapter.draft.list"))[0]
 await container.close()
 await mkdir(resolve("output/playwright"), { recursive: true })
 const app = await electron.launch({
-  executablePath: createRequire(resolve("apps/desktop/package.json"))("electron"),
-  args: [resolve("apps/desktop"), `--user-data-dir=${join(root, "chromium")}`],
-  env: { ...process.env, WORLDSEED_APP_DATA_ROOT: applicationDataRoot, WORLDSEED_PROMPT_ROOT: resolve("packages/prompt-contracts") },
+  executablePath: createRequire(resolve("win/desktop/package.json"))("electron"),
+  args: [resolve("win/desktop"), `--user-data-dir=${join(root, "chromium")}`],
+  env: { ...process.env, WORLDSEED_APP_DATA_ROOT: applicationDataRoot, WORLDSEED_PROMPT_ROOT: resolve("common/packages/prompt-contracts") },
 })
 try {
   const page = await app.firstWindow()

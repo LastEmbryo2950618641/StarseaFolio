@@ -1,9 +1,11 @@
 packages:
-  - apps/backend
-  - apps/desktop
-  - apps/web
-  # apps/mobile is a standalone Expo app (own install); see apps/mobile/README.md
-  - packages/*
+  - win/*
+  - common/backend
+  - common/renderer
+  - common/web
+  - common/packages/*
+  # Expo keeps its own npm install (React Native uses a different React version).
+  # See android/mobile/README.md.
 # electron-builder → @electron/rebuild@3.x pulls git-hosted @electron/node-gyp.
 # Keep false so packaging deps can install under pnpm 11.
 blockExoticSubdeps: false

@@ -1,5 +1,7 @@
 # Worldseed
 
+源码已按 `win/`、`android/`、`common/` 划分。Windows 平台入口位于 `win/desktop`，Android 入口位于 `android/mobile`，共享后端、工作台、契约、配置和提示词位于 `common/`。目录职责、运行入口和当前 Android 本地运行边界见 [平台源码目录](docs/platform-source-layout.md)。
+
 Worldseed 是一个以 AI 自治动态图为目标的实验项目。目标设计、当前代码和已经验收的能力必须分开判断；权威状态见 [设计与实施状态](docs/implementation-status.md)。
 
 核心目标：

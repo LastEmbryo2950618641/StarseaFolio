@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Optional version override (e.g. 0.1.1). Leave empty to use apps/desktop/package.json."
+        description: "Optional version override (e.g. 0.1.1). Leave empty to use win/desktop/package.json."
         required: false
         type: string
       prerelease:
@@ -61,7 +61,7 @@ jobs:
             if ($version.StartsWith("v")) { $version = $version.Substring(1) }
           }
           if ([string]::IsNullOrWhiteSpace($version)) {
-            $version = (Get-Content "apps/desktop/package.json" -Raw | ConvertFrom-Json).version
+            $version = (Get-Content "win/desktop/package.json" -Raw | ConvertFrom-Json).version
           }
           if ($version -notmatch '^\d+\.\d+\.\d+') {
             throw "Invalid version: $version"
@@ -77,14 +77,14 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          node -e "const fs=require('fs'); const p='apps/desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.RELEASE_VERSION; fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n'); console.log('Set @worldseed/desktop version to', j.version)"
+          node -e "const fs=require('fs'); const p='win/desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.RELEASE_VERSION; fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n'); console.log('Set @worldseed/desktop version to', j.version)"
 
       - name: Stamp build-info.json
         shell: pwsh
         env:
           BUILD_NUMBER: ${{ steps.version.outputs.buildNumber }}
         run: |
-          @{ buildNumber = $env:BUILD_NUMBER } | ConvertTo-Json | Set-Content -Path "apps/desktop/build-info.json" -Encoding utf8
+          @{ buildNumber = $env:BUILD_NUMBER } | ConvertTo-Json | Set-Content -Path "win/desktop/build-info.json" -Encoding utf8
           Write-Host "buildNumber=$env:BUILD_NUMBER"
 
       - name: Prefer hoisted node_modules for electron-builder
@@ -97,7 +97,7 @@ jobs:
           "@ | Set-Content -Path .npmrc -Encoding utf8
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false
+        run: pnpm install --frozen-lockfile
 
       - name: Setup MSVC build environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -111,16 +111,7 @@ jobs:
           npm_config_msvs_version: "2022"
           GYP_MSVS_VERSION: "2022"
         shell: pwsh
-        run: |
-          corepack pnpm --filter @worldseed/contracts build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          corepack pnpm --filter @worldseed/config build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          corepack pnpm --filter @worldseed/prompt-contracts build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          corepack pnpm --filter @worldseed/backend build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          corepack pnpm --filter @worldseed/desktop package:win
+        run: corepack pnpm package:exe
 
       - name: Write latest.json manifest
         shell: pwsh
@@ -136,24 +127,24 @@ jobs:
             downloadUrl = $downloadUrl
             productName = "星海余页 (StarseaFolio)"
           }
-          ($manifest | ConvertTo-Json) | Set-Content -Path "apps/desktop/release/latest.json" -Encoding utf8
-          Get-Content "apps/desktop/release/latest.json"
+          ($manifest | ConvertTo-Json) | Set-Content -Path "win/desktop/release/latest.json" -Encoding utf8
+          Get-Content "win/desktop/release/latest.json"
 
       - name: List release artifacts
         shell: pwsh
         run: |
-          Get-ChildItem "apps/desktop/release" -File | Format-Table Name, Length -AutoSize
-          $exes = Get-ChildItem "apps/desktop/release" -Filter "*.exe" -File
-          if ($exes.Count -lt 1) { throw "No .exe artifacts found under apps/desktop/release" }
+          Get-ChildItem "win/desktop/release" -File | Format-Table Name, Length -AutoSize
+          $exes = Get-ChildItem "win/desktop/release" -Filter "*.exe" -File
+          if ($exes.Count -lt 1) { throw "No .exe artifacts found under win/desktop/release" }
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: starseafolio-windows-${{ steps.version.outputs.version }}-b${{ steps.version.outputs.buildNumber }}
           path: |
-            apps/desktop/release/*.exe
-            apps/desktop/release/*.blockmap
-            apps/desktop/release/latest.json
+            win/desktop/release/*.exe
+            win/desktop/release/*.blockmap
+            win/desktop/release/latest.json
           if-no-files-found: error
 
       - name: Create or update GitHub Release
@@ -168,8 +159,8 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            apps/desktop/release/*.exe
-            apps/desktop/release/*.blockmap
-            apps/desktop/release/latest.json
+            win/desktop/release/*.exe
+            win/desktop/release/*.blockmap
+            win/desktop/release/latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

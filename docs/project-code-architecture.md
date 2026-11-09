@@ -71,69 +71,47 @@ Renderer、Preload 和 Main 都不能直接读写项目数据库。Main 只转�
 
 ```text
 worldseed/
-├── apps/
-│   ├── desktop/
-│   │   ├── electron.vite.config.ts
-│   │   ├── electron-builder.yml
-│   │   ├── package.json
-│   │   └── src/
-│   │       ├── main/
-│   │       │   ├── index.ts
-│   │       │   ├── window-manager.ts
-│   │       │   ├── backend-process.ts
-│   │       │   ├── ipc-router.ts
-│   │       │   └── security.ts
-│   │       ├── preload/
-│   │       │   ├── index.ts
-│   │       │   └── worldseed-bridge.ts
-│   │       └── renderer/
-│   │           ├── index.html
-│   │           └── src/
-│   │               ├── app/
-│   │               ├── features/
-│   │               ├── components/
-│   │               ├── hooks/
-│   │               ├── state/
-│   │               ├── styles/
-│   │               └── main.tsx
-│   └── backend/
-│       ├── package.json
-│       ├── migrations/
+├── win/
+│   └── desktop/                  Electron Main / Preload / Windows 资源与打包
+│       ├── electron.vite.config.ts
+│       ├── electron-builder.yml
 │       └── src/
-│           ├── bootstrap/
-│           ├── application/
-│           ├── core/
-│           ├── infrastructure/
-│           └── transport/
-├── packages/
-│   ├── contracts/
-│   ├── prompt-contracts/
-│   ├── ui/
-│   ├── config/
-│   └── test-fixtures/
-├── tests/
-│   ├── e2e/
-│   ├── integration/
-│   └── long-run/
+│           ├── main/
+│           └── preload/
+├── android/
+│   └── mobile/                   Expo / React Native 平台入口
+├── common/
+│   ├── backend/                  业务用例、状态门禁、任务与现有运行时适配
+│   │   └── src/
+│   │       ├── bootstrap/
+│   │       ├── application/
+│   │       ├── core/
+│   │       ├── infrastructure/
+│   │       └── transport/
+│   ├── renderer/                 桌面与 Web 共用工作台
+│   │   ├── src/
+│   │   └── test/
+│   ├── web/                      浏览器入口和 HTTP 平台桥接
+│   └── packages/
+│       ├── contracts/            包含平台桥接契约
+│       ├── config/
+│       └── prompt-contracts/
+├── scripts/
 ├── docs/
-├── tooling/
-│   ├── eslint/
-│   └── typescript/
+├── third-party/
 ├── package.json
 ├── pnpm-workspace.yaml
-├── tsconfig.base.json
-├── eslint.config.mjs
-└── vitest.workspace.ts
+└── tsconfig.base.json
 ```
 
-V1 不建立独立 Web 前端、云端 API、微服务目录或领域插件目录。
+当前平台目录与运行边界见 [平台源码目录](platform-source-layout.md)。Web 入口复用 common/renderer；Android 的本地运行适配仍需实现，目录归并不代表 Node.js 依赖已经支持 Android。
 
 ## 4. Desktop 应用
 
 ### 4.1 Main
 
 ```text
-apps/desktop/src/main/
+win/desktop/src/main/
 ├── index.ts                 # Electron 启动入口
 ├── window-manager.ts        # 项目选择窗口和工作台窗口
 ├── backend-process.ts       # 启动、监控、重启 Utility Process
@@ -143,17 +121,17 @@ apps/desktop/src/main/
 └── security.ts              # 导航、下载、权限和外链限制
 ```
 
-Main 不导入 `apps/backend/src/application`，也不实例化仓储。后端通过独立入口构建，Main 只管理其生命周期。
+Main 不导入 `common/backend/src/application`，也不实例化仓储。后端通过独立入口构建，Main 只管理其生命周期。
 
 ### 4.2 Preload
 
 ```text
-apps/desktop/src/preload/
+win/desktop/src/preload/
 ├── index.ts
 └── worldseed-bridge.ts
 ```
 
-`worldseed-bridge.ts` 只暴露 `packages/contracts` 中声明的接口：
+`worldseed-bridge.ts` 只暴露 `common/packages/contracts` 中声明的接口：
 
 ```ts
 contextBridge.exposeInMainWorld("worldseed", {
@@ -167,7 +145,7 @@ contextBridge.exposeInMainWorld("worldseed", {
 ### 4.3 Renderer
 
 ```text
-apps/desktop/src/renderer/src/
+common/renderer/src/
 ├── app/
 │   ├── App.tsx
 │   ├── router.tsx
@@ -217,7 +195,7 @@ Sigma.js 只显示后端返回的局部 `GraphSlice`。Graphology 保存当前�
 ## 5. Backend Utility Process
 
 ```text
-apps/backend/src/
+common/backend/src/
 ├── bootstrap/
 │   ├── utility-entry.ts
 │   ├── container.ts
@@ -286,7 +264,7 @@ Kysely database
 ### 6.1 contracts
 
 ```text
-packages/contracts/src/
+common/packages/contracts/src/
 ├── requests/
 ├── responses/
 ├── events/
@@ -301,7 +279,7 @@ packages/contracts/src/
 ### 6.2 prompt-contracts
 
 ```text
-packages/prompt-contracts/
+common/packages/prompt-contracts/
 ├── manifests/
 ├── prompts/
 ├── schemas/
@@ -313,7 +291,7 @@ packages/prompt-contracts/
 ### 6.3 ui
 
 ```text
-packages/ui/src/
+common/packages/ui/src/
 ├── primitives/
 ├── icons/
 ├── theme/
@@ -430,7 +408,7 @@ pnpm dev
 ```
 
 开发模式必须通过 `pnpm dev` 或 `pnpm --filter @worldseed/desktop dev` 启动。不要使用
-`electron .`、`electron apps/desktop` 或直接打开 `apps/desktop/out/renderer/index.html`，
+`electron .`、`electron win/desktop` 或直接打开 `win/desktop/out/renderer/index.html`，
 这些方式会加载构建产物，不会建立 Renderer HMR 连接。开发 CSP 同时放行 localhost 和
 127.0.0.1 的 Vite HTTP / WebSocket 地址，避免回环地址变化导致 HMR 被浏览器拦截。
 

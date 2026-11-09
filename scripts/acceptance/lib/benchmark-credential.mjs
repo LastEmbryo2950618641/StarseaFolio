@@ -7,7 +7,7 @@ export async function resolveBenchmarkCredential(selection, userData) {
   if (process.env.WORLDSEED_BENCHMARK_API_KEY) return process.env.WORLDSEED_BENCHMARK_API_KEY
   if (selection.apiKey) return selection.apiKey
   if (!userData) throw new Error("Supply --desktop-user-data or WORLDSEED_BENCHMARK_API_KEY for real evaluation")
-  const require = createRequire(resolve(import.meta.dirname, "../../../apps/desktop/package.json"))
+  const require = createRequire(resolve(import.meta.dirname, "../../../win/desktop/package.json"))
   const electron = require("electron")
   const env = { ...process.env }
   delete env.ELECTRON_RUN_AS_NODE

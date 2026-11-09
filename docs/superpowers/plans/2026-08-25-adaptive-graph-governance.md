@@ -13,10 +13,10 @@
 ### Task 1: Add the generic execution-mode contract
 
 **Files:**
-- Modify: `packages/prompt-contracts/src/phase-schemas/artifacts.ts`
-- Modify: `packages/prompt-contracts/resources/v1/phases/graph-governance.md`
-- Modify: `apps/backend/src/infrastructure/models/fake-ai-model-adapter.ts`
-- Test: `packages/prompt-contracts/test/prompt-contracts.test.ts`
+- Modify: `common/packages/prompt-contracts/src/phase-schemas/artifacts.ts`
+- Modify: `common/packages/prompt-contracts/resources/v1/phases/graph-governance.md`
+- Modify: `common/backend/src/infrastructure/models/fake-ai-model-adapter.ts`
+- Test: `common/packages/prompt-contracts/test/prompt-contracts.test.ts`
 
 - [x] Add `executionMode` to `graphGovernanceArtifactSchema` with the values `no_change`, `local_governance`, and `full_governance`; default omitted legacy artifacts to `full_governance` so existing persisted runs remain safe.
 - [x] State in the phase prompt that the mode is a routing decision, not a domain category, and that `no_change` must contain no mutations.
@@ -27,9 +27,9 @@
 ### Task 2: Add an isolated adaptive route decision helper
 
 **Files:**
-- Create: `apps/backend/src/application/turns/adaptive-graph-governance-coordinator.ts`
-- Modify: `apps/backend/src/application/turns/index.ts`
-- Test: `apps/backend/test/adaptive-graph-governance-coordinator.test.ts`
+- Create: `common/backend/src/application/turns/adaptive-graph-governance-coordinator.ts`
+- Modify: `common/backend/src/application/turns/index.ts`
+- Test: `common/backend/test/adaptive-graph-governance-coordinator.test.ts`
 
 - [x] Define a pure coordinator result with `no_change`, `local_governance`, and `full_governance`, plus a reason and fallback reason.
 - [x] Parse the generic governance artifact through the existing Zod schema; never inspect narrative field names or semantic categories.
@@ -39,9 +39,9 @@
 ### Task 3: Route revision graph synchronization with minimal intrusion
 
 **Files:**
-- Modify: `apps/backend/src/application/turns/turn-orchestrator.ts`
-- Modify: `apps/backend/src/bootstrap/project-runtime.ts`
-- Test: `apps/backend/test/turn-orchestrator.test.ts`
+- Modify: `common/backend/src/application/turns/turn-orchestrator.ts`
+- Modify: `common/backend/src/bootstrap/project-runtime.ts`
+- Test: `common/backend/test/turn-orchestrator.test.ts`
 
 - [x] Add an internal adaptive flag to `TurnOrchestratorInput` and enable it only from `ProjectRuntime.runGraphSync`.
 - [x] Keep normal turn/evolution phase arrays unchanged; use the adaptive coordinator only at the revision graph-sync entry point.
@@ -55,10 +55,10 @@
 ### Task 4: Preserve recovery and finalization behavior
 
 **Files:**
-- Modify: `apps/backend/src/application/turns/turn-orchestrator.ts`
-- Modify: `apps/backend/src/bootstrap/project-runtime.ts`
-- Test: `apps/backend/test/chapter-document.test.ts`
-- Test: `apps/backend/test/turn-orchestrator.test.ts`
+- Modify: `common/backend/src/application/turns/turn-orchestrator.ts`
+- Modify: `common/backend/src/bootstrap/project-runtime.ts`
+- Test: `common/backend/test/chapter-document.test.ts`
+- Test: `common/backend/test/turn-orchestrator.test.ts`
 
 - [x] Persist the adaptive phase run and task checkpoint before returning or falling back.
 - [x] Ensure a process restart resumes the adaptive phase or the full-chain checkpoint without a second content submission.

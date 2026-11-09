@@ -11,7 +11,7 @@ import { connectElectron, readActiveModel, runQuery } from "./lib/electron-backe
 
 const require = createRequire(import.meta.url)
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
-const Database = require(resolve(repositoryRoot, "apps/backend/node_modules/better-sqlite3"))
+const Database = require(resolve(repositoryRoot, "common/backend/node_modules/better-sqlite3"))
 const projectId = requiredEnvironment("WORLDSEED_ACCEPTANCE_PROJECT_ID")
 const workspace = resolve(requiredEnvironment("WORLDSEED_ACCEPTANCE_WORKSPACE"))
 const databasePath = resolve(requiredEnvironment("WORLDSEED_ACCEPTANCE_DB"))

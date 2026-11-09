@@ -6,8 +6,8 @@ export default defineConfig({
       enabled: false,
     },
     include: [
-      "apps/**/test/**/*.test.ts",
-      "packages/**/test/**/*.test.ts",
+      "win/**/test/**/*.test.ts",
+      "common/**/test/**/*.test.ts",
       "scripts/**/test/**/*.test.mjs",
     ],
     passWithNoTests: false,

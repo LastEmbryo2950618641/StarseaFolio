@@ -78,18 +78,18 @@ TurnOrchestrator
 
 修改：
 
-- `packages/contracts/src/context.ts`
-- `packages/contracts/src/backend-payloads.ts`
-- `packages/contracts/src/project-settings.ts`
-- `packages/contracts/test/contracts.test.ts`
-- `packages/config/src/deepseek.ts`
-- `packages/config/src/profiles.ts`
-- `packages/config/test/config.test.ts`
-- `packages/config/test/deepseek.test.ts`
+- `common/packages/contracts/src/context.ts`
+- `common/packages/contracts/src/backend-payloads.ts`
+- `common/packages/contracts/src/project-settings.ts`
+- `common/packages/contracts/test/contracts.test.ts`
+- `common/packages/config/src/deepseek.ts`
+- `common/packages/config/src/profiles.ts`
+- `common/packages/config/test/config.test.ts`
+- `common/packages/config/test/deepseek.test.ts`
 
 新增：
 
-- `packages/contracts/src/model-context.ts`
+- `common/packages/contracts/src/model-context.ts`
 
 内容：定义 `ModelContextChain`、消息、轮次归属、正式章节标记、压缩策略、项目级永久 ID、前缀计数器、Token 计算结果和模型 Profile 的 `contextWindowTokens`。从项目设置移除重复容量，只保留 `contextCompactionThresholdRatio` 与目标比例，默认分别为 `0.97` 和 `0.50`。
 
@@ -97,22 +97,22 @@ TurnOrchestrator
 
 新增：
 
-- `apps/backend/src/application/context/model-context-coordinator.ts`
-- `apps/backend/src/application/context/context-appender.ts`
-- `apps/backend/src/application/context/context-window-manager.ts`
-- `apps/backend/src/application/context/ports/project-id-allocator-port.ts`
-- `apps/backend/src/application/context/ports/context-chain-store-port.ts`
-- `apps/backend/src/application/context/ports/model-input-token-counter.ts`
-- `apps/backend/src/infrastructure/sqlite/repositories/sqlite-project-id-allocator.ts`
-- `apps/backend/test/model-context-coordinator.test.ts`
-- `apps/backend/test/context-appender.test.ts`
-- `apps/backend/test/context-window-manager.test.ts`
-- `apps/backend/test/project-id-allocator.test.ts`
+- `common/backend/src/application/context/model-context-coordinator.ts`
+- `common/backend/src/application/context/context-appender.ts`
+- `common/backend/src/application/context/context-window-manager.ts`
+- `common/backend/src/application/context/ports/project-id-allocator-port.ts`
+- `common/backend/src/application/context/ports/context-chain-store-port.ts`
+- `common/backend/src/application/context/ports/model-input-token-counter.ts`
+- `common/backend/src/infrastructure/sqlite/repositories/sqlite-project-id-allocator.ts`
+- `common/backend/test/model-context-coordinator.test.ts`
+- `common/backend/test/context-appender.test.ts`
+- `common/backend/test/context-window-manager.test.ts`
+- `common/backend/test/project-id-allocator.test.ts`
 
 修改：
 
-- `apps/backend/src/application/index.ts`
-- `apps/backend/src/application/turns/ports/ai-model-port.ts`
+- `common/backend/src/application/index.ts`
+- `common/backend/src/application/turns/ports/ai-model-port.ts`
 
 内容：实现与供应商无关的消息链增量、永久 ID 可见性、当前治理事务的局部引用物化、失败临时尾部和机械压缩。应用服务接收现有业务对象，序列化后才形成供应商消息；核心层不依赖 DeepSeek。
 
@@ -120,11 +120,11 @@ TurnOrchestrator
 
 修改：
 
-- `apps/backend/src/infrastructure/sqlite/database-types.ts`
-- `apps/backend/src/infrastructure/sqlite/migrations/project-migrations.ts`
-- `apps/backend/src/infrastructure/sqlite/repositories/sqlite-turn-persistence.ts`
-- `apps/backend/src/bootstrap/project-runtime.ts`
-- `apps/backend/test/sqlite-turn-persistence.test.ts`
+- `common/backend/src/infrastructure/sqlite/database-types.ts`
+- `common/backend/src/infrastructure/sqlite/migrations/project-migrations.ts`
+- `common/backend/src/infrastructure/sqlite/repositories/sqlite-turn-persistence.ts`
+- `common/backend/src/bootstrap/project-runtime.ts`
+- `common/backend/test/sqlite-turn-persistence.test.ts`
 
 建议新增表：
 
@@ -138,12 +138,12 @@ TurnOrchestrator
 
 修改：
 
-- `apps/backend/src/application/turns/turn-orchestrator.ts`
-- `apps/backend/src/application/turns/ports/turn-persistence.ts`
-- `apps/backend/src/bootstrap/container.ts`
-- `apps/backend/src/bootstrap/backend-facade.ts`
-- `apps/backend/test/turn-orchestrator.test.ts`
-- `apps/backend/test/backend-facade.test.ts`
+- `common/backend/src/application/turns/turn-orchestrator.ts`
+- `common/backend/src/application/turns/ports/turn-persistence.ts`
+- `common/backend/src/bootstrap/container.ts`
+- `common/backend/src/bootstrap/backend-facade.ts`
+- `common/backend/test/turn-orchestrator.test.ts`
+- `common/backend/test/backend-facade.test.ts`
 
 重构原则：
 
@@ -162,12 +162,12 @@ TurnOrchestrator
 
 修改：
 
-- `apps/backend/src/infrastructure/models/deepseek/deepseek-model-adapter.ts`
-- `apps/backend/src/infrastructure/models/deepseek/model-reference-view.ts`
-- `apps/backend/src/infrastructure/models/deepseek/model-phase-result-assembler.ts`
-- `apps/backend/src/infrastructure/models/fake-ai-model-adapter.ts`
-- `apps/backend/src/infrastructure/models/unavailable-ai-model-adapter.ts`
-- `apps/backend/test/deepseek-model-adapter.test.ts`
+- `common/backend/src/infrastructure/models/deepseek/deepseek-model-adapter.ts`
+- `common/backend/src/infrastructure/models/deepseek/model-reference-view.ts`
+- `common/backend/src/infrastructure/models/deepseek/model-phase-result-assembler.ts`
+- `common/backend/src/infrastructure/models/fake-ai-model-adapter.ts`
+- `common/backend/src/infrastructure/models/unavailable-ai-model-adapter.ts`
+- `common/backend/test/deepseek-model-adapter.test.ts`
 
 内容：
 
@@ -182,9 +182,9 @@ TurnOrchestrator
 
 修改：
 
-- `apps/backend/src/application/turns/turn-orchestrator.ts`
-- `apps/backend/src/application/context/context-appender.ts`
-- `apps/backend/test/turn-orchestrator.test.ts`
+- `common/backend/src/application/turns/turn-orchestrator.ts`
+- `common/backend/src/application/context/context-appender.ts`
+- `common/backend/test/turn-orchestrator.test.ts`
 
 内容：把唯一正式章节消息的追加点放到以下操作全部成功之后：
 
@@ -206,20 +206,20 @@ TurnOrchestrator
 
 新增或修改：
 
-- `packages/contracts/src/history.ts`
-- `packages/contracts/src/backend-methods.ts`
-- `packages/contracts/src/backend-payloads.ts`
-- `apps/backend/src/application/history/history-service.ts`
-- `apps/backend/src/application/history/history-manifest-builder.ts`
-- `apps/backend/src/application/history/history-checkout-service.ts`
-- `apps/backend/src/application/history/ports/history-vcs-port.ts`
-- `apps/backend/src/infrastructure/history-git/isomorphic-git-history-adapter.ts`
-- `apps/backend/src/infrastructure/sqlite/repositories/sqlite-history-repository.ts`
-- `apps/backend/src/bootstrap/backend-facade.ts`
-- `apps/backend/package.json`
-- `apps/backend/test/history-service.test.ts`
-- `apps/backend/test/history-checkout.test.ts`
-- `apps/backend/test/history-git-adapter.test.ts`
+- `common/packages/contracts/src/history.ts`
+- `common/packages/contracts/src/backend-methods.ts`
+- `common/packages/contracts/src/backend-payloads.ts`
+- `common/backend/src/application/history/history-service.ts`
+- `common/backend/src/application/history/history-manifest-builder.ts`
+- `common/backend/src/application/history/history-checkout-service.ts`
+- `common/backend/src/application/history/ports/history-vcs-port.ts`
+- `common/backend/src/infrastructure/history-git/isomorphic-git-history-adapter.ts`
+- `common/backend/src/infrastructure/sqlite/repositories/sqlite-history-repository.ts`
+- `common/backend/src/bootstrap/backend-facade.ts`
+- `common/backend/package.json`
+- `common/backend/test/history-service.test.ts`
+- `common/backend/test/history-checkout.test.ts`
+- `common/backend/test/history-git-adapter.test.ts`
 
 内容：
 
@@ -236,16 +236,16 @@ TurnOrchestrator
 
 修改：
 
-- `apps/backend/src/infrastructure/sqlite/database-types.ts`
-- `apps/backend/src/infrastructure/sqlite/migrations/registry-migrations.ts`
-- `apps/backend/src/infrastructure/sqlite/repositories/sqlite-model-profile-store.ts`
-- `apps/desktop/src/renderer/src/features/settings/ModelConfigurationDialog.tsx`
-- `apps/desktop/src/renderer/src/features/settings/ProjectSettingsDialog.tsx`
-- `apps/desktop/src/renderer/src/features/status/TaskCheckpointPrototype.tsx`
-- `apps/desktop/src/renderer/src/features/status/HistoryPanel.tsx`
-- `apps/desktop/src/renderer/src/api/client.ts`
-- `apps/desktop/src/renderer/src/app/App.tsx`
-- `apps/desktop/test/renderer-ui.test.ts`
+- `common/backend/src/infrastructure/sqlite/database-types.ts`
+- `common/backend/src/infrastructure/sqlite/migrations/registry-migrations.ts`
+- `common/backend/src/infrastructure/sqlite/repositories/sqlite-model-profile-store.ts`
+- `common/renderer/src/features/settings/ModelConfigurationDialog.tsx`
+- `common/renderer/src/features/settings/ProjectSettingsDialog.tsx`
+- `common/renderer/src/features/status/TaskCheckpointPrototype.tsx`
+- `common/renderer/src/features/status/HistoryPanel.tsx`
+- `common/renderer/src/api/client.ts`
+- `common/renderer/src/app/App.tsx`
+- `win/desktop/test/renderer-ui.test.ts`
 
 内容：
 
@@ -259,7 +259,7 @@ TurnOrchestrator
 
 ### Task 1：冻结上下文链与 ID 契约
 
-1. 在 `packages/contracts/src/model-context.ts` 添加最小上下文链、永久 ID 和计数器 Schema。
+1. 在 `common/packages/contracts/src/model-context.ts` 添加最小上下文链、永久 ID 和计数器 Schema。
 2. 给模型 Profile 增加 `contextWindowTokens`。
 3. 从项目设置移除重复的上下文窗口字段，增加 `contextCompressionTargetRatio`。
 4. 固定 `node`、`link`、`evidence`、`source`、`revision` 等代码可用前缀。
@@ -274,7 +274,7 @@ TurnOrchestrator
 2. 实现固定追加顺序、禁止修改旧消息、永久 ID 可见性和两阶段压缩。
 3. 实现 `ModelContextCoordinator` 的正式尾部、临时修复尾部和 `local:*` 物化入口。
 4. 增加 Token 计数端口及测试假实现。
-5. 运行：`pnpm vitest run apps/backend/test/context-appender.test.ts apps/backend/test/project-id-allocator.test.ts apps/backend/test/context-window-manager.test.ts apps/backend/test/model-context-coordinator.test.ts`。
+5. 运行：`pnpm vitest run common/backend/test/context-appender.test.ts common/backend/test/project-id-allocator.test.ts common/backend/test/context-window-manager.test.ts common/backend/test/model-context-coordinator.test.ts`。
 
 验收：第二次请求严格等于第一次请求消息加尾部；压缩前旧消息字节不变；永久 ID 在跨阶段、跨轮次和历史快照中保持不变；失败输出不进入正式链。
 

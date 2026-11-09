@@ -71,13 +71,13 @@ if (values["validate-only"]) {
   }
   await save()
   try {
-    const backend = await import(pathToFileURL(join(root, "apps/backend/dist/index.js")).href)
+    const backend = await import(pathToFileURL(join(root, "common/backend/dist/index.js")).href)
     const { browser, page } = await connectElectron(values.cdp)
     let selection
     try { selection = await readActiveModel(page) } finally { await browser.close() }
     secret = await resolveBenchmarkCredential(selection, values["desktop-user-data"])
     selection.apiKey = secret
-    const realModel = backend.createModelFromSelection(join(root, "packages/prompt-contracts"), selection)
+    const realModel = backend.createModelFromSelection(join(root, "common/packages/prompt-contracts"), selection)
     report.model = { provider: realModel.info?.provider, name: selection.model, contextWindowTokens: selection.contextWindowTokens }
     const calls = []
     const model = {
@@ -97,7 +97,7 @@ if (values["validate-only"]) {
     }
     container = await backend.BackendContainer.open({
       applicationDataRoot: join(outputRoot, "data"),
-      promptPackageRoot: join(root, "packages/prompt-contracts"), model,
+      promptPackageRoot: join(root, "common/packages/prompt-contracts"), model,
     })
     const projectId = randomUUID()
     const workspaceRootRef = join(outputRoot, "workspace")

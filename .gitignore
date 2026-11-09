@@ -10,11 +10,12 @@ coverage/
 .env.*
 !.env.example
 !**/.env.http.example
-apps/mobile/node_modules/
-apps/mobile/.expo/
+android/mobile/node_modules/
+android/mobile/.expo/
 *.log
 .playwright-cli/
+.playwright-mcp/
 .runtime-logs/
 output/
-apps/desktop/resources/lncrawl/
-apps/desktop/resources/lncrawl.staging/
+win/desktop/resources/lncrawl/
+win/desktop/resources/lncrawl.staging/

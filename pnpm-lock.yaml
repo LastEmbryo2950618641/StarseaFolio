@@ -33,17 +33,17 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.1))
 
-  apps/backend:
+  common/backend:
     dependencies:
       '@worldseed/config':
         specifier: workspace:*
-        version: link:../../packages/config
+        version: link:../packages/config
       '@worldseed/contracts':
         specifier: workspace:*
-        version: link:../../packages/contracts
+        version: link:../packages/contracts
       '@worldseed/prompt-contracts':
         specifier: workspace:*
-        version: link:../../packages/prompt-contracts
+        version: link:../packages/prompt-contracts
       better-sqlite3:
         specifier: ^13.0.2
         version: 13.0.2
@@ -73,7 +73,150 @@ importers:
         specifier: ^3.4.0
         version: 3.4.0
 
-  apps/desktop:
+  common/packages/config:
+    dependencies:
+      '@worldseed/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+
+  common/packages/contracts:
+    dependencies:
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+
+  common/packages/prompt-contracts:
+    dependencies:
+      '@worldseed/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+
+  common/renderer:
+    dependencies:
+      '@monaco-editor/react':
+        specifier: ^4.7.0
+        version: 4.7.0(monaco-editor@0.52.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@tanstack/react-query':
+        specifier: ^5.83.0
+        version: 5.101.4(react@19.2.8)
+      '@worldseed/config':
+        specifier: workspace:*
+        version: link:../packages/config
+      '@worldseed/contracts':
+        specifier: workspace:*
+        version: link:../packages/contracts
+      graphology:
+        specifier: ^0.26.0
+        version: 0.26.0(graphology-types@0.24.8)
+      lucide-react:
+        specifier: ^0.468.0
+        version: 0.468.0(react@19.2.8)
+      monaco-editor:
+        specifier: ^0.52.2
+        version: 0.52.2
+      react:
+        specifier: ^19.1.0
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.1.0
+        version: 19.2.8(react@19.2.8)
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@19.2.18)(react@19.2.8)
+      react-resizable-panels:
+        specifier: ^3.0.6
+        version: 3.0.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
+      sigma:
+        specifier: ^3.0.2
+        version: 3.0.3(graphology-types@0.24.8)
+      zustand:
+        specifier: ^5.0.6
+        version: 5.0.14(@types/react@19.2.18)(react@19.2.8)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.1.6
+        version: 19.2.4(@types/react@19.2.18)
+      '@vitejs/plugin-react':
+        specifier: ^4.6.0
+        version: 4.7.0(vite@7.3.6(@types/node@26.1.2)(lightningcss@1.33.0))
+      vite:
+        specifier: ^7.0.5
+        version: 7.3.6(@types/node@26.1.2)(lightningcss@1.33.0)
+
+  common/web:
+    dependencies:
+      '@monaco-editor/react':
+        specifier: ^4.7.0
+        version: 4.7.0(monaco-editor@0.52.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@tanstack/react-query':
+        specifier: ^5.83.0
+        version: 5.101.4(react@19.2.8)
+      '@worldseed/config':
+        specifier: workspace:*
+        version: link:../packages/config
+      '@worldseed/contracts':
+        specifier: workspace:*
+        version: link:../packages/contracts
+      graphology:
+        specifier: ^0.26.0
+        version: 0.26.0(graphology-types@0.24.8)
+      lucide-react:
+        specifier: ^0.468.0
+        version: 0.468.0(react@19.2.8)
+      monaco-editor:
+        specifier: ^0.52.2
+        version: 0.52.2
+      react:
+        specifier: ^19.1.0
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.1.0
+        version: 19.2.8(react@19.2.8)
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@19.2.18)(react@19.2.8)
+      react-resizable-panels:
+        specifier: ^3.0.6
+        version: 3.0.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
+      sigma:
+        specifier: ^3.0.2
+        version: 3.0.3(graphology-types@0.24.8)
+      zustand:
+        specifier: ^5.0.6
+        version: 5.0.14(@types/react@19.2.18)(react@19.2.8)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.1.6
+        version: 19.2.4(@types/react@19.2.18)
+      '@vitejs/plugin-react':
+        specifier: ^4.6.0
+        version: 4.7.0(vite@7.3.6(@types/node@26.1.2)(lightningcss@1.33.0))
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.0.5
+        version: 7.3.6(@types/node@26.1.2)(lightningcss@1.33.0)
+
+  win/desktop:
     dependencies:
       '@monaco-editor/react':
         specifier: ^4.7.0
@@ -83,13 +226,13 @@ importers:
         version: 5.101.4(react@19.2.8)
       '@worldseed/backend':
         specifier: workspace:*
-        version: link:../backend
+        version: link:../../common/backend
       '@worldseed/config':
         specifier: workspace:*
-        version: link:../../packages/config
+        version: link:../../common/packages/config
       '@worldseed/contracts':
         specifier: workspace:*
-        version: link:../../packages/contracts
+        version: link:../../common/packages/contracts
       graphology:
         specifier: ^0.26.0
         version: 0.26.0(graphology-types@0.24.8)
@@ -142,91 +285,6 @@ importers:
       vite:
         specifier: ^7.0.5
         version: 7.3.6(@types/node@26.1.2)(lightningcss@1.33.0)
-
-  apps/web:
-    dependencies:
-      '@monaco-editor/react':
-        specifier: ^4.7.0
-        version: 4.7.0(monaco-editor@0.52.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@tanstack/react-query':
-        specifier: ^5.83.0
-        version: 5.101.4(react@19.2.8)
-      '@worldseed/config':
-        specifier: workspace:*
-        version: link:../../packages/config
-      '@worldseed/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      graphology:
-        specifier: ^0.26.0
-        version: 0.26.0(graphology-types@0.24.8)
-      lucide-react:
-        specifier: ^0.468.0
-        version: 0.468.0(react@19.2.8)
-      monaco-editor:
-        specifier: ^0.52.2
-        version: 0.52.2
-      react:
-        specifier: ^19.1.0
-        version: 19.2.8
-      react-dom:
-        specifier: ^19.1.0
-        version: 19.2.8(react@19.2.8)
-      react-markdown:
-        specifier: ^10.1.0
-        version: 10.1.0(@types/react@19.2.18)(react@19.2.8)
-      react-resizable-panels:
-        specifier: ^3.0.6
-        version: 3.0.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      remark-gfm:
-        specifier: ^4.0.1
-        version: 4.0.1
-      sigma:
-        specifier: ^3.0.2
-        version: 3.0.3(graphology-types@0.24.8)
-      zustand:
-        specifier: ^5.0.6
-        version: 5.0.14(@types/react@19.2.18)(react@19.2.8)
-    devDependencies:
-      '@types/react':
-        specifier: ^19.1.8
-        version: 19.2.18
-      '@types/react-dom':
-        specifier: ^19.1.6
-        version: 19.2.4(@types/react@19.2.18)
-      '@vitejs/plugin-react':
-        specifier: ^4.6.0
-        version: 4.7.0(vite@7.3.6(@types/node@26.1.2)(lightningcss@1.33.0))
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vite:
-        specifier: ^7.0.5
-        version: 7.3.6(@types/node@26.1.2)(lightningcss@1.33.0)
-
-  packages/config:
-    dependencies:
-      '@worldseed/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-
-  packages/contracts:
-    dependencies:
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
-
-  packages/prompt-contracts:
-    dependencies:
-      '@worldseed/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
 
 packages:
 

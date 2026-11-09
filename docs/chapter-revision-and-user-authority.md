@@ -288,7 +288,7 @@ graph_sync_pending     -> graph_sync_running      用户选择继续或重试
 
 ### 7.1 Contracts
 
-在 `packages/contracts` 增加：
+在 `common/packages/contracts` 增加：
 
 - `chapter.list`、`chapter.read`、`chapter.readRevision`、`chapter.findActiveRevision` 的真实 payload 和返回 schema；
 - `chapter.startRevision`：章节 ID、base source ID、独立 `heading` 和正文 `body`；
@@ -308,7 +308,7 @@ graph_sync_pending     -> graph_sync_running      用户选择继续或重试
 新增独立模块，建议位于：
 
 ```text
-apps/backend/src/application/chapters/
+common/backend/src/application/chapters/
   chapter-revision-service.ts
   chapter-revision-finalization-service.ts
   chapter-revision-review-service.ts

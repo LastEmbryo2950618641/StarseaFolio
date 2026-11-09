@@ -7,9 +7,12 @@
     "types": ["node", "electron", "vite/client", "vitest/globals"]
   },
   "include": [
-    "apps/**/*.ts",
-    "apps/**/*.tsx",
-    "packages/**/*.ts",
+    "win/**/*.ts",
+    "win/**/*.tsx",
+    "android/**/*.ts",
+    "android/**/*.tsx",
+    "common/**/*.ts",
+    "common/**/*.tsx",
     "vitest.config.ts"
   ]
 }

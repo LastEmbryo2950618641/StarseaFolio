@@ -7,7 +7,7 @@ import { chromium } from "playwright-core"
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const require = createRequire(import.meta.url)
-const Database = require(resolve(repositoryRoot, "apps/backend/node_modules/better-sqlite3"))
+const Database = require(resolve(repositoryRoot, "common/backend/node_modules/better-sqlite3"))
 
 const cdpUrl = process.env.WORLDSEED_ACCEPTANCE_CDP_URL ?? "http://127.0.0.1:9230"
 const dataRoot = process.env.WORLDSEED_APP_DATA_ROOT

@@ -112,7 +112,7 @@ flowchart LR
 ## 5. 源码目录
 
 ```text
-apps/
+common/
 └── backend/
     └── src/
         ├── bootstrap/
@@ -142,7 +142,7 @@ apps/
             ├── vector/
             ├── models/
             └── telemetry/
-packages/                           # 详见项目代码架构
+common/packages/                           # 详见项目代码架构
 ├── contracts/
 ├── prompt-contracts/
 └── test-fixtures/
@@ -457,7 +457,7 @@ V1 不依赖 Tool Calling。模型需要查询或提出修改时，先返回 Wor
 供应商适配器负责认证、流式传输、重试限制、token 统计和原始错误转换。它不能修改阶段输出的世界含义。
 
 ```text
-apps/backend/src/infrastructure/models/deepseek/
+common/backend/src/infrastructure/models/deepseek/
 ├── deepseek-adapter.ts
 ├── deepseek-client.ts
 ├── deepseek-config.ts
@@ -480,7 +480,7 @@ interface PromptRegistry {
 
 ### 11.3 结构验证
 
-所有阶段共用 `packages/prompt-contracts` 中唯一的语义 artifact schema。已有持久化对象在模型协议与数据库中统一使用项目级永久 ID，例如 `node_103`、`link_24`、`evidence_87`；不再为每次请求建立临时 `read-*`、`node-*`、`link-*`别名，也不维护永久 ID 到 UUID 的长期映射。共享契约校验器只要求永久 ID 已出现在当前模型可见输入、工作区选择来自实际读取文件、`graph_governance` 中的所有 `local:*` 都在当前治理 artifact 明确声明；规划、草稿和审查阶段不得提前发明局部句柄。应用层只把本次治理新对象的 `local:*` 按技术类别一次性物化为永久 ID，并生成章节、修订、投影、结算、时空绑定和决定记录。项目为每个前缀维护独立原子计数器；计数器跨任务和世界线共享，历史恢复不能回退。详见 [模型协议边界设计](model-protocol-boundary.md)。
+所有阶段共用 `common/packages/prompt-contracts` 中唯一的语义 artifact schema。已有持久化对象在模型协议与数据库中统一使用项目级永久 ID，例如 `node_103`、`link_24`、`evidence_87`；不再为每次请求建立临时 `read-*`、`node-*`、`link-*`别名，也不维护永久 ID 到 UUID 的长期映射。共享契约校验器只要求永久 ID 已出现在当前模型可见输入、工作区选择来自实际读取文件、`graph_governance` 中的所有 `local:*` 都在当前治理 artifact 明确声明；规划、草稿和审查阶段不得提前发明局部句柄。应用层只把本次治理新对象的 `local:*` 按技术类别一次性物化为永久 ID，并生成章节、修订、投影、结算、时空绑定和决定记录。项目为每个前缀维护独立原子计数器；计数器跨任务和世界线共享，历史恢复不能回退。详见 [模型协议边界设计](model-protocol-boundary.md)。
 
 后端只验证：
 

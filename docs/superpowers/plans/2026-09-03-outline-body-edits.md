@@ -14,16 +14,16 @@
 
 | File | Role |
 | --- | --- |
-| `apps/backend/src/application/chapters/markdown-search-replace.ts` | Pure apply helper |
-| `apps/backend/test/markdown-search-replace.test.ts` | Unit tests |
-| `packages/prompt-contracts/.../artifacts.ts` | `bodyEdits` schema + refine mutex |
-| `packages/contracts/src/synopsis.ts` | `lastOutlineAgentDigest` |
-| `apps/backend/.../project-migrations.ts` | 041 |
+| `common/backend/src/application/chapters/markdown-search-replace.ts` | Pure apply helper |
+| `common/backend/test/markdown-search-replace.test.ts` | Unit tests |
+| `common/packages/prompt-contracts/.../artifacts.ts` | `bodyEdits` schema + refine mutex |
+| `common/packages/contracts/src/synopsis.ts` | `lastOutlineAgentDigest` |
+| `common/backend/.../project-migrations.ts` | 041 |
 | `sqlite-synopsis-conversation-repository.ts` + database-types | Persist digest |
 | `synopsis-conversation-service.ts` | Apply + loud fail + inject |
 | `synopsis-discuss.md` + `plot-synopsis-guide.md` | Prompt rules |
 | `fake-ai-model-adapter.ts` | Optional bodyEdits path |
-| `apps/backend/test/outline-body-edits.test.ts` | Gate/integration-ish |
+| `common/backend/test/outline-body-edits.test.ts` | Gate/integration-ish |
 
 ---
 
@@ -52,4 +52,4 @@
 
 ### Task 5: Tests green
 
-Run: `npx vitest run apps/backend/test/markdown-search-replace.test.ts apps/backend/test/outline-body-edits.test.ts`
+Run: `npx vitest run common/backend/test/markdown-search-replace.test.ts common/backend/test/outline-body-edits.test.ts`

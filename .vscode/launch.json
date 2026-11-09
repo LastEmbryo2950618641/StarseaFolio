@@ -5,13 +5,13 @@
       "name": "Worldseed: Electron Dev",
       "type": "node",
       "request": "launch",
-      "runtimeExecutable": "${workspaceFolder}\\apps\\desktop\\node_modules\\.bin\\electron-vite.CMD",
+      "runtimeExecutable": "${workspaceFolder}\\win\\desktop\\node_modules\\.bin\\electron-vite.CMD",
       "runtimeArgs": [
         "--inspect=9229",
         "--remoteDebuggingPort=9230",
         "--sourcemap"
       ],
-      "cwd": "${workspaceFolder}\\apps\\desktop",
+      "cwd": "${workspaceFolder}\\win\\desktop",
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
       "autoAttachChildProcesses": true,
@@ -20,7 +20,7 @@
         "${workspaceFolder}/node_modules/**"
       ],
       "env": {
-        "WORLDSEED_PROMPT_ROOT": "${workspaceFolder}\\packages\\prompt-contracts",
+        "WORLDSEED_PROMPT_ROOT": "${workspaceFolder}\\common\\packages\\prompt-contracts",
         "WORLDSEED_LOG_LEVEL": "debug",
         "WORLDSEED_LOG_CONSOLE": "true",
         "WORLDSEED_LOG_FILE_ENABLED": "true",
@@ -28,9 +28,9 @@
       },
       "sourceMaps": true,
       "outFiles": [
-        "${workspaceFolder}/apps/desktop/out/**/*.js",
-        "${workspaceFolder}/apps/backend/dist/**/*.js",
-        "${workspaceFolder}/packages/*/dist/**/*.js"
+        "${workspaceFolder}/win/desktop/out/**/*.js",
+        "${workspaceFolder}/common/backend/dist/**/*.js",
+        "${workspaceFolder}/common/packages/*/dist/**/*.js"
       ]
     },
     {
@@ -45,9 +45,9 @@
       ],
       "sourceMaps": true,
       "outFiles": [
-        "${workspaceFolder}/apps/desktop/out/**/*.js",
-        "${workspaceFolder}/apps/backend/dist/**/*.js",
-        "${workspaceFolder}/packages/*/dist/**/*.js"
+        "${workspaceFolder}/win/desktop/out/**/*.js",
+        "${workspaceFolder}/common/backend/dist/**/*.js",
+        "${workspaceFolder}/common/packages/*/dist/**/*.js"
       ]
     },
     {
@@ -55,7 +55,7 @@
       "type": "chrome",
       "request": "attach",
       "port": 9230,
-      "webRoot": "${workspaceFolder}\\apps\\desktop\\src\\renderer",
+      "webRoot": "${workspaceFolder}\\common\\renderer",
       "sourceMaps": true
     }
   ],

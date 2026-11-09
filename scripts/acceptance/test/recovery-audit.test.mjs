@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildCompletedRecoveryReport,
   selectLatestRestoredTask,
-} from "../../../apps/backend/acceptance/lib/recovery-audit.mjs"
+} from "../../../common/backend/acceptance/lib/recovery-audit.mjs"
 
 describe("recovery acceptance audit", () => {
   it("audits the latest restored task instead of requiring the archived original task to complete", () => {

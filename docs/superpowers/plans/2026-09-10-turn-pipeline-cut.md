@@ -43,11 +43,11 @@ interpret → rule_assembly → source_retrieval
 
 | File | Change |
 | --- | --- |
-| `apps/backend/src/application/turns/turn-orchestrator.ts` | Phase list, synthesize helpers, skip settings pause, inherit discuss evidence, resume mapping, completeTurn without commit_review parse |
-| `apps/backend/src/application/chapters/synopsis-conversation-service.ts` | `listInheritedReadEvidence(projectId)` |
-| `apps/desktop/src/renderer/src/features/status/RightRail.tsx` | Hide skipped turn phases; attach graph group after `dependency_audit` |
-| `apps/backend/test/turn-orchestrator.test.ts` | Expected phase lists / artifact deps |
-| `apps/desktop/test/renderer-ui.test.ts` | Phase list still renders remaining rows |
+| `common/backend/src/application/turns/turn-orchestrator.ts` | Phase list, synthesize helpers, skip settings pause, inherit discuss evidence, resume mapping, completeTurn without commit_review parse |
+| `common/backend/src/application/chapters/synopsis-conversation-service.ts` | `listInheritedReadEvidence(projectId)` |
+| `common/renderer/src/features/status/RightRail.tsx` | Hide skipped turn phases; attach graph group after `dependency_audit` |
+| `common/backend/test/turn-orchestrator.test.ts` | Expected phase lists / artifact deps |
+| `win/desktop/test/renderer-ui.test.ts` | Phase list still renders remaining rows |
 
 ## Resume of old in-flight turns
 

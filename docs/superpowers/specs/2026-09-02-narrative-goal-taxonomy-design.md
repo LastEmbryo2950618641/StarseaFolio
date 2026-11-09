@@ -133,10 +133,10 @@ Agent **不得**静默写库；「自动」= 讨论中自动提案，而非绕�
 
 ## 9. 实施触点（v1）
 
-- `packages/contracts`：`deduction-goals.ts`、`backend-payloads.ts` + 相关性 helper
-- `packages/prompt-contracts`：artifacts + synopsis-discuss / plot-synopsis-guide
-- `apps/backend`：migration 039、database-types、repository、service、discuss 注入过滤
-- `apps/desktop`：goals helpers、popover 徽章/筛选、create/update 传参
+- `common/packages/contracts`：`deduction-goals.ts`、`backend-payloads.ts` + 相关性 helper
+- `common/packages/prompt-contracts`：artifacts + synopsis-discuss / plot-synopsis-guide
+- `common/backend`：migration 039、database-types、repository、service、discuss 注入过滤
+- `win/desktop`：goals helpers、popover 徽章/筛选、create/update 传参
 - 测试：deduction-goals、creation-desk-goals、prompt-contracts
 
 ---

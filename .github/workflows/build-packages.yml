@@ -1,0 +1,84 @@
+name: Build EXE and APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, dev-0.0.1]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Use hoisted dependencies for electron-builder
+        shell: pwsh
+        run: Set-Content .npmrc "node-linker=hoisted`nshamefully-hoist=true`nblockExoticSubdeps=false"
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          vsversion: "2022"
+      - name: Stamp build number
+        shell: pwsh
+        run: |
+          @{ buildNumber = "$env:GITHUB_RUN_NUMBER" } | ConvertTo-Json | Set-Content win/desktop/build-info.json -Encoding utf8
+      - name: Package EXE
+        run: corepack pnpm package:exe
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          npm_config_msvs_version: "2022"
+          GYP_MSVS_VERSION: "2022"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarseaFolio-Windows-${{ github.run_number }}
+          path: win/desktop/release/*.exe
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install workspace dependencies
+        run: corepack pnpm install --frozen-lockfile
+      - name: Install Android dependencies
+        run: npm --prefix android/mobile ci --no-audit --no-fund
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('android/mobile/package-lock.json', 'android/mobile/app.json', 'android/mobile/plugins/**') }}
+      - name: Package APK
+        run: corepack pnpm package:apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarseaFolio-Android-preview-${{ github.run_number }}
+          path: android/mobile/release/*.apk
+          if-no-files-found: error

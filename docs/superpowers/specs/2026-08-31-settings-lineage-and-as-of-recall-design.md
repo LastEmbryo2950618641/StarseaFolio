@@ -281,9 +281,9 @@ Approve payload 可选：`reasonOverride?: string`。
 
 | 层 | 路径 |
 | --- | --- |
-| 迁移 / 类型 | `apps/backend/.../project-migrations.ts`, `database-types.ts` |
+| 迁移 / 类型 | `common/backend/.../project-migrations.ts`, `database-types.ts` |
 | 仓储 / 服务 | 新建 `sqlite-settings-lineage-repository.ts`, `settings-lineage-service.ts` |
 | 写入挂钩 | `settings-extraction-service.ts`, `staging-promote-service.ts`, workspace save / history restore |
-| 契约 / IPC | `packages/contracts`, `backend-facade.ts`, desktop bridge / client |
+| 契约 / IPC | `common/packages/contracts`, `backend-facade.ts`, desktop bridge / client |
 | 树 / UI | `WorkspaceTree.tsx`, `App.tsx`, 新建沿革面板组件；diff 复用 editor 原型 |
 | AI（P1） | `reads.ts`, `synopsis-workspace-reads.ts`, `synopsis-discuss.md`, `settings-query-guide.md` |

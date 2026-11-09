@@ -11,7 +11,7 @@ import console from "node:console"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const pin = JSON.parse(await readFile(join(root, "third-party/lncrawl/upstream.json"), "utf8"))
-export const bundledDirectory = join(root, "apps/desktop/resources/lncrawl")
+export const bundledDirectory = join(root, "win/desktop/resources/lncrawl")
 
 async function sha256(path) {
   const hash = createHash("sha256")

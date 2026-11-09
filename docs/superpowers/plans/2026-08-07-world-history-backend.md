@@ -278,8 +278,8 @@ type HistoryManifest = Readonly<{
 ### 5.1 新建
 
 ```text
-packages/contracts/src/history.ts
-apps/backend/src/application/history/
+common/packages/contracts/src/history.ts
+common/backend/src/application/history/
   history-service.ts
   history-checkout-service.ts
   history-retention-service.ts
@@ -292,16 +292,16 @@ apps/backend/src/application/history/
     workspace-snapshot-port.ts
     history-finalization-repository.ts
     index.ts
-apps/backend/src/infrastructure/history-git/
+common/backend/src/infrastructure/history-git/
   isomorphic-git-history-adapter.ts
   index.ts
-apps/backend/src/infrastructure/filesystem/
+common/backend/src/infrastructure/filesystem/
   node-workspace-snapshot-adapter.ts
-apps/backend/src/infrastructure/sqlite/repositories/
+common/backend/src/infrastructure/sqlite/repositories/
   sqlite-history-repository.ts
   sqlite-history-finalization-repository.ts
   sqlite-active-projection-repository.ts
-apps/backend/test/
+common/backend/test/
   history-git-adapter.test.ts
   history-service.test.ts
   history-checkout.test.ts
@@ -311,31 +311,31 @@ apps/backend/test/
 ### 5.2 修改
 
 ```text
-packages/contracts/src/backend-methods.ts
-packages/contracts/src/backend-payloads.ts
-packages/contracts/src/errors.ts
-packages/contracts/src/index.ts
-apps/backend/package.json
-apps/backend/src/application/index.ts
-apps/backend/src/application/workspace/ports/workspace-port.ts
-apps/backend/src/bootstrap/backend-facade.ts
-apps/backend/src/bootstrap/project-runtime.ts
-apps/backend/src/infrastructure/index.ts
-apps/backend/src/infrastructure/filesystem/index.ts
-apps/backend/src/infrastructure/filesystem/node-internal-store-adapter.ts
-apps/backend/src/infrastructure/sqlite/database-types.ts
-apps/backend/src/infrastructure/sqlite/migrations/project-migrations.ts
-apps/backend/src/infrastructure/sqlite/repositories/index.ts
-apps/backend/src/infrastructure/sqlite/repositories/sqlite-scope-commit-repository.ts
-apps/backend/src/infrastructure/sqlite/repositories/sqlite-task-scope-repository.ts
-apps/backend/src/infrastructure/sqlite/repositories/sqlite-document-repository.ts
-apps/backend/src/infrastructure/sqlite/repositories/sqlite-graph-repository.ts
-apps/backend/src/infrastructure/sqlite/repositories/sqlite-retrieval-repository.ts
-apps/backend/test/sqlite-migrations.test.ts
-apps/backend/test/sqlite-repositories.test.ts
-apps/backend/test/turn-orchestrator.test.ts
-apps/backend/test/filesystem-project-lifecycle.test.ts
-apps/backend/test/architecture.test.ts
+common/packages/contracts/src/backend-methods.ts
+common/packages/contracts/src/backend-payloads.ts
+common/packages/contracts/src/errors.ts
+common/packages/contracts/src/index.ts
+common/backend/package.json
+common/backend/src/application/index.ts
+common/backend/src/application/workspace/ports/workspace-port.ts
+common/backend/src/bootstrap/backend-facade.ts
+common/backend/src/bootstrap/project-runtime.ts
+common/backend/src/infrastructure/index.ts
+common/backend/src/infrastructure/filesystem/index.ts
+common/backend/src/infrastructure/filesystem/node-internal-store-adapter.ts
+common/backend/src/infrastructure/sqlite/database-types.ts
+common/backend/src/infrastructure/sqlite/migrations/project-migrations.ts
+common/backend/src/infrastructure/sqlite/repositories/index.ts
+common/backend/src/infrastructure/sqlite/repositories/sqlite-scope-commit-repository.ts
+common/backend/src/infrastructure/sqlite/repositories/sqlite-task-scope-repository.ts
+common/backend/src/infrastructure/sqlite/repositories/sqlite-document-repository.ts
+common/backend/src/infrastructure/sqlite/repositories/sqlite-graph-repository.ts
+common/backend/src/infrastructure/sqlite/repositories/sqlite-retrieval-repository.ts
+common/backend/test/sqlite-migrations.test.ts
+common/backend/test/sqlite-repositories.test.ts
+common/backend/test/turn-orchestrator.test.ts
+common/backend/test/filesystem-project-lifecycle.test.ts
+common/backend/test/architecture.test.ts
 ```
 
 ---
@@ -345,27 +345,27 @@ apps/backend/test/architecture.test.ts
 ### Task 1: 冻结历史契约与错误类型
 
 **Files:**
-- Create: `packages/contracts/src/history.ts`
-- Modify: `packages/contracts/src/backend-methods.ts`
-- Modify: `packages/contracts/src/backend-payloads.ts`
-- Modify: `packages/contracts/src/errors.ts`
-- Modify: `packages/contracts/src/index.ts`
-- Test: `packages/contracts/test/contracts.test.ts`
+- Create: `common/packages/contracts/src/history.ts`
+- Modify: `common/packages/contracts/src/backend-methods.ts`
+- Modify: `common/packages/contracts/src/backend-payloads.ts`
+- Modify: `common/packages/contracts/src/errors.ts`
+- Modify: `common/packages/contracts/src/index.ts`
+- Test: `common/packages/contracts/test/contracts.test.ts`
 
 - [ ] 定义 `HistoryEntrySummary`、`HistoryBranchSummary`、`HistoryManifest`、`HistoryRetentionPreview` 和状态枚举。
 - [ ] 增加方法：`history.list`、`history.branches`、`history.saveManual`、`history.returnPreviousRound`、`history.continueFrom`、`history.restore`、`history.retention.preview`。
 - [ ] 所有改变状态的方法要求 `operationId`，保证前端重复点击幂等。
 - [ ] 增加类型化错误码：`history_busy`、`history_corrupt`、`history_not_found`、`checkpoint_unavailable`。
-- [ ] 运行 `pnpm vitest run packages/contracts/test/contracts.test.ts`，确认非法上限、非法 entry ID 和缺失 operation ID 被拒绝。
+- [ ] 运行 `pnpm vitest run common/packages/contracts/test/contracts.test.ts`，确认非法上限、非法 entry ID 和缺失 operation ID 被拒绝。
 
 ### Task 2: 增加内部 Git 目录和依赖隔离
 
 **Files:**
-- Modify: `apps/backend/package.json`
+- Modify: `common/backend/package.json`
 - Modify: `pnpm-lock.yaml`
-- Modify: `apps/backend/src/application/workspace/ports/workspace-port.ts`
-- Modify: `apps/backend/src/infrastructure/filesystem/node-internal-store-adapter.ts`
-- Test: `apps/backend/test/filesystem-project-lifecycle.test.ts`
+- Modify: `common/backend/src/application/workspace/ports/workspace-port.ts`
+- Modify: `common/backend/src/infrastructure/filesystem/node-internal-store-adapter.ts`
+- Test: `common/backend/test/filesystem-project-lifecycle.test.ts`
 
 - [ ] 添加 `isomorphic-git` 依赖，不调用系统 Git CLI。
 - [ ] 为 `InternalProjectStore` 增加 `historyGitRef`、`historyCheckoutRef` 和 `historyRecoveryRef`。
@@ -375,9 +375,9 @@ apps/backend/test/architecture.test.ts
 ### Task 3: 增加历史与活动投影 Migration
 
 **Files:**
-- Modify: `apps/backend/src/infrastructure/sqlite/database-types.ts`
-- Modify: `apps/backend/src/infrastructure/sqlite/migrations/project-migrations.ts`
-- Test: `apps/backend/test/sqlite-migrations.test.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/database-types.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/migrations/project-migrations.ts`
+- Test: `common/backend/test/sqlite-migrations.test.ts`
 
 - [ ] 创建第 14 个 Migration 和第 3 节全部表、索引与 generation 字段。
 - [ ] 从现有 committed scope 初始化 `active_scope_refs`。
@@ -388,11 +388,11 @@ apps/backend/test/architecture.test.ts
 ### Task 4: 保持 scope 提交流程并写 active projection
 
 **Files:**
-- Modify: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-task-scope-repository.ts`
-- Modify: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-scope-commit-repository.ts`
-- Modify: `apps/backend/src/application/turns/ports/task-scope-repository.ts`
-- Test: `apps/backend/test/sqlite-repositories.test.ts`
-- Test: `apps/backend/test/turn-orchestrator.test.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/repositories/sqlite-task-scope-repository.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/repositories/sqlite-scope-commit-repository.ts`
+- Modify: `common/backend/src/application/turns/ports/task-scope-repository.ts`
+- Test: `common/backend/test/sqlite-repositories.test.ts`
+- Test: `common/backend/test/turn-orchestrator.test.ts`
 
 - [ ] scope 创建时冻结 `base_generation`。
 - [ ] commit 同时检查 `committed_sequence` 和 `active_generation`。
@@ -404,10 +404,10 @@ apps/backend/test/architecture.test.ts
 ### Task 5: 让现有查询只读取当前世界投影
 
 **Files:**
-- Modify: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-document-repository.ts`
-- Modify: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-retrieval-repository.ts`
-- Modify: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-graph-repository.ts`
-- Test: `apps/backend/test/sqlite-repositories.test.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/repositories/sqlite-document-repository.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/repositories/sqlite-retrieval-repository.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/repositories/sqlite-graph-repository.ts`
+- Test: `common/backend/test/sqlite-repositories.test.ts`
 
 - [ ] `listCommittedChapters` join `active_document_heads`。
 - [ ] committed retrieval exact、短文本和 FTS 查询限定 `scope_id IN active_scope_refs`。
@@ -419,11 +419,11 @@ apps/backend/test/architecture.test.ts
 ### Task 6: 实现隔离的 isomorphic-git 适配器
 
 **Files:**
-- Create: `apps/backend/src/application/history/ports/history-vcs-port.ts`
-- Create: `apps/backend/src/infrastructure/history-git/isomorphic-git-history-adapter.ts`
-- Create: `apps/backend/src/infrastructure/history-git/index.ts`
-- Modify: `apps/backend/src/infrastructure/index.ts`
-- Test: `apps/backend/test/history-git-adapter.test.ts`
+- Create: `common/backend/src/application/history/ports/history-vcs-port.ts`
+- Create: `common/backend/src/infrastructure/history-git/isomorphic-git-history-adapter.ts`
+- Create: `common/backend/src/infrastructure/history-git/index.ts`
+- Modify: `common/backend/src/infrastructure/index.ts`
+- Test: `common/backend/test/history-git-adapter.test.ts`
 
 - [ ] 使用 `writeBlob`、`writeTree`、`writeCommit`、`writeRef` 等 plumbing API 创建 bare 内部历史，不使用用户工作树。
 - [ ] 固定应用 author，不读取 Git config、credential helper、hooks 或 remotes。
@@ -434,11 +434,11 @@ apps/backend/test/architecture.test.ts
 ### Task 7: 实现 workspace 与数据库 manifest 构建
 
 **Files:**
-- Create: `apps/backend/src/application/history/history-manifest-builder.ts`
-- Create: `apps/backend/src/application/history/ports/workspace-snapshot-port.ts`
-- Create: `apps/backend/src/infrastructure/filesystem/node-workspace-snapshot-adapter.ts`
-- Modify: `apps/backend/src/infrastructure/filesystem/index.ts`
-- Test: `apps/backend/test/history-service.test.ts`
+- Create: `common/backend/src/application/history/history-manifest-builder.ts`
+- Create: `common/backend/src/application/history/ports/workspace-snapshot-port.ts`
+- Create: `common/backend/src/infrastructure/filesystem/node-workspace-snapshot-adapter.ts`
+- Modify: `common/backend/src/infrastructure/filesystem/index.ts`
+- Test: `common/backend/test/history-service.test.ts`
 
 - [ ] 从 `WorkspacePort.validate` 的 inventory 读取全部允许的 Markdown 内容。
 - [ ] 基础规则只记录摘要，不写入可恢复 blob。
@@ -449,15 +449,15 @@ apps/backend/test/architecture.test.ts
 ### Task 8: 实现自动保存和历史列表
 
 **Files:**
-- Create: `apps/backend/src/application/history/history-service.ts`
-- Create: `apps/backend/src/application/history/ports/history-repository.ts`
-- Create: `apps/backend/src/application/history/ports/history-finalization-repository.ts`
-- Create: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-history-repository.ts`
-- Create: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-history-finalization-repository.ts`
-- Modify: `apps/backend/src/bootstrap/project-runtime.ts`
-- Modify: `apps/backend/src/bootstrap/backend-facade.ts`
-- Test: `apps/backend/test/history-service.test.ts`
-- Test: `apps/backend/test/turn-orchestrator.test.ts`
+- Create: `common/backend/src/application/history/history-service.ts`
+- Create: `common/backend/src/application/history/ports/history-repository.ts`
+- Create: `common/backend/src/application/history/ports/history-finalization-repository.ts`
+- Create: `common/backend/src/infrastructure/sqlite/repositories/sqlite-history-repository.ts`
+- Create: `common/backend/src/infrastructure/sqlite/repositories/sqlite-history-finalization-repository.ts`
+- Modify: `common/backend/src/bootstrap/project-runtime.ts`
+- Modify: `common/backend/src/bootstrap/backend-facade.ts`
+- Test: `common/backend/test/history-service.test.ts`
+- Test: `common/backend/test/turn-orchestrator.test.ts`
 
 - [ ] `ProjectRuntime` 暴露 `enqueueAutomaticHistory(result)` 和只读 history 查询。
 - [ ] `BackendFacade` 只在 orchestrator 成功回调中排队自动保存；不修改 `TurnOrchestrator`。
@@ -469,11 +469,11 @@ apps/backend/test/architecture.test.ts
 ### Task 9: 建立 context lineage
 
 **Files:**
-- Modify: `apps/backend/src/bootstrap/backend-facade.ts`
-- Modify: `apps/backend/src/application/turns/turn-orchestrator.ts`
-- Modify: `apps/backend/src/application/turns/ports/turn-persistence.ts`
-- Modify: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-turn-persistence.ts`
-- Test: `apps/backend/test/turn-orchestrator.test.ts`
+- Modify: `common/backend/src/bootstrap/backend-facade.ts`
+- Modify: `common/backend/src/application/turns/turn-orchestrator.ts`
+- Modify: `common/backend/src/application/turns/ports/turn-persistence.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/repositories/sqlite-turn-persistence.ts`
+- Test: `common/backend/test/turn-orchestrator.test.ts`
 
 - [ ] `turn.start` 从 `project_history_state` 读取 continuation context ID。
 - [ ] 新 context 创建后写一条旁路 `context_lineage` 记录。
@@ -484,11 +484,11 @@ apps/backend/test/architecture.test.ts
 ### Task 10: 实现完整世界恢复与返回上一轮
 
 **Files:**
-- Create: `apps/backend/src/application/history/history-checkout-service.ts`
-- Create: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-active-projection-repository.ts`
-- Modify: `apps/backend/src/bootstrap/project-runtime.ts`
-- Modify: `apps/backend/src/bootstrap/backend-facade.ts`
-- Test: `apps/backend/test/history-checkout.test.ts`
+- Create: `common/backend/src/application/history/history-checkout-service.ts`
+- Create: `common/backend/src/infrastructure/sqlite/repositories/sqlite-active-projection-repository.ts`
+- Modify: `common/backend/src/bootstrap/project-runtime.ts`
+- Modify: `common/backend/src/bootstrap/backend-facade.ts`
+- Test: `common/backend/test/history-checkout.test.ts`
 
 - [ ] 恢复前查询项目是否存在 running、waiting、committing 或未决 finalization；存在时返回 `history_busy`。
 - [ ] 从 Git 校验并展开目标 Markdown 到内部 checkout 目录。
@@ -502,10 +502,10 @@ apps/backend/test/architecture.test.ts
 ### Task 11: 实现世界线与延迟分叉
 
 **Files:**
-- Modify: `apps/backend/src/application/history/history-service.ts`
-- Modify: `apps/backend/src/application/history/history-checkout-service.ts`
-- Modify: `apps/backend/src/bootstrap/backend-facade.ts`
-- Test: `apps/backend/test/history-checkout.test.ts`
+- Modify: `common/backend/src/application/history/history-service.ts`
+- Modify: `common/backend/src/application/history/history-checkout-service.ts`
+- Modify: `common/backend/src/bootstrap/backend-facade.ts`
+- Test: `common/backend/test/history-checkout.test.ts`
 
 - [ ] `continueFrom` 显式创建分支并切换；普通“恢复到这里”只移动活动历史状态。
 - [ ] `turn.start`、`workspace.save` 和未来章节修订调用统一的 `ensureWritableBranch()`。
@@ -516,11 +516,11 @@ apps/backend/test/architecture.test.ts
 ### Task 12: 实现历史保留上限与 Git 保留边界
 
 **Files:**
-- Create: `apps/backend/src/application/history/history-retention-service.ts`
-- Modify: `apps/backend/src/application/history/history-service.ts`
-- Modify: `apps/backend/src/infrastructure/history-git/isomorphic-git-history-adapter.ts`
-- Modify: `apps/backend/src/bootstrap/backend-facade.ts`
-- Test: `apps/backend/test/history-retention.test.ts`
+- Create: `common/backend/src/application/history/history-retention-service.ts`
+- Modify: `common/backend/src/application/history/history-service.ts`
+- Modify: `common/backend/src/infrastructure/history-git/isomorphic-git-history-adapter.ts`
+- Modify: `common/backend/src/bootstrap/backend-facade.ts`
+- Test: `common/backend/test/history-retention.test.ts`
 
 - [ ] 每次 history entry ready 后读取 `ProjectSettings.history.retentionLimit`。
 - [ ] `null` 不执行删除；有限值按 `createdAt, entryId` 删除全项目最旧 entry。
@@ -533,9 +533,9 @@ apps/backend/test/architecture.test.ts
 ### Task 13: 实现空闲状态手动保存
 
 **Files:**
-- Modify: `apps/backend/src/application/history/history-service.ts`
-- Modify: `apps/backend/src/bootstrap/backend-facade.ts`
-- Test: `apps/backend/test/history-service.test.ts`
+- Modify: `common/backend/src/application/history/history-service.ts`
+- Modify: `common/backend/src/bootstrap/backend-facade.ts`
+- Test: `common/backend/test/history-service.test.ts`
 
 - [ ] 无活动任务时，`history.saveManual` 复用自动保存 manifest 管线并接受名称、备注。
 - [ ] 手动保存不移动 `world_head_entry_id`，只移动 `history_head_entry_id`。
@@ -544,15 +544,15 @@ apps/backend/test/architecture.test.ts
 ### Task 14: 单独实现稳定任务检查点，再开放请求中手动保存
 
 **Files:**
-- Create: `apps/backend/src/core/execution/turn-checkpoint.ts`
-- Create: `apps/backend/src/application/turns/turn-resume-service.ts`
-- Create: `apps/backend/src/infrastructure/sqlite/repositories/sqlite-turn-checkpoint-repository.ts`
-- Modify: `apps/backend/src/application/turns/turn-orchestrator.ts`
-- Modify: `apps/backend/src/bootstrap/backend-facade.ts`
-- Modify: `apps/backend/src/infrastructure/sqlite/database-types.ts`
+- Create: `common/backend/src/core/execution/turn-checkpoint.ts`
+- Create: `common/backend/src/application/turns/turn-resume-service.ts`
+- Create: `common/backend/src/infrastructure/sqlite/repositories/sqlite-turn-checkpoint-repository.ts`
+- Modify: `common/backend/src/application/turns/turn-orchestrator.ts`
+- Modify: `common/backend/src/bootstrap/backend-facade.ts`
+- Modify: `common/backend/src/infrastructure/sqlite/database-types.ts`
 - Add: Migration `015_turn_checkpoints`
-- Test: `apps/backend/test/turn-checkpoint.test.ts`
-- Test: `apps/backend/test/turn-orchestrator.test.ts`
+- Test: `common/backend/test/turn-checkpoint.test.ts`
+- Test: `common/backend/test/turn-orchestrator.test.ts`
 
 - [ ] checkpoint 保存 next phase、phase artifacts 引用、context ID、read evidence、retrieval gaps、usage、budget window、scope、source IDs 和 generation。
 - [ ] 每个阶段成功后先持久化 checkpoint，再进入下一阶段。
@@ -565,10 +565,10 @@ apps/backend/test/architecture.test.ts
 ### Task 15: Electron 接入真实历史 API
 
 **Files:**
-- Modify: `apps/desktop/src/renderer/src/api/client.ts`
-- Modify: `apps/desktop/src/renderer/src/features/status/HistoryPanel.tsx`
-- Modify: `apps/desktop/src/renderer/src/app/App.tsx`
-- Test: `apps/desktop/test/renderer-ui.test.ts`
+- Modify: `common/renderer/src/api/client.ts`
+- Modify: `common/renderer/src/features/status/HistoryPanel.tsx`
+- Modify: `common/renderer/src/app/App.tsx`
+- Test: `win/desktop/test/renderer-ui.test.ts`
 
 - [ ] 删除 HistoryPanel 内部原型数组，改为后端 list/branches/status 数据。
 - [ ] 保存、返回上一轮、比较、从这里继续和设置预览都调用真实 IPC。
@@ -585,11 +585,11 @@ apps/backend/test/architecture.test.ts
 pnpm --filter @worldseed/contracts typecheck
 pnpm --filter @worldseed/backend typecheck
 pnpm --filter @worldseed/desktop typecheck
-pnpm vitest run apps/backend/test/turn-orchestrator.test.ts
-pnpm vitest run apps/backend/test/sqlite-repositories.test.ts
-pnpm vitest run apps/backend/test/sqlite-migrations.test.ts
-pnpm vitest run apps/backend/test/filesystem-project-lifecycle.test.ts
-pnpm vitest run apps/desktop/test/renderer-ui.test.ts
+pnpm vitest run common/backend/test/turn-orchestrator.test.ts
+pnpm vitest run common/backend/test/sqlite-repositories.test.ts
+pnpm vitest run common/backend/test/sqlite-migrations.test.ts
+pnpm vitest run common/backend/test/filesystem-project-lifecycle.test.ts
+pnpm vitest run win/desktop/test/renderer-ui.test.ts
 ```
 
 每完成一个可运行批次再执行：

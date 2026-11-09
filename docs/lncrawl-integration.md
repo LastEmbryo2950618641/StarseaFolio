@@ -6,9 +6,9 @@
 
 官方提供 CLI：`lncrawl search "作品名"`、`lncrawl crawl "作品链接" --noin --format json`。Windows 官方资产是安装包，构建阶段校验固定版本及官方 SHA-256，再在构建机准备真正的 CLI 与完整依赖。最终安装版与便携版都携带这些资源，用户端不再首次下载、安装或启动独立服务。
 
-上游地址、固定版本、安装包地址及摘要统一在 `third-party/lncrawl/upstream.json` 维护。`scripts/packaging/prepare-lncrawl.mjs` 生成 `apps/desktop/resources/lncrawl/`；electron-builder 的 beforePack 钩子强制准备和验证全部资源，缺失时构建失败，不允许发出漏带工具的包。资源包含原版 CLI、依赖、GPL 许可证及对应版本源码归档。大体积生成文件不提交 Git，由构建脚本从上游准备。
+上游地址、固定版本、安装包地址及摘要统一在 `third-party/lncrawl/upstream.json` 维护。`scripts/packaging/prepare-lncrawl.mjs` 生成 `win/desktop/resources/lncrawl/`；electron-builder 的 beforePack 钩子强制准备和验证全部资源，缺失时构建失败，不允许发出漏带工具的包。资源包含原版 CLI、依赖、GPL 许可证及对应版本源码归档。大体积生成文件不提交 Git，由构建脚本从上游准备。
 
-发行包运行时位于 `resources/tools/lncrawl/`，开发环境位于 `apps/desktop/resources/lncrawl/`；后端只读校验并执行这里的程序。抓取数据库和缓存保存在 `<applicationDataRoot>/tools/lncrawl/books/`，不会写入安装目录。运行时缺失、平台不匹配或可执行文件损坏会清楚报错，不自动下载安装。官方 CLI 的站点规则同步、搜书及下载本身仍需联网。
+发行包运行时位于 `resources/tools/lncrawl/`，开发环境位于 `win/desktop/resources/lncrawl/`；后端只读校验并执行这里的程序。抓取数据库和缓存保存在 `<applicationDataRoot>/tools/lncrawl/books/`，不会写入安装目录。运行时缺失、平台不匹配或可执行文件损坏会清楚报错，不自动下载安装。官方 CLI 的站点规则同步、搜书及下载本身仍需联网。
 
 开发机第一次准备：`pnpm prepare:lncrawl`；运行开发模式时会先检查该资源。更新上游时维护 pin 文件并重新构建 StarseaFolio，用户随软件版本更新获得新运行时。
 
@@ -25,7 +25,7 @@
 定向测试：
 
 ```powershell
-pnpm exec vitest run apps/backend/test/lncrawl-reference-service.test.ts apps/backend/test/original-work-tool-gates.test.ts apps/backend/test/original-work-evidence-gate.test.ts
+pnpm exec vitest run common/backend/test/lncrawl-reference-service.test.ts common/backend/test/original-work-tool-gates.test.ts common/backend/test/original-work-evidence-gate.test.ts
 pnpm --filter @worldseed/backend build
 node scripts/acceptance/lncrawl-reference-run.mjs "作品搜索词" "可选来源" "简介中的身份线索1" "简介中的身份线索2"
 ```

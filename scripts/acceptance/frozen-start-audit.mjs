@@ -12,7 +12,7 @@ if (databasePathRef === undefined || runtimeRootRef === undefined || workspaceRo
 
 const repositoryRoot = resolve(import.meta.dirname, "../..")
 const require = createRequire(import.meta.url)
-const Database = require(resolve(repositoryRoot, "apps/backend/node_modules/better-sqlite3"))
+const Database = require(resolve(repositoryRoot, "common/backend/node_modules/better-sqlite3"))
 const databasePath = resolve(databasePathRef)
 const runtimeRoot = resolve(runtimeRootRef)
 const workspaceRoot = resolve(workspaceRootRef)

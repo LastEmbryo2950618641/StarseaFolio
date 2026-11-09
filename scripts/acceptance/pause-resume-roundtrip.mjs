@@ -19,7 +19,7 @@ if (process.env.WORLDSEED_ACCEPTANCE_REAL !== "1") {
 
 const repositoryRoot = resolve(import.meta.dirname, "../..")
 const require = createRequire(import.meta.url)
-const Database = require(resolve(repositoryRoot, "apps/backend/node_modules/better-sqlite3"))
+const Database = require(resolve(repositoryRoot, "common/backend/node_modules/better-sqlite3"))
 const projectId = requiredEnvironment("WORLDSEED_ACCEPTANCE_PROJECT_ID")
 const databasePath = resolve(requiredEnvironment("WORLDSEED_ACCEPTANCE_DB"))
 const workspace = resolve(requiredEnvironment("WORLDSEED_ACCEPTANCE_WORKSPACE"))

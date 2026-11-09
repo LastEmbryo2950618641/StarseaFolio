@@ -12,7 +12,7 @@ const databasePath = resolve(databasePathRef)
 const runtimeRoot = resolve(runtimeRootRef)
 const objectRoot = resolve(runtimeRoot, "projects", projectId, "objects", "documents")
 const require = createRequire(import.meta.url)
-const Database = require(resolve(import.meta.dirname, "../../apps/backend/node_modules/better-sqlite3"))
+const Database = require(resolve(import.meta.dirname, "../../common/backend/node_modules/better-sqlite3"))
 const database = new Database(databasePath, { fileMustExist: true })
 
 try {

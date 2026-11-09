@@ -70,7 +70,7 @@ requestedReads
 ## 3. 模块分层
 
 ```text
-apps/backend/src/
+common/backend/src/
 ├── application/
 │   ├── context/
 │   │   ├── context-assembler.ts
@@ -770,8 +770,8 @@ type GraphRetrievalBudget = {
 | `core/context/turn-context-ledger.ts` | 增加统一 Evidence 追加和全局检索预算快照操作 |
 | `infrastructure/filesystem/node-workspace-adapter.ts` | 实现目录快照、受限 Markdown 读取和版本摘要，不解析世界语义 |
 | `bootstrap/project-runtime.ts` | 组装工作区检索器、图检索器、检索编排器、上下文装配器和检查点仓储 |
-| `packages/contracts` | 增加动态读取请求、证据、预算、目录快照和检查点的 Zod 契约 |
-| `packages/config` | 保存默认检索、上下文压缩和超时参数，业务代码不得重复声明默认值 |
+| `common/packages/contracts` | 增加动态读取请求、证据、预算、目录快照和检查点的 Zod 契约 |
+| `common/packages/config` | 保存默认检索、上下文压缩和超时参数，业务代码不得重复声明默认值 |
 
 上述改造保持端口依赖方向：`core <- application <- infrastructure/bootstrap`。模型适配器、文件系统和 SQLite 之间不能相互直接引用。
 

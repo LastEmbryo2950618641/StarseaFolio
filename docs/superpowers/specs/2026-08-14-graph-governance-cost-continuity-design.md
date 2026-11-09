@@ -308,25 +308,25 @@ phaseRunId、路径和 digest 仅用于审计、恢复和一致性检查，不�
 
 ### 11.1 Contracts 与阶段输入
 
-修改 `apps/backend/src/application/turns/ports/ai-model-port.ts`：
+修改 `common/backend/src/application/turns/ports/ai-model-port.ts`：
 
 - 为 `TurnPhaseInput` 增加可选的 `stageProjection`；
 - 投影与 `artifacts` 分离，避免把应用派生视图伪装成 AI 阶段 artifact；
 - 为 Evidence 版本聚合补充 `versionKey`、`canonicalReadId` 和 `readIdAliases`，模型仍只引用规范化后的单一 read ID；
 - 将引用 alias 归一能力放在应用层组件中，不让编排器或 Prompt 自行解释。
 
-第一批不修改 `packages/contracts` 的公共 Task/IPC 结构。当前 `turn.status` 已通过 `phaseRuns[].result.artifact` 返回阶段结果，桌面端可在该既有边界内展示连续性建议。内部图审核投影不进入公共 IPC 契约；只有后续把阶段结果改为强类型公共 API 时，才单独新增 DTO。
+第一批不修改 `common/packages/contracts` 的公共 Task/IPC 结构。当前 `turn.status` 已通过 `phaseRuns[].result.artifact` 返回阶段结果，桌面端可在该既有边界内展示连续性建议。内部图审核投影不进入公共 IPC 契约；只有后续把阶段结果改为强类型公共 API 时，才单独新增 DTO。
 
 ### 11.2 Prompt contracts
 
-新增 `packages/prompt-contracts/src/stage-projections.ts`：
+新增 `common/packages/prompt-contracts/src/stage-projections.ts`：
 
 - 定义四类投影的 Zod 运行时 Schema 和 TypeScript 类型；
 - 使用 `kind + version` 判别治理审核、结算审核、前沿结算和提交审核投影；
 - 校验 source artifact digest、projection digest、pending scope、覆盖矩阵和未解决问题的结构；
 - 不在 Schema 中枚举人物、势力、地点、物品、事件类型或 AI 自定义出口含义。
 
-修改 `packages/prompt-contracts/src/phase-schemas/artifacts.ts`：
+修改 `common/packages/prompt-contracts/src/phase-schemas/artifacts.ts`：
 
 - 扩展 `dependencyAuditArtifactSchema`，增加场景时间断言；
 - 扩展 `graphSpacetimeSettlementArtifactSchema`，增加断言结算并要求全集覆盖；
@@ -352,7 +352,7 @@ phaseRunId、路径和 digest 仅用于审计、恢复和一致性检查，不�
 
 ### 11.3 Evidence 复用组件
 
-新增 `apps/backend/src/application/context/evidence-version-key.ts`：
+新增 `common/backend/src/application/context/evidence-version-key.ts`：
 
 - 生成统一版本键；
 - 合并同一事实版本的审计引用和机械来源字段；
@@ -365,7 +365,7 @@ phaseRunId、路径和 digest 仅用于审计、恢复和一致性检查，不�
 
 ### 11.4 阶段投影组件
 
-新增 `apps/backend/src/application/turns/graph-governance-stage-projection.ts`：
+新增 `common/backend/src/application/turns/graph-governance-stage-projection.ts`：
 
 - 构建治理审核投影；
 - 构建结算审核投影；
@@ -420,7 +420,7 @@ phaseRunId、路径和 digest 仅用于审计、恢复和一致性检查，不�
 - 保持已有消息顺序和旧消息字节不变；
 - 不在此处判断图语义或时间含义。
 
-修改 `apps/backend/src/infrastructure/models/deepseek/model-reference-view.ts`：
+修改 `common/backend/src/infrastructure/models/deepseek/model-reference-view.ts`：
 
 - 不把 `readIdAliases` 暴露给模型；
 - 注册投影中真正需要模型引用的 canonical read ID、永久图 ID 和 Source ID；
@@ -463,13 +463,13 @@ phaseRunId、路径和 digest 仅用于审计、恢复和一致性检查，不�
 
 第一批直接修改：
 
-- `apps/desktop/src/renderer/src/features/status/RightRail.tsx`：在现有 `PhaseDetails` 基础上增加连续性建议专用分组；
-- `apps/desktop/test/renderer-ui.test.ts`：覆盖 `pass`、`uncertain`、`conflict`、默认折叠以及“建议不改变任务完成态”；
-- `apps/desktop/src/renderer/src/api/client.ts`：仅在需要时为本地 `PhaseRunSnapshot.result` 增加窄化辅助类型，不改 IPC payload。
+- `common/renderer/src/features/status/RightRail.tsx`：在现有 `PhaseDetails` 基础上增加连续性建议专用分组；
+- `win/desktop/test/renderer-ui.test.ts`：覆盖 `pass`、`uncertain`、`conflict`、默认折叠以及“建议不改变任务完成态”；
+- `common/renderer/src/api/client.ts`：仅在需要时为本地 `PhaseRunSnapshot.result` 增加窄化辅助类型，不改 IPC payload。
 
 ### 11.10 Fake 模型与验收工具
 
-修改 `apps/backend/src/infrastructure/models/fake-ai-model-adapter.ts`：
+修改 `common/backend/src/infrastructure/models/fake-ai-model-adapter.ts`：
 
 - `dependency_audit` fixture 返回可确定验证的时间断言；
 - `graph_spacetime_settlement` 恰好覆盖全部断言；
@@ -482,8 +482,8 @@ phaseRunId、路径和 digest 仅用于审计、恢复和一致性检查，不�
 - `scripts/acceptance/full-chain-run.mjs`：记录每阶段投影字符、输入 Token、KV 命中和调用数；
 - `scripts/acceptance/lib/full-chain-audit.mjs`：增加单链字节前缀、投影降重和阶段完整性审核；
 - `scripts/acceptance/forgotten-context-continuation.mjs`：按 Evidence 版本键审计压缩后召回，不再按 `readId` 误计重复事实；
-- `apps/backend/acceptance/audit-project.mjs`：增加时间断言覆盖、投影 digest 和建议不阻断提交检查；
-- `apps/backend/acceptance/lib/graph-audit.mjs`：继续审核验证探针，并增加断言 assessment 的恰好覆盖。
+- `common/backend/acceptance/audit-project.mjs`：增加时间断言覆盖、投影 digest 和建议不阻断提交检查；
+- `common/backend/acceptance/lib/graph-audit.mjs`：继续审核验证探针，并增加断言 assessment 的恰好覆盖。
 
 ### 11.11 明确不改范围
 

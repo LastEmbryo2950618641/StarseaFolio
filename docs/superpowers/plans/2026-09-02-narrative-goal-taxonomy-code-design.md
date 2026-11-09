@@ -57,7 +57,7 @@ type GoalTaxonomyInput = Readonly<{
 
 ### 3.1 Desktop hook（P0）
 
-**文件：** `apps/desktop/src/renderer/src/features/editor/use-deduction-goals.ts`
+**文件：** `common/renderer/src/features/editor/use-deduction-goals.ts`
 
 ```ts
 addGoal(content: string, taxonomy?: GoalTaxonomyInput): Promise<void>
@@ -120,8 +120,8 @@ onUpdateGoal(goalId: string, patch: { content?: string } & GoalTaxonomyInput): P
 
 | 文件 | 职责 |
 | --- | --- |
-| `packages/contracts/src/deduction-goals.ts` | 模型、提案、helpers（已完成） |
-| `packages/contracts/src/backend-payloads.ts` | IPC 载荷（已完成） |
+| `common/packages/contracts/src/deduction-goals.ts` | 模型、提案、helpers（已完成） |
+| `common/packages/contracts/src/backend-payloads.ts` | IPC 载荷（已完成） |
 | `039_deduction_goal_taxonomy` | 列迁移（已完成） |
 | `sqlite-deduction-goals-repository.ts` | 持久化（已完成） |
 | `deduction-goals-service.ts` | 业务 + 过滤注入（补校验） |

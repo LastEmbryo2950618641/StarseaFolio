@@ -1,6 +1,6 @@
 # 服务端 + 安卓：部署与联调
 
-后端与桌面共用 `BackendFacade` / `@worldseed/contracts`；服务器多一个 HTTP/WS 入口。安卓客户端见 [`apps/mobile/README.md`](../apps/mobile/README.md)。
+后端与桌面共用 `BackendFacade` / `@worldseed/contracts`；服务器多一个 HTTP/WS 入口。安卓客户端见 [`android/mobile/README.md`](../android/mobile/README.md)。
 
 ## 安全
 
@@ -14,7 +14,7 @@
 | 变量 | 说明 |
 |------|------|
 | `WORLDSEED_APP_DATA_ROOT` | 服务端数据根（SQLite / 登记项目） |
-| `WORLDSEED_PROMPT_ROOT` | `packages/prompt-contracts` 绝对路径 |
+| `WORLDSEED_PROMPT_ROOT` | `common/packages/prompt-contracts` 绝对路径 |
 | `WORLDSEED_HTTP_HOST` | 默认 `127.0.0.1` |
 | `WORLDSEED_HTTP_PORT` | 默认 `8787` |
 | `WORLDSEED_API_TOKEN` 或 `WORLDSEED_API_TOKENS` | Bearer 鉴权（逗号分隔多 token） |
@@ -26,7 +26,7 @@
 
 ```bash
 WORLDSEED_APP_DATA_ROOT=/var/lib/worldseed/data
-WORLDSEED_PROMPT_ROOT=/opt/worldseed/packages/prompt-contracts
+WORLDSEED_PROMPT_ROOT=/opt/worldseed/common/packages/prompt-contracts
 WORLDSEED_HTTP_HOST=127.0.0.1
 WORLDSEED_HTTP_PORT=8787
 WORLDSEED_API_TOKEN=replace-with-long-random-token
@@ -67,7 +67,7 @@ Type=simple
 User=worldseed
 WorkingDirectory=/opt/worldseed
 EnvironmentFile=/etc/worldseed/worldseed.env
-ExecStart=/usr/bin/node /opt/worldseed/apps/backend/dist/bootstrap/http-entry.js
+ExecStart=/usr/bin/node /opt/worldseed/common/backend/dist/bootstrap/http-entry.js
 Restart=on-failure
 RestartSec=3
 

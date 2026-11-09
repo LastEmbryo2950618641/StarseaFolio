@@ -20,7 +20,7 @@
 
 ### P0-1 `ChapterContextResolver`
 
-**新建** `apps/backend/src/application/chapters/chapter-context-resolver.ts`
+**新建** `common/backend/src/application/chapters/chapter-context-resolver.ts`
 
 职责：
 - `resolveHeads(projectId)` → 当前 `active_document_heads` 章节映射
@@ -35,7 +35,7 @@
 
 ### P0-2 TurnOrchestrator 接入 supersession
 
-**修改** `apps/backend/src/application/turns/turn-orchestrator.ts`
+**修改** `common/backend/src/application/turns/turn-orchestrator.ts`
 
 - `compactInheritedModelContext`（~707）
 - `executePhase` 模型请求 hydration（~2095）
@@ -46,7 +46,7 @@
 
 ### P0-3 ContextWindowManager 保护 `chapter_revision`
 
-**修改** `apps/backend/src/application/context/context-window-manager.ts`
+**修改** `common/backend/src/application/context/context-window-manager.ts`
 
 - `isNarrativeChapterMessage(kind)` = `canonical_chapter` \| `chapter_revision`
 - 第一阶段不移除叙事类章节消息
@@ -56,7 +56,7 @@
 
 ### P0-4 `chapter_revision` 提交时机
 
-**修改** `apps/backend/src/application/chapters/chapter-revision-service.ts`
+**修改** `common/backend/src/application/chapters/chapter-revision-service.ts`
 
 - `appendChapterRevisionContext` 移到 `commitContent` 完成后（`chapter_registered`）
 - 不再绑定图同步 `try` 块；无 model 时仍追加链消息
@@ -66,8 +66,8 @@
 ### P0-5 持久化查询端口
 
 **修改**
-- `apps/backend/src/application/turns/ports/turn-persistence.ts`
-- `apps/backend/src/infrastructure/sqlite/repositories/sqlite-turn-persistence.ts`
+- `common/backend/src/application/turns/ports/turn-persistence.ts`
+- `common/backend/src/infrastructure/sqlite/repositories/sqlite-turn-persistence.ts`
 
 新增：
 - `listCanonicalChapterMessageSources(projectId)`
@@ -75,8 +75,8 @@
 
 ### P0-6 测试
 
-**新建** `apps/backend/test/chapter-context-resolver.test.ts`  
-**修改** `apps/backend/test/context-window-manager.test.ts`
+**新建** `common/backend/test/chapter-context-resolver.test.ts`
+**修改** `common/backend/test/context-window-manager.test.ts`
 
 覆盖：
 - stale `canonical_chapter` 被 head 正文替换

@@ -1,12 +1,12 @@
 import { join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-import { PROTOCOL_VERSION } from "../../packages/contracts/dist/index.js"
+import { PROTOCOL_VERSION } from "../../common/packages/contracts/dist/index.js"
 
 const workspaceRootRef = "C:\\Users\\liuqi\\Documents\\NBook\\TestDev"
 const applicationDataRoot = join(process.env.APPDATA ?? "", "@worldseed", "desktop", "runtime")
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..")
-const backendEntry = pathToFileURL(join(repoRoot, "apps/backend/dist/index.js")).href
+const backendEntry = pathToFileURL(join(repoRoot, "common/backend/dist/index.js")).href
 
 const {
   NodeInternalStoreAdapter,

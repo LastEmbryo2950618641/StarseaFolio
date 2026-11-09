@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "星海余页",
+    "slug": "worldseed-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "com.worldseed.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1419"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.worldseed.mobile"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "apiBaseUrl": "",
+      "apiTokenConfiguredInApp": true
+    },
+    "plugins": [
+      "./plugins/with-http-client.cjs",
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}

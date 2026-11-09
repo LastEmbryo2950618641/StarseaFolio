@@ -28,16 +28,16 @@
 
 | File | Responsibility |
 | --- | --- |
-| `apps/backend/src/infrastructure/sqlite/migrations/project-migrations.ts` | 046 draft versions + latest_draft_version_id; 047 optional one-active index |
-| `apps/backend/src/infrastructure/sqlite/database-types.ts` | Row types |
-| `apps/backend/src/infrastructure/sqlite/repositories/sqlite-revision-draft-version-repository.ts` | Draft version CRUD |
-| `packages/contracts/src/chapter.ts` | Draft version DTOs |
-| `packages/contracts/src/backend-methods.ts` + `backend-payloads.ts` | IPC |
-| `apps/backend/src/application/chapters/chapter-revision-service.ts` | start baseline; append/restore |
-| `apps/backend/src/bootstrap/backend-facade.ts` | Dispatch |
-| `apps/desktop/.../App.tsx` | Drop auto-apply; rail send → discuss; setFocus on open |
-| `apps/desktop/.../ChapterWorkspaceRail.tsx` | Compact discuss composer |
-| `packages/prompt-contracts/.../artifacts.ts` + `synopsis-discuss.md` | Draft proposal + choices |
+| `common/backend/src/infrastructure/sqlite/migrations/project-migrations.ts` | 046 draft versions + latest_draft_version_id; 047 optional one-active index |
+| `common/backend/src/infrastructure/sqlite/database-types.ts` | Row types |
+| `common/backend/src/infrastructure/sqlite/repositories/sqlite-revision-draft-version-repository.ts` | Draft version CRUD |
+| `common/packages/contracts/src/chapter.ts` | Draft version DTOs |
+| `common/packages/contracts/src/backend-methods.ts` + `backend-payloads.ts` | IPC |
+| `common/backend/src/application/chapters/chapter-revision-service.ts` | start baseline; append/restore |
+| `common/backend/src/bootstrap/backend-facade.ts` | Dispatch |
+| `win/desktop/.../App.tsx` | Drop auto-apply; rail send → discuss; setFocus on open |
+| `win/desktop/.../ChapterWorkspaceRail.tsx` | Compact discuss composer |
+| `common/packages/prompt-contracts/.../artifacts.ts` + `synopsis-discuss.md` | Draft proposal + choices |
 
 ---
 

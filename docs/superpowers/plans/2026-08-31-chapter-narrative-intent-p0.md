@@ -23,7 +23,7 @@
 ### Task 1: Contracts — `ChapterNarrativeIntent`
 
 **Files:**
-- Modify: `packages/contracts/src/backend-payloads.ts`
+- Modify: `common/packages/contracts/src/backend-payloads.ts`
 - Test: covered via backend schema parse in later tests
 
 **Interfaces:**
@@ -37,9 +37,9 @@
 ### Task 2: Appendix helper + unit tests
 
 **Files:**
-- Create: `apps/backend/src/application/settings/chapter-narrative-intent-policy.ts`
-- Modify: `apps/backend/src/application/settings/index.ts`
-- Test: `apps/backend/test/chapter-narrative-intent-policy.test.ts`
+- Create: `common/backend/src/application/settings/chapter-narrative-intent-policy.ts`
+- Modify: `common/backend/src/application/settings/index.ts`
+- Test: `common/backend/test/chapter-narrative-intent-policy.test.ts`
 
 **Interfaces:**
 - Consumes: `ChapterNarrativeIntent`, `AIPhase`
@@ -58,10 +58,10 @@ Assert appendix contains 边界节奏 / 因果焦点 for `draft` + `synopsis_dis
 ### Task 3: Wire discuss + draft injection + persistence
 
 **Files:**
-- Modify: `apps/backend/src/application/turns/ports/ai-model-port.ts` (`TurnPhaseInput.chapterIntent?`)
-- Modify: `apps/backend/src/application/turns/turn-orchestrator.ts` (`TurnOrchestratorInput` + `executePhase` append)
-- Modify: `apps/backend/src/application/chapters/synopsis-conversation-service.ts` (`send` + `runSynopsisDiscuss`)
-- Modify: `apps/backend/src/bootstrap/backend-facade.ts` (send / beginTurn / startTurn / startWorkflow / resume recover)
+- Modify: `common/backend/src/application/turns/ports/ai-model-port.ts` (`TurnPhaseInput.chapterIntent?`)
+- Modify: `common/backend/src/application/turns/turn-orchestrator.ts` (`TurnOrchestratorInput` + `executePhase` append)
+- Modify: `common/backend/src/application/chapters/synopsis-conversation-service.ts` (`send` + `runSynopsisDiscuss`)
+- Modify: `common/backend/src/bootstrap/backend-facade.ts` (send / beginTurn / startTurn / startWorkflow / resume recover)
 
 - [ ] **Step 1: Pass `chapterIntent` through facade → orchestrator / discuss**
 - [ ] **Step 2: Append appendix after base phase prompt (compose with worldDivergence when both present)**
@@ -73,10 +73,10 @@ Assert appendix contains 边界节奏 / 因果焦点 for `draft` + `synopsis_dis
 ### Task 4: Desktop UI + payload send
 
 **Files:**
-- Modify: `apps/desktop/src/renderer/src/features/editor/SynopsisConversationComposer.tsx`
-- Modify: `apps/desktop/src/renderer/src/features/editor/EditorArea.tsx`
-- Modify: `apps/desktop/src/renderer/src/app/App.tsx`
-- Modify: `apps/desktop/test/renderer-ui.test.ts`
+- Modify: `common/renderer/src/features/editor/SynopsisConversationComposer.tsx`
+- Modify: `common/renderer/src/features/editor/EditorArea.tsx`
+- Modify: `common/renderer/src/app/App.tsx`
+- Modify: `win/desktop/test/renderer-ui.test.ts`
 
 - [ ] **Step 1: State defaults + two selects with tooltips**
 - [ ] **Step 2: Include `chapterIntent` on `synopsis.conversation.send`, `beginTurn`, `turn.start`

@@ -237,7 +237,7 @@ UI **不**直接啃原始 bags 拼时序；也不在客户端用时间戳猜并�
 
 | 层 | 文件 |
 | --- | --- |
-| 契约 | `packages/contracts/src/synopsis.ts` |
+| 契约 | `common/packages/contracts/src/synopsis.ts` |
 | 迁移 | `project-migrations` + `editing_json` |
 | Hub | `synopsis-conversation-stream-hub.ts` |
 | 服务 | `synopsis-conversation-service.ts`（发射 + 停假 search） |

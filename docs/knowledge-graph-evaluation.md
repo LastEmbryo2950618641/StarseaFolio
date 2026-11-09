@@ -10,11 +10,11 @@ Worldseed 的图治理维护可修订的知识图谱，并通过检索投影和 
 
 | 实现 | 已提供的能力 | 仍需独立验证 |
 | --- | --- | --- |
-| `apps/backend/src/application/turns/verification-probe-coordinator.ts` | 应用真实执行探针，要求每个执行结果被评估一次 | 评估结论是否与独立标准事实一致 |
-| `apps/backend/acceptance/lib/graph-audit.mjs` | 探针覆盖、时序声明在多个阶段中的覆盖 | 声明本身是否正确、是否遗漏正文事实 |
+| `common/backend/src/application/turns/verification-probe-coordinator.ts` | 应用真实执行探针，要求每个执行结果被评估一次 | 评估结论是否与独立标准事实一致 |
+| `common/backend/acceptance/lib/graph-audit.mjs` | 探针覆盖、时序声明在多个阶段中的覆盖 | 声明本身是否正确、是否遗漏正文事实 |
 | `scripts/acceptance/lib/graph-cost-ab-audit.mjs` | 成对输入的 Token、耗时及流程检查 | 同等成本下的事实正确性与检索收益 |
-| `apps/backend/src/infrastructure/sqlite/repositories/sqlite-retrieval-repository.ts` | 检索投影、FTS、BM25、短文本及子串匹配 | 别名、中文短名字、同义改写的召回 |
-| `apps/backend/src/bootstrap/backend-facade.ts` | `world.query`、`graph.neighborhood` | 独立查询上下文、历史快照和证据评分的评测适配 |
+| `common/backend/src/infrastructure/sqlite/repositories/sqlite-retrieval-repository.ts` | 检索投影、FTS、BM25、短文本及子串匹配 | 别名、中文短名字、同义改写的召回 |
+| `common/backend/src/bootstrap/backend-facade.ts` | `world.query`、`graph.neighborhood` | 独立查询上下文、历史快照和证据评分的评测适配 |
 | `docs/full-chain-validation.md` | 已提出真实长跑、远期召回、历史与世界线验收要求 | 需要真实运行证据及人工复核的答案，文档要求不代表已通过 |
 
 特别注意：当前检索仓库中的 `semanticText` 经由词法检索使用，不能仅凭字段名认定具有向量语义召回能力。图谱拓扑由治理生成，同一事实可以有多种合理表示，不应强求与某套标准节点 UUID、节点数量或三元组结构完全相同。

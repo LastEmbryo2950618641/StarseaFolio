@@ -137,7 +137,7 @@ P1 去掉 proposals 表写入（结构预留），保留 progress + 用户 CRUD 
 
 ## 9. 实施顺序（8 步）
 
-1. `packages/contracts/src/deduction-goals.ts` + backend-payloads  
+1. `common/packages/contracts/src/deduction-goals.ts` + backend-payloads
 2. Migration 032 + `database-types.ts`  
 3. `sqlite-deduction-goals-repository.ts`  
 4. `deduction-goals-service.ts`  

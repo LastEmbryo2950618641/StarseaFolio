@@ -9,7 +9,7 @@ import { chapterFiles, connectElectron, invokeBackend } from "./lib/electron-bac
 
 const require = createRequire(import.meta.url)
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
-const Database = require(resolve(repositoryRoot, "apps/backend/node_modules/better-sqlite3"))
+const Database = require(resolve(repositoryRoot, "common/backend/node_modules/better-sqlite3"))
 const projectId = requiredEnvironment("WORLDSEED_ACCEPTANCE_PROJECT_ID")
 const databasePath = resolve(requiredEnvironment("WORLDSEED_ACCEPTANCE_DB"))
 const workspace = resolve(requiredEnvironment("WORLDSEED_ACCEPTANCE_WORKSPACE"))

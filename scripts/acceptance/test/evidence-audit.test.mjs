@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { deduplicateEvidenceByVersion, readEvidenceProjectionText } from "../lib/evidence-audit.mjs"
 
 const require = createRequire(import.meta.url)
-const Database = require(resolve(import.meta.dirname, "../../../apps/backend/node_modules/better-sqlite3"))
+const Database = require(resolve(import.meta.dirname, "../../../common/backend/node_modules/better-sqlite3"))
 const databases = []
 
 afterEach(() => {

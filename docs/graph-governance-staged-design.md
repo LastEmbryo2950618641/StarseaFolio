@@ -427,11 +427,11 @@ Renderer 不读取模型 artifact，不自行计算容量，也不根据字段�
 
 后端预计修改：
 
-- `packages/contracts`：阶段枚举、阶段结果和进度 DTO；
-- `packages/prompt-contracts`：五个阶段 Prompt、Schema、引用和跨阶段契约；
-- `apps/backend/application/turns`：新增 coordinator、候选 overlay、组合器和失效策略；
+- `common/packages/contracts`：阶段枚举、阶段结果和进度 DTO；
+- `common/packages/prompt-contracts`：五个阶段 Prompt、Schema、引用和跨阶段契约；
+- `common/backend/application/turns`：新增 coordinator、候选 overlay、组合器和失效策略；
 - `TurnOrchestrator`：把单体阶段替换为 coordinator 调用，保留外围预算、检查点和最终化；
-- `apps/backend/infrastructure/sqlite`：复用 `phase_runs`，仅在需要查询机械容量轮次时增加运行记录；
+- `common/backend/infrastructure/sqlite`：复用 `phase_runs`，仅在需要查询机械容量轮次时增加运行记录；
 - `DeepSeekAiModelAdapter`：保持通用，不增加图领域判断，仅加载新阶段 Schema；
 - Fake adapter、验收脚本和测试 fixture：按新阶段生成最小合法 artifact。
 

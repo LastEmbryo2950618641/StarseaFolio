@@ -2,10 +2,10 @@ import { createRequire } from "node:module"
 import { resolve } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { auditTemporalContinuityCoverage, auditVerificationProbeCoverage } from "../../../apps/backend/acceptance/lib/graph-audit.mjs"
+import { auditTemporalContinuityCoverage, auditVerificationProbeCoverage } from "../../../common/backend/acceptance/lib/graph-audit.mjs"
 
 const require = createRequire(import.meta.url)
-const Database = require(resolve(import.meta.dirname, "../../../apps/backend/node_modules/better-sqlite3"))
+const Database = require(resolve(import.meta.dirname, "../../../common/backend/node_modules/better-sqlite3"))
 const databases = []
 
 afterEach(() => {

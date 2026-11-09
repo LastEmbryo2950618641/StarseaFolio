@@ -169,7 +169,7 @@ type PhaseRequestEnvelope = {
 
 模型引用只允许当前模型可见输入中的 `evidence_*`、`node_*`、`link_*` 永久 ID 和当前 artifact 声明的 `local:*`。实现不得提供兜底别名，也不得把出现规划中的数量或动作解释为图治理的代码级上限；图的创建、复用、编辑、重构和归档方案由 AI 自审阶段决定。
 
-Zod Schema 的唯一来源为 `packages/contracts` 和 `packages/prompt-contracts`，禁止在 Renderer、应用用例或 DeepSeek 适配器中重复声明。
+Zod Schema 的唯一来源为 `common/packages/contracts` 和 `common/packages/prompt-contracts`，禁止在 Renderer、应用用例或 DeepSeek 适配器中重复声明。
 
 ## 4. SQLite Schema 与迁移冻结
 
@@ -404,7 +404,7 @@ const defaultWorldEvolutionProfile = {
 平台资源只读且随协议版本发布：
 
 ```text
-packages/prompt-contracts/
+common/packages/prompt-contracts/
 ├── src/
 │   ├── phase-schemas/
 │   ├── prompt-registry.ts
@@ -489,7 +489,7 @@ base-rules.md
 
 本文冻结后即可开始编码。编码过程中必须满足以下守门条件：
 
-1. `packages/contracts` 和 `packages/prompt-contracts` 按本文路径创建；
+1. `common/packages/contracts` 和 `common/packages/prompt-contracts` 按本文路径创建；
 2. Migration `001` 至 `007` 的字段、索引和 JSON 版本不能由业务代码临时决定；
 3. DeepSeek 配置只从安全存储/开发环境读取，代理和缓存 token 映射必须有测试；
 4. Fake AI 必须先按本文契约跑通一轮，并在失败时保留 pending；

@@ -6,8 +6,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `packages/contracts/src/deduction-goals.ts` | 共享文案 helper |
-| `apps/desktop/.../creation-desk-goals.ts` | `resolveGoalRowStatus` 接 kind 映射 |
+| `common/packages/contracts/src/deduction-goals.ts` | 共享文案 helper |
+| `win/desktop/.../creation-desk-goals.ts` | `resolveGoalRowStatus` 接 kind 映射 |
 | `CreationDeskGoalsPopover.tsx` | 展开区标题 / 空态提示 |
 | `CreationDeskProgressReview.tsx` | 复盘按钮文案 |
 | `synopsis-discuss.md` / `plot-synopsis-guide.md` | Agent 约定 |

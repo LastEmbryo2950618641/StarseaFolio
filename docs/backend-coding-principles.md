@@ -206,7 +206,7 @@ import { buildInternalPrompt } from "../turns/internal/prompt-builder";
 跨模块协作只能使用：
 
 - 应用层声明的端口；
-- `packages/contracts` 中的稳定 DTO；
+- `common/packages/contracts` 中的稳定 DTO；
 - 已注册的版本化应用事件。
 
 例如，推演模块需要保存章节时调用 `ChapterWriterPort`，而不是导入章节模块的 SQLite Repository。

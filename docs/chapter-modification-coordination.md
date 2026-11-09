@@ -337,9 +337,9 @@ Turn 3 → ch3@v1 committed
 
 ### 8.2 扩展类型
 
-- `packages/contracts/src/chapter.ts` — `ChapterIndex`、`ChapterLineage`、`ResolvedChapter`、`EditorSurfaceMode`
-- `packages/contracts/src/model-context.ts` — `chapter_revision` 结构化 metadata；可选 `revision_conversation` kind（仅内部组装）
-- `packages/contracts/src/events.ts` — `chapter.resolved.changed`、`chapter.lineage.stale`
+- `common/packages/contracts/src/chapter.ts` — `ChapterIndex`、`ChapterLineage`、`ResolvedChapter`、`EditorSurfaceMode`
+- `common/packages/contracts/src/model-context.ts` — `chapter_revision` 结构化 metadata；可选 `revision_conversation` kind（仅内部组装）
+- `common/packages/contracts/src/events.ts` — `chapter.resolved.changed`、`chapter.lineage.stale`
 
 ### 8.3 持久化
 

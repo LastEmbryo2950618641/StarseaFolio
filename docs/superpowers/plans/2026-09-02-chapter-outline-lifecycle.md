@@ -22,7 +22,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `apps/backend/src/core/chapters/synopsis-path.ts`（或拆 outline） | 细纲后缀、derive/parse/is |
+| `common/backend/src/core/chapters/synopsis-path.ts`（或拆 outline） | 细纲后缀、derive/parse/is |
 | `workspace-policy.ts` + desktop locks | 细纲可写 |
 | `chapter-synopsis-service.ts` | 发布后不删；可选归档细纲 |
 | `synopsis-conversation-service.ts` | bootstrap 细纲为主；写 outlineBody |

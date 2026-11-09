@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-import { PROTOCOL_VERSION } from "../../packages/contracts/dist/index.js"
+import { PROTOCOL_VERSION } from "../../common/packages/contracts/dist/index.js"
 
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..")
 const workspaceRootRef = resolve(process.env.WORLDSEED_ACCEPTANCE_WORKSPACE
@@ -12,15 +12,15 @@ const applicationDataRoot = process.env.WORLDSEED_APPLICATION_DATA_ROOT
   ?? join(process.env.APPDATA ?? "", "@worldseed", "desktop", "runtime")
 const reportPath = resolve(process.env.WORLDSEED_ACCEPTANCE_BOOTSTRAP_REPORT ?? join(repoRoot, ".worldseed-data/acceptance/current/synopsis-desk-bootstrap.json"))
 
-const backendEntry = pathToFileURL(join(repoRoot, "apps/backend/dist/index.js")).href
-const fakeModelEntry = pathToFileURL(join(repoRoot, "apps/backend/dist/infrastructure/models/fake-ai-model-adapter.js")).href
+const backendEntry = pathToFileURL(join(repoRoot, "common/backend/dist/index.js")).href
+const fakeModelEntry = pathToFileURL(join(repoRoot, "common/backend/dist/infrastructure/models/fake-ai-model-adapter.js")).href
 
 const { BackendContainer, BackendFacade } = await import(backendEntry)
 const { FakeAiModelAdapter } = await import(fakeModelEntry)
 
 const container = await BackendContainer.open({
   applicationDataRoot,
-  promptPackageRoot: join(repoRoot, "packages/prompt-contracts"),
+  promptPackageRoot: join(repoRoot, "common/packages/prompt-contracts"),
   model: new FakeAiModelAdapter(),
 })
 const facade = new BackendFacade(container)
