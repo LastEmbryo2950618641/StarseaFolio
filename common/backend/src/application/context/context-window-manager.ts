@@ -1,4 +1,4 @@
-import type { ModelContextMessage } from "@worldseed/contracts"
+import type { ModelContextMessage } from "@starseafolio/contracts"
 
 const MODEL_MESSAGE_OVERHEAD_TOKENS = 8
 

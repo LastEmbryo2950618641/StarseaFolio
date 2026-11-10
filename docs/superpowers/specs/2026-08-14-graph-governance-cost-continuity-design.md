@@ -577,9 +577,9 @@ phaseRunId、路径和 digest 仅用于审计、恢复和一致性检查，不�
 
 按以下顺序执行，前一层失败时不进入真实模型测试：
 
-1. `pnpm --filter @worldseed/prompt-contracts test`：Schema、引用覆盖和 Prompt 资源；
-2. `pnpm --filter @worldseed/backend test`：Evidence、投影、编排、Fake 模型、恢复和 Finalization；
-3. `pnpm --filter @worldseed/desktop typecheck` 与根级 `pnpm test`：UI 窄化、展示和跨包回归；
+1. `pnpm --filter @starseafolio/prompt-contracts test`：Schema、引用覆盖和 Prompt 资源；
+2. `pnpm --filter @starseafolio/backend test`：Evidence、投影、编排、Fake 模型、恢复和 Finalization；
+3. `pnpm --filter @starseafolio/desktop typecheck` 与根级 `pnpm test`：UI 窄化、展示和跨包回归；
 4. `pnpm verify:baseline`：全仓测试、类型检查和构建；
 5. `pnpm verify:forgotten-continuation`、`pnpm verify:recovery`、`pnpm verify:history`：压缩召回、暂停恢复和历史切换；
 6. 相同历史保存点执行至少三组真实模型配对 A/B，运行 `pnpm verify:graph-cost-ab-compare -- <reports...>` 通过后，再运行 `pnpm verify:audit` 和 `pnpm verify:all`。

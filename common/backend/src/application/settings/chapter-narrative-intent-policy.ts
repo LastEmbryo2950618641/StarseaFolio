@@ -1,4 +1,4 @@
-import type { AIPhase, ChapterNarrativeIntent } from "@worldseed/contracts"
+import type { AIPhase, ChapterNarrativeIntent } from "@starseafolio/contracts"
 
 import {
   AUTO_DESCRIPTION_RULE_PATH,

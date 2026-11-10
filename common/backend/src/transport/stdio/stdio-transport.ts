@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline"
 
-import type { ClientResponse } from "@worldseed/contracts"
+import type { ClientResponse } from "@starseafolio/contracts"
 
 import type { BackendFacade } from "../../bootstrap/backend-facade.js"
 

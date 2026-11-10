@@ -1,5 +1,5 @@
-import type { PhaseResultEnvelope, ProjectSettings } from "@worldseed/contracts"
-import { defaultProjectSettings } from "@worldseed/config"
+import type { PhaseResultEnvelope, ProjectSettings } from "@starseafolio/contracts"
+import { defaultProjectSettings } from "@starseafolio/config"
 
 import { digest } from "../../core/index.js"
 import { scoreWebSearchHit } from "../retrieval/web-search-relevance.js"

@@ -1,4 +1,4 @@
-import type { PROTOCOL_VERSION, ProjectId } from "@worldseed/contracts"
+import type { PROTOCOL_VERSION, ProjectId } from "@starseafolio/contracts"
 
 export const PROJECT_MANIFEST_VERSION = 1 as const
 

@@ -1,10 +1,10 @@
-# Worldseed：IDE 式桌面工作台 UI 设计
+# StarseaFolio：IDE 式桌面工作台 UI 设计
 
 > 本文定义目标界面与交互，不代表界面已经接通真实后端。静态原型、模拟历史数据和可点击演示必须与真实功能分开标注，当前实现状态以 [设计与实施状态](implementation-status.md) 为准。
 
 ## 1. 设计目标
 
-Worldseed 采用接近 IntelliJ IDEA 的桌面 IDE 排版，面向长期创作和反复推演，而不是一次性表单或聊天页面。
+StarseaFolio 采用接近 IntelliJ IDEA 的桌面 IDE 排版，面向长期创作和反复推演，而不是一次性表单或聊天页面。
 
 核心工作流：
 
@@ -26,7 +26,7 @@ Worldseed 采用接近 IntelliJ IDEA 的桌面 IDE 排版，面向长期创作�
 
 ```mermaid
 flowchart TD
-    A["启动 Worldseed"] --> B{"是否存在最近项目？"}
+    A["启动 StarseaFolio"] --> B{"是否存在最近项目？"}
     B -->|是| C["显示最近项目和项目目录"]
     B -->|否| D["显示新建项目和打开项目"]
     C --> E["新建项目"]
@@ -41,7 +41,7 @@ flowchart TD
 
 ### 2.1 项目选择页
 
-- 左侧显示 Worldseed 项目标识和最近项目；
+- 左侧显示 StarseaFolio 项目标识和最近项目；
 - 中央显示项目卡片：项目名、工作目录、最近打开时间、最近章节和当前图规模；
 - 右侧提供“新建项目”和“打开项目”操作；
 - 打开项目时，应用先从内部项目注册表定位该工作目录对应的有效 `ProjectManifest`，再校验五个固定顶级目录和 Markdown 文件限制；工作目录移动后必须显式重新关联，不能静默创建替代项目；
@@ -94,7 +94,7 @@ flowchart TD
 底部是一行始终可见的 IDE 环境状态栏，主要展示当前编辑和工作目录环境，不重复承载右侧世界推演详情。状态栏从左到右显示：
 
 ```text
-UTF-8  |  LF  |  Markdown  |  已保存  |  C:\Projects\Worldseed\设定集\盐雾城.md
+UTF-8  |  LF  |  Markdown  |  已保存  |  C:\Projects\StarseaFolio\设定集\盐雾城.md
 继承环境：RuleSnapshot rs-00042 / 3 个 Skill  |  归档删除：4/9  [██████░░░░]  44%
 ```
 
@@ -614,6 +614,6 @@ sequenceDiagram
 
 ## 12. 最终定义
 
-Worldseed 的 UI 是一个围绕持久化动态图的 IDE：
+StarseaFolio 的 UI 是一个围绕持久化动态图的 IDE：
 
 > 左侧管理用户可编辑的 Markdown 世界材料，中央进行规则驱动的创作和正文工作，右侧展示 AI 当前如何读取、推演、治理图和让世界自洽演化；用户看到的是完整过程，但不能绕过基础规则直接破坏世界连续性。

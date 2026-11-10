@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { ProjectId } from "@worldseed/contracts"
+import type { ProjectId } from "@starseafolio/contracts"
 
 import { DeductionGoalsService } from "../src/application/chapters/deduction-goals-service.js"
 

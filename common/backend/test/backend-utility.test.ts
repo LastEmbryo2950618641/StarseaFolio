@@ -11,7 +11,7 @@ import {
   PROTOCOL_VERSION,
   runtimeMetricsSnapshotSchema,
   type ClientResponse,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import { afterEach, describe, expect, it } from "vitest"
 
 import {

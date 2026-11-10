@@ -33,7 +33,7 @@ describe("runtime logger", () => {
     })
 
     const line = readFileSync(logFile, "utf8").trim()
-    const record = JSON.parse(line.replace(/^\[Worldseed\] /u, "")) as Record<string, unknown>
+    const record = JSON.parse(line.replace(/^\[StarseaFolio\] /u, "")) as Record<string, unknown>
     expect(record).toMatchObject({
       component: "turn-orchestrator",
       event: "phase.completed",

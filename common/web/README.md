@@ -13,9 +13,9 @@
 ```bash
 # 仓库根
 pnpm install
-pnpm --filter @worldseed/contracts build
-pnpm --filter @worldseed/config build
-pnpm --filter @worldseed/web dev
+pnpm --filter @starseafolio/contracts build
+pnpm --filter @starseafolio/config build
+pnpm --filter @starseafolio/web dev
 ```
 
 浏览器打开 `http://localhost:5173`。默认 API：`http://111.229.32.85`。
@@ -33,7 +33,7 @@ location.reload()
 ## 构建
 
 ```bash
-pnpm --filter @worldseed/web build
+pnpm --filter @starseafolio/web build
 ```
 
 产物在 `common/web/dist`，可挂到 Nginx 静态目录。

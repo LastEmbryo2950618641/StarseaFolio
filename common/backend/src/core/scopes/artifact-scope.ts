@@ -4,7 +4,7 @@ import type {
   TaskId,
   TurnId,
   Visibility,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 export type ArtifactScope = Readonly<{
   scopeId: ScopeId

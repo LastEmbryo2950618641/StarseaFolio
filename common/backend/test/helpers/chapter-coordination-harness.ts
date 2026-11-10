@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 
 import Database from "better-sqlite3"
 
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 
 import type { AIModelPort } from "../../src/application/turns/ports/ai-model-port.js"
 import {

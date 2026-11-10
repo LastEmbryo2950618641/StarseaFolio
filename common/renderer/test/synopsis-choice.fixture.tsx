@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { createRoot } from "react-dom/client"
-import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@worldseed/contracts"
+import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
 
 import { SynopsisConversationComposer } from "../src/features/editor/SynopsisConversationComposer.js"
 import "../src/styles/global.css"

@@ -13,7 +13,7 @@ import {
   type RuntimeMetric,
   type RuntimeMetricsSnapshot,
   type TurnContext,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import {
   digest,
@@ -127,7 +127,7 @@ export class SqliteTurnPersistence implements TurnPersistencePort {
     contentRef: string
     contentDigest: string
     tokenEstimate: number
-    metadata: import("@worldseed/contracts").ChapterRevisionContextMetadata
+    metadata: import("@starseafolio/contracts").ChapterRevisionContextMetadata
     createdAtMs: number
   }>): Promise<void> {
     await this.database.transaction().execute(async (transaction) => {

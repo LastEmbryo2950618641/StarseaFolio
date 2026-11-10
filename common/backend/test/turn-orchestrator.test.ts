@@ -6,11 +6,11 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 import { sql } from "kysely"
-import { defaultProjectSettings } from "@worldseed/config"
+import { defaultProjectSettings } from "@starseafolio/config"
 import {
   graphCapacityRewriteArtifactSchema,
   graphStructurePlanArtifactSchema,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 import {
   NodeInternalStoreAdapter,

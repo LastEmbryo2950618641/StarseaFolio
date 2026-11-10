@@ -1,5 +1,5 @@
 import { CheckCircle2, CircleDashed, Target, XCircle } from "lucide-react"
-import { labelForGoalProgressStatus } from "@worldseed/contracts"
+import { labelForGoalProgressStatus } from "@starseafolio/contracts"
 
 import type { ReviewableGoalProgress } from "./creation-desk-goals.js"
 

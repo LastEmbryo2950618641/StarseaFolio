@@ -11,8 +11,8 @@ import type {
   ChapterRevision,
   DeductionTask,
   GraphRevisionTask,
-} from "@worldseed/contracts"
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
+} from "@starseafolio/contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 
 import {
   TurnOrchestrator,
@@ -84,7 +84,7 @@ import { graphRevisionProgress } from "../application/chapters/graph-revision-pr
 import { createGraphRevisionModel } from "../application/chapters/graph-revision-model.js"
 import { LncrawlReferenceService } from "../infrastructure/web-research/lncrawl-reference-service.js"
 import { deductionTaskProgress } from "../application/turns/deduction-task-progress.js"
-import type { HistoryBranchSummary, HistoryCheckoutResult, HistoryEntrySummary, HistoryOverview, HistoryRetentionPreview } from "@worldseed/contracts"
+import type { HistoryBranchSummary, HistoryCheckoutResult, HistoryEntrySummary, HistoryOverview, HistoryRetentionPreview } from "@starseafolio/contracts"
 
 export class ProjectRuntime {
   private closed = false

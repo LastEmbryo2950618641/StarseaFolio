@@ -9,7 +9,7 @@ import type {
   HistoryRetentionPreview,
   ModelContextMessage,
   ProjectId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 export type BeginHistorySaveInput = Readonly<{
   projectId: ProjectId

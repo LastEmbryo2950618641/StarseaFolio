@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { describe, expect, it, vi } from "vitest"
-import { PROTOCOL_VERSION, type GraphRevisionModelActivity, type PhaseRequestEnvelope, type VisibleModelContextMessage } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type GraphRevisionModelActivity, type PhaseRequestEnvelope, type VisibleModelContextMessage } from "@starseafolio/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { createGraphRevisionModel } from "../src/application/chapters/graph-revision-model.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"

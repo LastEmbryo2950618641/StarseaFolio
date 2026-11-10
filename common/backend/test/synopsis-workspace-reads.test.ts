@@ -7,7 +7,7 @@ import {
   selectSynopsisWorkspaceEntries,
   sliceMarkdownLines,
 } from "../src/application/chapters/synopsis-workspace-reads.js"
-import type { WorkspaceCatalogSnapshot } from "@worldseed/contracts"
+import type { WorkspaceCatalogSnapshot } from "@starseafolio/contracts"
 
 const catalog: WorkspaceCatalogSnapshot = {
   snapshotId: "snap",

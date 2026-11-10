@@ -2,7 +2,7 @@ import type {
   HistoryCheckoutResult,
   HistoryEntrySummary,
   ProjectId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type {
   HistoryCheckoutMode,

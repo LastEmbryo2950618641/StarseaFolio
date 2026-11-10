@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { afterEach, describe, expect, it } from "vitest"
-import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@starseafolio/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { openChapterHarness, prepareChapterPlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 

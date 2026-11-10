@@ -1,7 +1,7 @@
 import type { Kysely } from "kysely"
 
-import { defaultProjectSettings } from "@worldseed/config"
-import { projectSettingsSchema, type ProjectId, type ProjectSettings } from "@worldseed/contracts"
+import { defaultProjectSettings } from "@starseafolio/config"
+import { projectSettingsSchema, type ProjectId, type ProjectSettings } from "@starseafolio/contracts"
 
 import type { ProjectDatabase } from "../database-types.js"
 import { decodeJson, encodeJson } from "../json-codec.js"

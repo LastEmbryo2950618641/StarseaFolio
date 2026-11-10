@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, FileText } from "lucide-react"
-import type { DiscussFocusKind, SynopsisConversationSession } from "@worldseed/contracts"
+import type { DiscussFocusKind, SynopsisConversationSession } from "@starseafolio/contracts"
 
 import {
   discussFocusOpenLabel,

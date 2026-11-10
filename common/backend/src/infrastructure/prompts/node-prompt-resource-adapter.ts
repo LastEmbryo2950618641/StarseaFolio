@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
-import type { AIPhase } from "@worldseed/contracts"
+import type { AIPhase } from "@starseafolio/contracts"
 import {
   BASE_RULES_RESOURCE,
   CONTENT_HANDLING_RESOURCE,
@@ -19,7 +19,7 @@ import {
   resolvePromptDefinition,
   resolveSkillDefinition,
   SYNOPSIS_SKILLS_PROTOCOL,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 import type { LoadedSkillResource, PromptResource, PromptResourcePort } from "../../application/index.js"
 import { digest } from "../../core/index.js"

@@ -4,7 +4,7 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "paths": {
-      "@worldseed/contracts": ["../../common/packages/contracts/src/index.ts"]
+      "@starseafolio/contracts": ["../../common/packages/contracts/src/index.ts"]
     }
   },
   "include": ["App.tsx", "index.js", "src/**/*.ts", "src/**/*.tsx"]

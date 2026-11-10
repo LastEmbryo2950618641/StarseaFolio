@@ -6,7 +6,7 @@ import type {
   SynopsisConversationStreamUsage,
   SynopsisConversationThinkingRound,
   SynopsisConversationTodo,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 type MutableSearch = {
   query: string

@@ -1,4 +1,4 @@
-import type { RevisionDraftVersion } from "@worldseed/contracts"
+import type { RevisionDraftVersion } from "@starseafolio/contracts"
 
 export type DraftVersionSource = "baseline" | "agent" | "manual" | "rollback" | "workflow"
 

@@ -1,4 +1,4 @@
-import type { ProjectId, ScopeId, Visibility } from "@worldseed/contracts"
+import type { ProjectId, ScopeId, Visibility } from "@starseafolio/contracts"
 
 export type RetrievalProjection = Readonly<{
   projectionId: string

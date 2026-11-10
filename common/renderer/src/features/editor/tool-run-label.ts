@@ -1,4 +1,4 @@
-import type { SynopsisConversationStreamRun } from "@worldseed/contracts"
+import type { SynopsisConversationStreamRun } from "@starseafolio/contracts"
 
 const MAX_ARG_CHARS = 120
 

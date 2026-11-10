@@ -1,4 +1,4 @@
-# Worldseed 后端编码原则
+# StarseaFolio 后端编码原则
 
 ## 1. 文档目的
 

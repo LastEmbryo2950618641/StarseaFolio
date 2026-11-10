@@ -9,7 +9,7 @@ import {
   foldPathPunctuation,
   isAbsoluteHostPath,
 } from "../src/application/chapters/synopsis-host-reads.js"
-import type { PhaseResultEnvelope } from "@worldseed/contracts"
+import type { PhaseResultEnvelope } from "@starseafolio/contracts"
 
 function hostRequest(partial: {
   exactKeys: string[]

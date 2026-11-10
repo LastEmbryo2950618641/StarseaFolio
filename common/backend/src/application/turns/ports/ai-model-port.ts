@@ -11,10 +11,10 @@ import type {
   ModelReasoningKind,
   VisibleModelContextMessage,
   WorkspaceCatalogSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { GraphDegreeEntry } from "./graph-repository.js"
-import type { StageProjection } from "@worldseed/prompt-contracts"
+import type { StageProjection } from "@starseafolio/prompt-contracts"
 
 export type PhaseModelUsage = Readonly<{
   modelCalls?: number

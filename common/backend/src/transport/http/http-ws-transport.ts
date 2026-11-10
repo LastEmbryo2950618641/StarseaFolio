@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
 import { randomUUID } from "node:crypto"
 
-import { PROTOCOL_VERSION, type ClientResponse } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type ClientResponse } from "@starseafolio/contracts"
 import { WebSocketServer, type WebSocket } from "ws"
 
 import type { BackendFacade } from "../../bootstrap/backend-facade.js"

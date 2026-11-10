@@ -1,4 +1,4 @@
-import type { ChapterRevision } from "@worldseed/contracts"
+import type { ChapterRevision } from "@starseafolio/contracts"
 
 export type RevisionStage = "idle" | "reviewing" | "reviewed" | "submitted"
 export type ChapterDocumentPane = "committed" | "draft"

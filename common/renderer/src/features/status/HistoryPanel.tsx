@@ -11,7 +11,7 @@ import {
   Save,
   Settings2,
 } from "lucide-react"
-import type { HistoryBranchSummary, HistoryEntrySummary } from "@worldseed/contracts"
+import type { HistoryBranchSummary, HistoryEntrySummary } from "@starseafolio/contracts"
 
 import { UiTooltip } from "../../components/UiTooltip.js"
 

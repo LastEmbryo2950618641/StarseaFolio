@@ -5,7 +5,7 @@ import {
   deepSeekRuntimeConfigFromEnvironment,
   defaultDeepSeekRuntimeConfig,
   type DeepSeekEnvironment,
-} from "@worldseed/config"
+} from "@starseafolio/config"
 
 import type { AIModelPort } from "../../application/index.js"
 import { EnvironmentSecretProvider, DeepSeekAiModelAdapter } from "./deepseek/deepseek-model-adapter.js"

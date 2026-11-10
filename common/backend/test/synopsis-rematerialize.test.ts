@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 
 import {
   assembleSynopsisPlaceholderDocument,

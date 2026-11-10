@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import type {
   SettingsLineageCommitResult,
   SettingsLineageEntry,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { invokeBackend } from "../../api/client.js"
 import { computeLineDiff } from "../editor/chapter-draft-versions-prototype.js"

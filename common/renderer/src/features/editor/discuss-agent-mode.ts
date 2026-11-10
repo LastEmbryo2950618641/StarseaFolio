@@ -1,4 +1,4 @@
-import type { DiscussAgentMode } from "@worldseed/contracts"
+import type { DiscussAgentMode } from "@starseafolio/contracts"
 
 const STORAGE_KEY = "worldseed.creation-desk.discuss-agent-mode"
 

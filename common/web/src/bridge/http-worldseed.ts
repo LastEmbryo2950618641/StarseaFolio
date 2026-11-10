@@ -7,9 +7,9 @@ import {
   type ClientRequest,
   type ClientResponse,
   type ModelListResult,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
-import type { WorldseedBridge } from "@worldseed/contracts"
+import type { WorldseedBridge } from "@starseafolio/contracts"
 import { chooseBrowserImage, readBrowserCover, saveBrowserCover } from "./browser-book-covers.js"
 import { browserModelCredentials } from "./browser-model-credentials.js"
 import {

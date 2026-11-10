@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import Database from "better-sqlite3"
 import { describe, expect, it, vi } from "vitest"
-import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@starseafolio/contracts"
 
 import type { AIModelPort, ModelExecutionOptions, TurnPhaseInput } from "../src/application/turns/ports/ai-model-port.js"
 import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"

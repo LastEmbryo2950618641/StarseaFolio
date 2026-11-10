@@ -4,7 +4,7 @@ import {
   workspaceCatalogSnapshotSchema,
   type WorkspaceCatalogEntry,
   type WorkspaceCatalogSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type {
   CreateWorkspaceCatalogSnapshotInput,

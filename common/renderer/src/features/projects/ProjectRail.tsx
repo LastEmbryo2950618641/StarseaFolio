@@ -114,7 +114,7 @@ export function ProjectRail(props: Props): React.JSX.Element {
   return (
     <aside className="project-rail" aria-label="最近书籍" data-testid="project-rail">
       <div className="project-rail-header">
-        <div className="project-rail-brand" title="Worldseed">
+        <div className="project-rail-brand" title="星海余页 · StarseaFolio">
           <img className="project-rail-brand-mark" src={appBrandIcon} alt="" draggable={false} />
           {updateAvailable
             ? <button

@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto"
 import { rm } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 
-import { defaultDeepSeekRuntimeConfig } from "@worldseed/config"
-import { PROTOCOL_VERSION, type BackendMethod, type ChapterRevisionReadResult, type RevisionDraftVersion } from "@worldseed/contracts"
+import { defaultDeepSeekRuntimeConfig } from "@starseafolio/config"
+import { PROTOCOL_VERSION, type BackendMethod, type ChapterRevisionReadResult, type RevisionDraftVersion } from "@starseafolio/contracts"
 import { describe, expect, it } from "vitest"
 
 import { DeepSeekAiModelAdapter, NodePromptResourceAdapter } from "../src/index.js"

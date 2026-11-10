@@ -1,4 +1,4 @@
-import { startBackendUtility, type UtilityEntryOptions } from "@worldseed/backend"
+import { startBackendUtility, type UtilityEntryOptions } from "@starseafolio/backend"
 
 process.parentPort.on("message", (event) => {
   if (!isConnectMessage(event.data) || event.ports[0] === undefined) return

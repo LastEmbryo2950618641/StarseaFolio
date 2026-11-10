@@ -1,4 +1,4 @@
-import type { AIPhase } from "@worldseed/contracts"
+import type { AIPhase } from "@starseafolio/contracts"
 import {
   commitReviewProjectionSchema,
   dependencyAuditArtifactSchema,
@@ -18,7 +18,7 @@ import {
   type GraphGovernanceReviewProjection,
   type SettlementReviewProjection,
   type StageProjection,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 import { digest } from "../../core/index.js"
 import type { VerificationProbeExecution } from "./ports/index.js"

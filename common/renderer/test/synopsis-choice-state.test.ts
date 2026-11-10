@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@worldseed/contracts"
+import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
 
 import {
   choiceContribution, choiceIdentity, createChoiceComposer, formatChoiceStyle,

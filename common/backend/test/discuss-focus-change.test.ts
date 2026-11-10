@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { synopsisDiscussArtifactSchema } from "@worldseed/prompt-contracts"
+import { synopsisDiscussArtifactSchema } from "@starseafolio/prompt-contracts"
 
 import { filterDiscussChoices } from "../src/application/chapters/synopsis-conversation-service.js"
 import { discussAgentModePromptAppendix } from "../src/application/chapters/discuss-agent-mode.js"

@@ -1,4 +1,4 @@
-import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@worldseed/contracts"
+import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@starseafolio/contracts"
 
 export const MODEL_CONTEXT_DELTA_HEADER = "Worldseed context delta JSON:"
 

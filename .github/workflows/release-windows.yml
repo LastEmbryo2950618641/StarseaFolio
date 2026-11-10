@@ -77,7 +77,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          node -e "const fs=require('fs'); const p='win/desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.RELEASE_VERSION; fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n'); console.log('Set @worldseed/desktop version to', j.version)"
+          node -e "const fs=require('fs'); const p='win/desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.RELEASE_VERSION; fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n'); console.log('Set @starseafolio/desktop version to', j.version)"
 
       - name: Stamp build-info.json
         shell: pwsh
@@ -157,11 +157,11 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: StarseaFolio ${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.buildNumber }})
+          name: 星海余页 StarseaFolio ${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.buildNumber }})
           draft: false
           make_latest: true
           prerelease: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prerelease == 'true' }}
-          generate_release_notes: true
+          body_path: docs/release-notes.md
           fail_on_unmatched_files: true
           files: |
             win/desktop/release/*.exe

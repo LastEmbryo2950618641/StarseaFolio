@@ -11,7 +11,7 @@ import type {
   SynopsisConversationTodo,
   SynopsisStagingPromoteProposal,
   ChapterNarrativeIntent,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { UiTooltip } from "../../components/UiTooltip.js"
 import { MobileBottomSheet, useMobileViewport } from "../../components/MobileBottomSheet.js"

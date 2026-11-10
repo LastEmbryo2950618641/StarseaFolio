@@ -1,4 +1,4 @@
-# Worldseed 追加式模型上下文链实施计划
+# StarseaFolio 追加式模型上下文链实施计划
 
 > **历史实施计划快照：** 本文用于记录实施顺序和当时状态，不是当前完成证明。当前功能状态只以 [设计与实施状态](../../implementation-status.md) 为准。
 
@@ -264,7 +264,7 @@ TurnOrchestrator
 3. 从项目设置移除重复的上下文窗口字段，增加 `contextCompressionTargetRatio`。
 4. 固定 `node`、`link`、`evidence`、`source`、`revision` 等代码可用前缀。
 5. 更新默认配置与契约测试。
-6. 运行：`pnpm --filter @worldseed/contracts test && pnpm --filter @worldseed/config test`。
+6. 运行：`pnpm --filter @starseafolio/contracts test && pnpm --filter @starseafolio/config test`。
 
 验收：序列化后能无损恢复消息顺序、轮次、阶段、可移出属性、正式章节身份和永久 ID；每个前缀拥有独立计数器，模型容量只有一个配置来源。
 

@@ -1,4 +1,4 @@
-import type { PhaseResultEnvelope } from "@worldseed/contracts"
+import type { PhaseResultEnvelope } from "@starseafolio/contracts"
 
 import type { TurnRetrievalGap } from "./ports/index.js"
 

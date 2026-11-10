@@ -1,4 +1,4 @@
-import { phaseResultEnvelopeSchema, type AIPhase, type PhaseResultEnvelope } from "@worldseed/contracts"
+import { phaseResultEnvelopeSchema, type AIPhase, type PhaseResultEnvelope } from "@starseafolio/contracts"
 
 import {
   coerceSynopsisDiscussToolExclusive,

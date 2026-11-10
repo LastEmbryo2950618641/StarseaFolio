@@ -5,7 +5,7 @@ import {
   backendErrorSchema,
   clientRequestSchema,
   idSchema,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import type {
   BackendError,
   ClientRequest,
@@ -15,12 +15,12 @@ import type {
   TaskHandle,
   TaskKind,
   TaskStatus,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import {
   calculateEffectiveWorldEvolutionLimits,
   defaultTurnExecutionProfile,
   defaultWorldEvolutionProfile,
-} from "@worldseed/config"
+} from "@starseafolio/config"
 import {
   GRAPH_NEIGHBORHOOD_MAX_ANCHORS,
   phaseRequestEnvelopeSchema,
@@ -105,7 +105,7 @@ import {
   workspaceImportFolderPayloadSchema,
   worldEvolvePayloadSchema,
   worldQueryPayloadSchema,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import { DEFAULT_VOLUME_FOLDER_NAME, digest, isChapterVolumeContainerPath, pickPreferredVolumeFolderName } from "../core/index.js"
 import {
   ChapterNotFoundError,

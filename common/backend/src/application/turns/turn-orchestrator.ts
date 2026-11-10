@@ -16,8 +16,8 @@ import {
   type ChapterNarrativeIntent,
   type WorkspaceCatalogEntry,
   type WorkspaceCatalogSnapshot,
-} from "@worldseed/contracts"
-import { defaultProjectSettings, defaultTurnExecutionProfile } from "@worldseed/config"
+} from "@starseafolio/contracts"
+import { defaultProjectSettings, defaultTurnExecutionProfile } from "@starseafolio/config"
 import {
   assertGraphGovernanceReferenceContract,
   assertGraphSpacetimeSettlementCoverage,
@@ -48,7 +48,7 @@ import {
   type GraphGovernanceArtifact,
   type SemanticReviewArtifact,
   type SettlementReviewArtifact,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 import {
   appendContextSegments,
@@ -155,7 +155,7 @@ import {
   isTemporalReadRequest,
   MAX_TEMPORAL_READS_PER_ROUND,
 } from "../chapters/synopsis-temporal-reads.js"
-import { settingsExtractionArtifactSchema } from "@worldseed/prompt-contracts"
+import { settingsExtractionArtifactSchema } from "@starseafolio/prompt-contracts"
 
 const turnModelPhases: readonly AIPhase[] = [
   "interpret",

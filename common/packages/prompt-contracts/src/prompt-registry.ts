@@ -1,4 +1,4 @@
-import { aiPhaseValues, type AIPhase } from "@worldseed/contracts"
+import { aiPhaseValues, type AIPhase } from "@starseafolio/contracts"
 
 import { SKILL_INDEX_RESOURCE } from "./skill-registry.js"
 

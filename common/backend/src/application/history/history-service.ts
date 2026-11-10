@@ -1,4 +1,4 @@
-import type { HistoryEntrySummary, ProjectId } from "@worldseed/contracts"
+import type { HistoryEntrySummary, ProjectId } from "@starseafolio/contracts"
 
 import type { HistoryManifestBuilder } from "./history-manifest-builder.js"
 import type { HistoryRepository, HistoryVcsPort } from "./ports/index.js"

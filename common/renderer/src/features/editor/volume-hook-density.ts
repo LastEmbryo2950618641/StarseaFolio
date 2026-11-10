@@ -1,4 +1,4 @@
-import type { DeductionGoal, DeductionGoalProgress } from "@worldseed/contracts"
+import type { DeductionGoal, DeductionGoalProgress } from "@starseafolio/contracts"
 
 import { findChapterProgress, listActiveGoals } from "./creation-desk-goals.js"
 import type { DiscussFocusChapterOption } from "./synopsis-path.js"

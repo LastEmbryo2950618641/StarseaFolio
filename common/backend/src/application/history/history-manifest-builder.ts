@@ -1,4 +1,4 @@
-import type { HistoryManifest, ProjectId } from "@worldseed/contracts"
+import type { HistoryManifest, ProjectId } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 import type {

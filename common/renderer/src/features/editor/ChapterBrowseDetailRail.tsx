@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import type { ChapterRevisionReadResult, ChapterWorkflowGate, DeductionGoal, RevisionDraftVersion } from "@worldseed/contracts"
+import type { ChapterRevisionReadResult, ChapterWorkflowGate, DeductionGoal, RevisionDraftVersion } from "@starseafolio/contracts"
 import { AlertTriangle, ArrowLeft, BookOpenText, ChevronDown, ChevronRight, FileText, Info, Link2, Library, ScrollText } from "lucide-react"
 
 import { invokeBackend } from "../../api/client.js"

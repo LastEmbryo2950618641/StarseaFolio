@@ -1,4 +1,4 @@
-import type { ModelContextMessage } from "@worldseed/contracts"
+import type { ModelContextMessage } from "@starseafolio/contracts"
 
 import { MODEL_CONTEXT_DELTA_HEADER } from "./model-context-appender.js"
 import { estimateModelMessageTokens } from "./context-window-manager.js"

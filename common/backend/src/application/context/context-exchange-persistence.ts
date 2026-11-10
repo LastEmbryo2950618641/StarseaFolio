@@ -1,4 +1,4 @@
-import type { ModelContextMessage, ModelContextMessageDraft } from "@worldseed/contracts"
+import type { ModelContextMessage, ModelContextMessageDraft } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 

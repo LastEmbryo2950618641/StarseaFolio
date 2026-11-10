@@ -2,7 +2,7 @@ import type {
   ModelContextMessage,
   VisibleModelContextMessage,
   WorkspaceCatalogSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { MODEL_CONTEXT_DELTA_HEADER } from "../context/model-context-appender.js"
 import { digest, resolveDescriptionRulePaths, listWorkDescriptionRuleFiles } from "../../core/index.js"

@@ -1,4 +1,4 @@
-# Worldseed V1 编码前冻结基线
+# StarseaFolio V1 编码前冻结基线
 
 > 本文冻结的是 V1 的目标契约和参数基线，不表示 V1 已经实现或验收完成。当前代码与测试状态以 [设计与实施状态](implementation-status.md) 为准。
 
@@ -298,7 +298,7 @@ const defaultDeepSeekRuntimeConfig = {
 }
 ```
 
-调用使用 OpenAI 兼容 `chat/completions` 接口。`thinkingModeEnabled` 决定是否发送 DeepSeek `thinking.enabled/disabled`；开启时同时发送 `reasoning_effort`，强度只能是 `low`、`high` 或 `max`。`jsonModeEnabled` 默认 `false`；关闭时不发送 `response_format`，开启时附加 `response_format: { type: "json_object" }`。三项设置均随模型配置持久化并在每轮开始时冻结。模型按末尾契约返回 Worldseed JSON 文本，适配器提取第一个完整 JSON 对象并执行 Schema 校验。V1 不使用 Tool Calling；模型需要读取或修改时返回 Worldseed JSON，应用层执行读取或暂存提案，再将实际结果追加到同一 `TurnContext`。已有对象在模型和数据库中使用同一个项目级永久 ID；每个技术前缀拥有独立项目计数器。新对象仅在当前图治理事务使用 `local:*`，由应用层一次性物化为永久 ID。适配器不执行阶段专用字段移动、长期 ID 别名转换或身份猜测。
+调用使用 OpenAI 兼容 `chat/completions` 接口。`thinkingModeEnabled` 决定是否发送 DeepSeek `thinking.enabled/disabled`；开启时同时发送 `reasoning_effort`，强度只能是 `low`、`high` 或 `max`。`jsonModeEnabled` 默认 `false`；关闭时不发送 `response_format`，开启时附加 `response_format: { type: "json_object" }`。三项设置均随模型配置持久化并在每轮开始时冻结。模型按末尾契约返回 StarseaFolio JSON 文本，适配器提取第一个完整 JSON 对象并执行 Schema 校验。V1 不使用 Tool Calling；模型需要读取或修改时返回 StarseaFolio JSON，应用层执行读取或暂存提案，再将实际结果追加到同一 `TurnContext`。已有对象在模型和数据库中使用同一个项目级永久 ID；每个技术前缀拥有独立项目计数器。新对象仅在当前图治理事务使用 `local:*`，由应用层一次性物化为永久 ID。适配器不执行阶段专用字段移动、长期 ID 别名转换或身份猜测。
 
 可选代理只在 DeepSeek 基础设施适配器内通过注入的 HTTP dispatcher 生效，不修改进程级全局代理，也不影响 SQLite、文件系统或其他网络适配器。
 

@@ -1,4 +1,4 @@
-import type { PhaseRequestEnvelope } from "@worldseed/contracts"
+import type { PhaseRequestEnvelope } from "@starseafolio/contracts"
 
 export type ModelReferenceView = Readonly<{
   request: unknown

@@ -1,4 +1,4 @@
-import type { ProjectId } from "@worldseed/contracts"
+import type { ProjectId } from "@starseafolio/contracts"
 
 export type SynopsisModelBudgetAdvisory = Readonly<{
   message: string

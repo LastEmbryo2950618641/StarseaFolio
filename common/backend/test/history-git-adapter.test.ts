@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { digest, IsomorphicGitHistoryAdapter } from "../src/index.js"
-import type { HistoryManifest } from "@worldseed/contracts"
+import type { HistoryManifest } from "@starseafolio/contracts"
 
 const temporaryDirectories: string[] = []
 const projectId = "00000000-0000-4000-8000-000000000001"

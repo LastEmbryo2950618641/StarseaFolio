@@ -1,13 +1,13 @@
 {
-  "name": "worldseed",
+  "name": "starseafolio",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.9.0",
   "scripts": {
-    "backend:stdio": "pnpm --filter @worldseed/backend start:stdio",
-    "backend:http": "pnpm --filter @worldseed/backend build && pnpm --filter @worldseed/backend start:http",
-    "dev": "pnpm --filter @worldseed/backend build && pnpm --filter @worldseed/desktop dev",
+    "backend:stdio": "pnpm --filter @starseafolio/backend start:stdio",
+    "backend:http": "pnpm --filter @starseafolio/backend build && pnpm --filter @starseafolio/backend start:http",
+    "dev": "pnpm --filter @starseafolio/backend build && pnpm --filter @starseafolio/desktop dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
@@ -38,11 +38,11 @@
     "verify:real-turn": "node scripts/acceptance/real-run.mjs --turns 1",
     "verify:longrun": "node scripts/acceptance/full-chain-run.mjs --target-chapters 20",
     "verify:all": "node scripts/acceptance/verify-all.mjs",
-    "dev:win": "pnpm --filter @worldseed/backend build && pnpm --filter @worldseed/desktop dev",
+    "dev:win": "pnpm --filter @starseafolio/backend build && pnpm --filter @starseafolio/desktop dev",
     "dev:android": "pnpm dev:android:web",
     "dev:android:expo": "npm --prefix android/mobile run start",
-    "dev:android:web": "pnpm --filter @worldseed/backend... build && node android/scripts/dev-web.mjs",
-    "dev:web": "pnpm --filter @worldseed/web dev"
+    "dev:android:web": "pnpm --filter @starseafolio/backend... build && node android/scripts/dev-web.mjs",
+    "dev:web": "pnpm --filter @starseafolio/web dev"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -53,5 +53,6 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10"
-  }
+  },
+  "description": "星海余页（StarseaFolio）：与 AI 共创长篇小说，用知识图谱记住故事。"
 }

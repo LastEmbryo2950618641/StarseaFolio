@@ -1,4 +1,4 @@
-import type { AIPhase, ProjectSettings, WorldDivergenceMode } from "@worldseed/contracts"
+import type { AIPhase, ProjectSettings, WorldDivergenceMode } from "@starseafolio/contracts"
 
 export function resolveWorldDivergenceMode(
   projectSettings: ProjectSettings | undefined,

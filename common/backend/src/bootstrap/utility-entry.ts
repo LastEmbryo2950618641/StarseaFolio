@@ -3,7 +3,7 @@ import { BackendContainer, type BackendContainerOptions } from "./container.js"
 import { BackendFacade } from "./backend-facade.js"
 import { MessagePortTransport, type BackendMessagePort } from "../transport/index.js"
 import { configureRuntimeDiagnostics } from "../infrastructure/diagnostics/index.js"
-import type { RuntimeDiagnosticsConfig } from "@worldseed/config"
+import type { RuntimeDiagnosticsConfig } from "@starseafolio/config"
 
 export type UtilityEntryOptions = BackendContainerOptions & Readonly<{
   diagnostics: RuntimeDiagnosticsConfig

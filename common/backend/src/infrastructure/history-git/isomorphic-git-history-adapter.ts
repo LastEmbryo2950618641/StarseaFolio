@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import { createRequire } from "node:module"
 
-import { historyManifestSchema, type HistoryManifest } from "@worldseed/contracts"
+import { historyManifestSchema, type HistoryManifest } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 import type {
@@ -48,7 +48,7 @@ export class IsomorphicGitHistoryAdapter implements HistoryVcsPort {
     const tree = await this.writeTree(root)
     const timestamp = Math.floor(input.manifest.createdAtMs / 1_000)
     const identity = {
-      name: "Worldseed History",
+      name: "StarseaFolio History",
       email: "history@worldseed.local",
       timestamp,
       timezoneOffset: 0,

@@ -5,8 +5,8 @@ import type {
   SettingsExtractionSnapshot,
   SettingsProposalPayload,
   WorldDivergenceMode,
-} from "@worldseed/contracts"
-import { settingsProposalPayloadSchema } from "@worldseed/contracts"
+} from "@starseafolio/contracts"
+import { settingsProposalPayloadSchema } from "@starseafolio/contracts"
 
 import { assertWorkspaceMutationAllowed } from "../../core/index.js"
 import type { WorkspacePort } from "../workspace/index.js"

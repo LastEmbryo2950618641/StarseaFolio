@@ -1,4 +1,4 @@
-import type { SynopsisConversationTodo } from "@worldseed/contracts"
+import type { SynopsisConversationTodo } from "@starseafolio/contracts"
 
 export const TODO_NO_PROGRESS_LIMIT = 3
 const TODO_CONSECUTIVE_LIMIT = 8

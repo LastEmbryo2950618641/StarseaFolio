@@ -6,7 +6,7 @@ import {
   findExactDuplicateStaticMessageIds,
 } from "../src/application/context/context-exchange-persistence.js"
 import { estimateModelMessageTokens } from "../src/application/context/context-window-manager.js"
-import type { ModelContextMessage, ModelContextMessageDraft } from "@worldseed/contracts"
+import type { ModelContextMessage, ModelContextMessageDraft } from "@starseafolio/contracts"
 import { digest } from "../src/core/index.js"
 
 function stored(

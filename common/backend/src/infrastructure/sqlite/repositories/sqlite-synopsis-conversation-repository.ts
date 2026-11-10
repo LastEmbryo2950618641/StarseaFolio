@@ -11,7 +11,7 @@ import type {
   SynopsisConversationMessage,
   SynopsisConversationSession,
   SynopsisConversationStreamUsage,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import {
   aiPhaseSchema,
   modelContextMessageDraftSchema,
@@ -23,7 +23,7 @@ import {
   synopsisConversationStreamSearchSchema,
   synopsisConversationThinkingRoundSchema,
   synopsisConversationTodoSchema,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { digest } from "../../../core/index.js"
 import type { ProjectDatabase } from "../database-types.js"

@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState } from "react"
 import { createPortal } from "react-dom"
 import { CheckCircle2, Circle, CircleDot, ListTodo, X, XCircle } from "lucide-react"
-import type { SynopsisConversationTodo } from "@worldseed/contracts"
+import type { SynopsisConversationTodo } from "@starseafolio/contracts"
 import { MobileBottomSheet, useMobileViewport } from "../../components/MobileBottomSheet.js"
 
 type Props = Readonly<{

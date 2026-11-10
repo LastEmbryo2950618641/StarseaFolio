@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { ChapterContextResolver } from "../src/application/chapters/chapter-context-resolver.js"
-import type { ModelContextMessage } from "@worldseed/contracts"
+import type { ModelContextMessage } from "@starseafolio/contracts"
 
 function message(input: Partial<ModelContextMessage> & Pick<ModelContextMessage, "messageId" | "sequence" | "kind">): ModelContextMessage {
   return {

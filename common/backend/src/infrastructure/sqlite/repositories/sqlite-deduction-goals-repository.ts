@@ -5,8 +5,8 @@ import type {
   DeductionGoalProgress,
   DeductionGoalProposal,
   ProjectId,
-} from "@worldseed/contracts"
-import { goalProposalPayloadSchema } from "@worldseed/contracts"
+} from "@starseafolio/contracts"
+import { goalProposalPayloadSchema } from "@starseafolio/contracts"
 
 import type { ProjectDatabase } from "../database-types.js"
 import { decodeJson, encodeJson } from "../json-codec.js"

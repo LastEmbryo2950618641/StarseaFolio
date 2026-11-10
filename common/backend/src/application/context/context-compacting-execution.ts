@@ -1,4 +1,4 @@
-import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@worldseed/contracts"
+import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@starseafolio/contracts"
 import type { AIModelPort, ModelExecutionOptions, PhaseModelExecution } from "../turns/ports/ai-model-port.js"
 import { estimateModelMessageTokens } from "./context-window-manager.js"
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { PROTOCOL_VERSION, clientRequestSchema } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, clientRequestSchema } from "@starseafolio/contracts"
 import { installHttpWorldseedBridge } from "../src/bridge/http-worldseed.js"
 
 const secrets = vi.hoisted(() => new Map<string, string>())

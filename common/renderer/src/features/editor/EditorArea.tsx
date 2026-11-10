@@ -1,7 +1,7 @@
 import { Editor, type Monaco } from "@monaco-editor/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { editor } from "monaco-editor"
-import type { ChapterNarrativeIntent, ChapterRevision, ChapterRevisionReadResult, ChapterSummary, DiscussFocusKind, RevisionDraftVersion, SynopsisConversationMessage, SynopsisConversationSession, SynopsisConversationStreamSnapshot, SynopsisStagingPromoteProposal } from "@worldseed/contracts"
+import type { ChapterNarrativeIntent, ChapterRevision, ChapterRevisionReadResult, ChapterSummary, DiscussFocusKind, RevisionDraftVersion, SynopsisConversationMessage, SynopsisConversationSession, SynopsisConversationStreamSnapshot, SynopsisStagingPromoteProposal } from "@starseafolio/contracts"
 import { WORLDSEED_EDITOR_THEME, ensureWorldseedEditorTheme } from "../../monaco.js"
 import { SynopsisConversationComposer } from "./SynopsisConversationComposer.js"
 import type { BatchDeductionPhase } from "./batch-chapter-deduction.js"

@@ -5,7 +5,7 @@ import {
   resolveWorldDivergenceMode,
   worldDivergencePhaseAppendix,
 } from "../src/application/settings/world-divergence-policy.js"
-import { defaultProjectSettings } from "@worldseed/config"
+import { defaultProjectSettings } from "@starseafolio/config"
 
 describe("world divergence policy", () => {
   it("defaults to world_consistent", () => {

@@ -236,7 +236,7 @@ async function waitForTask(page, taskId) {
 async function readTraceEvents(path) {
   try {
     const content = await readFile(path, "utf8")
-    return content.split("\n").filter((line) => line.includes("[Worldseed]"))
+    return content.split("\n").filter((line) => line.includes("[StarseaFolio]"))
   } catch {
     return []
   }

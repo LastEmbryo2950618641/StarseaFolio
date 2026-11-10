@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { PhaseRequestEnvelope } from "@worldseed/contracts"
+import type { PhaseRequestEnvelope } from "@starseafolio/contracts"
 
 import { assembleModelPhaseResult, parseModelPhaseResult } from "../src/infrastructure/models/deepseek/model-phase-result-assembler.js"
 

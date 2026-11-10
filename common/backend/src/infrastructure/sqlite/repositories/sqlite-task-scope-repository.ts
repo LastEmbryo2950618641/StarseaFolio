@@ -6,7 +6,7 @@ import {
   taskKindSchema,
   taskStatusSchema,
   type ScopeId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type {
   ArtifactScope,

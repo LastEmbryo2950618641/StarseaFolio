@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { defaultDeepSeekRuntimeConfig } from "@worldseed/config"
-import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@worldseed/contracts"
+import { defaultDeepSeekRuntimeConfig } from "@starseafolio/config"
+import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@starseafolio/contracts"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { DeepSeekAiModelAdapter, NodePromptResourceAdapter, type DeepSeekCompletionClient } from "../src/index.js"

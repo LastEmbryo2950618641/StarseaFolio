@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { describe, expect, it, vi } from "vitest"
-import type { VisibleModelContextMessage } from "@worldseed/contracts"
-import { synopsisDiscussArtifactSchema } from "@worldseed/prompt-contracts"
+import type { VisibleModelContextMessage } from "@starseafolio/contracts"
+import { synopsisDiscussArtifactSchema } from "@starseafolio/prompt-contracts"
 import {
   executeSynopsisTool,
   hasVisibleToolDescription,

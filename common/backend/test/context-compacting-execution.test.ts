@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@worldseed/contracts"
+import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@starseafolio/contracts"
 import type { AIModelPort, PhaseModelExecution } from "../src/application/turns/ports/ai-model-port.js"
 import { executeWithContextCompaction, readContextLengthError } from "../src/application/context/context-compacting-execution.js"
 

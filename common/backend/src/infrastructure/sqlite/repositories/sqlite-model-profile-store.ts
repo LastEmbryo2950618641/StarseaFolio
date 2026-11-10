@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely"
 
-import type { ModelProfile, ModelProfilesReadResult, ModelProfilesSavePayload } from "@worldseed/contracts"
+import type { ModelProfile, ModelProfilesReadResult, ModelProfilesSavePayload } from "@starseafolio/contracts"
 
 import type { ModelProfileStorePort } from "../../../application/index.js"
 import type { RegistryDatabase } from "../database-types.js"

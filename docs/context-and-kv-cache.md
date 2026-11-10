@@ -1,8 +1,8 @@
-# Worldseed 模型上下文链、KV 缓存与机械压缩设计
+# StarseaFolio 模型上下文链、KV 缓存与机械压缩设计
 
 ## 1. 文档地位
 
-本文是 Worldseed 关于以下主题的权威设计：
+本文是 StarseaFolio 关于以下主题的权威设计：
 
 - 模型上下文如何跨阶段、跨轮次连续追加；
 - `TurnContext` 与模型实际消息链如何分工；

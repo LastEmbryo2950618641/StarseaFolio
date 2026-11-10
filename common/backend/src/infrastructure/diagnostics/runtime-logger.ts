@@ -4,7 +4,7 @@ import {
   runtimeDiagnosticsConfigSchema,
   type RuntimeDiagnosticsConfig,
   type RuntimeLogLevel,
-} from "@worldseed/config"
+} from "@starseafolio/config"
 
 export type RuntimeEventLevel = Exclude<RuntimeLogLevel, "silent">
 
@@ -67,7 +67,7 @@ export function runtimeLog(
 }
 
 export function formatRuntimeLog(record: RuntimeLogFields): string {
-  return `[Worldseed] ${JSON.stringify(record)}`
+  return `[StarseaFolio] ${JSON.stringify(record)}`
 }
 
 export function errorDetails(error: unknown): Readonly<{ name: string; message: string; stack?: string }> {

@@ -1,4 +1,4 @@
-# Worldseed：项目代码架构
+# StarseaFolio：项目代码架构
 
 ## 1. 技术基线
 
@@ -342,8 +342,8 @@ Backend 使用 Kysely 定义查询和 migration，`better-sqlite3` 只存在于 
 每个项目独立连接：
 
 ```text
-AppData/Worldseed/registry.sqlite
-AppData/Worldseed/projects/<projectId>/project.sqlite
+AppData/StarseaFolio/registry.sqlite
+AppData/StarseaFolio/projects/<projectId>/project.sqlite
 ```
 
 数据库启用 WAL、外键和 busy timeout。SQLite 调用只发生在 Backend Utility Process，不阻塞 Renderer 或 Electron Main。
@@ -407,7 +407,7 @@ pnpm dev
   -> Renderer HMR
 ```
 
-开发模式必须通过 `pnpm dev` 或 `pnpm --filter @worldseed/desktop dev` 启动。不要使用
+开发模式必须通过 `pnpm dev` 或 `pnpm --filter @starseafolio/desktop dev` 启动。不要使用
 `electron .`、`electron win/desktop` 或直接打开 `win/desktop/out/renderer/index.html`，
 这些方式会加载构建产物，不会建立 Renderer HMR 连接。开发 CSP 同时放行 localhost 和
 127.0.0.1 的 Vite HTTP / WebSocket 地址，避免回环地址变化导致 HMR 被浏览器拦截。
@@ -456,14 +456,14 @@ tests/
 ```json
 {
   "scripts": {
-    "dev": "pnpm --filter @worldseed/desktop dev",
+    "dev": "pnpm --filter @starseafolio/desktop dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "test": "vitest --workspace vitest.workspace.ts",
     "test:e2e": "playwright test",
-    "package": "pnpm build && pnpm --filter @worldseed/desktop package",
-    "db:migrate": "pnpm --filter @worldseed/backend db:migrate"
+    "package": "pnpm build && pnpm --filter @starseafolio/desktop package",
+    "db:migrate": "pnpm --filter @starseafolio/backend db:migrate"
   }
 }
 ```

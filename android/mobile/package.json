@@ -1,5 +1,5 @@
 {
-  "name": "@worldseed/mobile",
+  "name": "@starseafolio/mobile",
   "version": "0.1.0",
   "private": true,
   "main": "index.js",
@@ -15,7 +15,7 @@
   "dependencies": {
     "@expo/metro-runtime": "~4.0.1",
     "@react-native-async-storage/async-storage": "2.1.2",
-    "@worldseed/contracts": "file:../../common/packages/contracts",
+    "@starseafolio/contracts": "file:../../common/packages/contracts",
     "expo": "~52.0.46",
     "expo-asset": "~11.0.5",
     "expo-font": "~13.0.4",

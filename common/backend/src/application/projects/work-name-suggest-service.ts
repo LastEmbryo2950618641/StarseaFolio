@@ -5,8 +5,8 @@ import {
   SCHEMA_VERSION,
   type ProjectId,
   type ProjectSuggestDisplayNameResult,
-} from "@worldseed/contracts"
-import { workNamingArtifactSchema } from "@worldseed/prompt-contracts"
+} from "@starseafolio/contracts"
+import { workNamingArtifactSchema } from "@starseafolio/prompt-contracts"
 
 import type { AIModelPort, PromptResourcePort } from "../turns/ports/ai-model-port.js"
 import type { WorkspacePort } from "../workspace/index.js"

@@ -1,4 +1,4 @@
-import type { GraphRevisionModelActivity } from "@worldseed/contracts"
+import type { GraphRevisionModelActivity } from "@starseafolio/contracts"
 import type { AIModelPort } from "../turns/ports/ai-model-port.js"
 
 export function createGraphRevisionModel(

@@ -3,7 +3,7 @@ import type {
   ReadRequest,
   WorkspaceCatalogEntry,
   WorkspaceCatalogSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import {
   assertWorkDescriptionCharLimit,

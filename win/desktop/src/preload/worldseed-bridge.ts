@@ -9,12 +9,12 @@ import type {
   AppUpdateInfoResult,
   BackendWaitTimeoutInfo,
   WorldseedBridge,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import {
   clientRequestSchema,
   clientResponseSchema,
-} from "@worldseed/contracts"
-import type { ModelListResult } from "@worldseed/contracts"
+} from "@starseafolio/contracts"
+import type { ModelListResult } from "@starseafolio/contracts"
 
 /** Avoid node:os / node:path in sandboxed preload — use env only. */
 export function resolveDefaultWorkDirectoryPath(): string {
@@ -100,7 +100,7 @@ export type {
   AppSettings,
   BackendWaitTimeoutInfo,
   WorldseedBridge,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 export const worldseedBridge: WorldseedBridge = {
   defaultWorkDirectoryPath: resolveDefaultWorkDirectoryPath(),

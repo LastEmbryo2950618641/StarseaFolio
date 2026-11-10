@@ -5,7 +5,7 @@ import type {
   TaskKind,
   TaskStatus,
   TurnId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { ArtifactScope } from "../../../core/index.js"
 

@@ -1,4 +1,4 @@
-import type { SynopsisDiscussArtifact } from "@worldseed/prompt-contracts"
+import type { SynopsisDiscussArtifact } from "@starseafolio/prompt-contracts"
 
 export type PendingDiscussWrites = Omit<SynopsisDiscussArtifact,
   "assistantMessage" | "finalSelfReview" | "toolRequest" | "choices" | "continueTurn" | "focusChange">

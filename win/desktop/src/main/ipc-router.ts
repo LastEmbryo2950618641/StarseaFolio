@@ -17,13 +17,13 @@ import {
   worldQueryPayloadSchema,
   type ClientRequest,
   type ModelProfilesReadResult,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { BackendProcess } from "./backend-process.js"
 import type { DesktopModelProfiles } from "../preload/worldseed-bridge.js"
 import type { FileCredentialVault } from "./credential-vault.js"
 import { resolveModelCredential } from "./model-credential-resolution.js"
-import { errorDetails, runtimeLog } from "@worldseed/backend"
+import { errorDetails, runtimeLog } from "@starseafolio/backend"
 import {
   addWorkDirectory,
   readAppSettings,

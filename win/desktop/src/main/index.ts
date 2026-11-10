@@ -3,8 +3,8 @@ import { loadEnvFile } from "node:process"
 import { join, resolve } from "node:path"
 
 import { app, BrowserWindow, safeStorage, screen, session } from "electron"
-import { configureRuntimeDiagnostics, runtimeLog } from "@worldseed/backend"
-import { runtimeDiagnosticsConfigFromEnvironment } from "@worldseed/config"
+import { configureRuntimeDiagnostics, runtimeLog } from "@starseafolio/backend"
+import { runtimeDiagnosticsConfigFromEnvironment } from "@starseafolio/config"
 
 import { BackendProcess } from "./backend-process.js"
 import { registerIpcRouter, unregisterIpcRouter } from "./ipc-router.js"

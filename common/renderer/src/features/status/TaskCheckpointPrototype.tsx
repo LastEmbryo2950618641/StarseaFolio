@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react"
 import { createPortal } from "react-dom"
-import type { ResettableRuntimeMetricId, RuntimeMetric, SettingsExtractionProposal, SettingsExtractionSnapshot } from "@worldseed/contracts"
+import type { ResettableRuntimeMetricId, RuntimeMetric, SettingsExtractionProposal, SettingsExtractionSnapshot } from "@starseafolio/contracts"
 import {
   AlertTriangle,
   ArrowLeftToLine,

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { createRoot } from "react-dom/client"
-import type { ClientRequest, ClientResponse } from "@worldseed/contracts"
+import type { ClientRequest, ClientResponse } from "@starseafolio/contracts"
 
 import { ChapterBrowseDetailRail } from "../src/features/editor/ChapterBrowseDetailRail.js"
 import "../src/styles/global.css"

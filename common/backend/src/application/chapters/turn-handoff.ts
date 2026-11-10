@@ -1,4 +1,4 @@
-import type { TurnHandoffBrief, TurnMonitorPhaseSnapshot } from "@worldseed/contracts"
+import type { TurnHandoffBrief, TurnMonitorPhaseSnapshot } from "@starseafolio/contracts"
 
 import type { StoredPhaseRun } from "../turns/ports/index.js"
 

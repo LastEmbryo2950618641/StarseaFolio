@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import type { ChapterRevisionReadResult, ChapterSummary } from "@worldseed/contracts"
+import type { ChapterRevisionReadResult, ChapterSummary } from "@starseafolio/contracts"
 import { Columns2, FileText, Hash, LayoutGrid, Pause, Play, Square } from "lucide-react"
 
 import { invokeBackend } from "../../api/client.js"

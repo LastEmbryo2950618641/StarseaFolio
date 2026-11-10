@@ -1,4 +1,4 @@
-import type { ModelProfile, ModelProfilesReadResult, ModelProfilesSavePayload } from "@worldseed/contracts"
+import type { ModelProfile, ModelProfilesReadResult, ModelProfilesSavePayload } from "@starseafolio/contracts"
 
 export type ModelProfileStorePort = Readonly<{
   read(): Promise<ModelProfilesReadResult>

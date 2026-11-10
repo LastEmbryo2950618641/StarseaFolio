@@ -11,7 +11,7 @@ import type {
   TaskStatus,
   TurnContext,
   TurnId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { TurnReadEvidence, VerificationProbeExecution } from "./ai-model-port.js"
 

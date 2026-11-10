@@ -14,14 +14,14 @@ config.resolver.nodeModulesPaths = [
 ]
 config.resolver.disableHierarchicalLookup = true
 config.resolver.extraNodeModules = {
-  "@worldseed/contracts": path.resolve(workspaceRoot, "common/packages/contracts"),
+  "@starseafolio/contracts": path.resolve(workspaceRoot, "common/packages/contracts"),
 }
 config.resolver.unstable_enablePackageExports = true
 
 const contractsEntry = path.resolve(workspaceRoot, "common/packages/contracts/dist/index.js")
 const upstreamResolveRequest = config.resolver.resolveRequest
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (moduleName === "@worldseed/contracts") {
+  if (moduleName === "@starseafolio/contracts") {
     return { type: "sourceFile", filePath: contractsEntry }
   }
   if (upstreamResolveRequest) {

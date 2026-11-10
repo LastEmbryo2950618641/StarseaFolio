@@ -51,7 +51,7 @@ Assert appendix contains 边界节奏 / 因果焦点 for `draft` + `synopsis_dis
 
 - [ ] **Step 2: Implement helper** (Chinese markdown, same style as world-divergence)
 
-- [ ] **Step 3: Run** `corepack pnpm --filter @worldseed/backend exec vitest run test/chapter-narrative-intent-policy.test.ts`
+- [ ] **Step 3: Run** `corepack pnpm --filter @starseafolio/backend exec vitest run test/chapter-narrative-intent-policy.test.ts`
 
 ---
 

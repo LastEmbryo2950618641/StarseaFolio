@@ -9,7 +9,7 @@ import {
   isHttpUrl,
 } from "./web-url-safety.js"
 
-const DEFAULT_USER_AGENT = "WorldseedDesktop/1.0 (+local research; respectful)"
+const DEFAULT_USER_AGENT = "StarseaFolioDesktop/1.0 (+local research; respectful)"
 const DEFAULT_TIMEOUT_MS = 15_000
 const MAX_RESPONSE_BYTES = 512_000
 const MAX_REDIRECTS = 3

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { synopsisDiscussArtifactSchema } from "@worldseed/prompt-contracts"
+import { synopsisDiscussArtifactSchema } from "@starseafolio/prompt-contracts"
 import { retainDiscussWrites, restoreDiscussWrites } from "../src/application/chapters/discuss-pending-artifact.js"
 
 const draft = { base: "body" as const, heading: "第一章 雨夜", body: "旧稿正文" }

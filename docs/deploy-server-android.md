@@ -1,6 +1,6 @@
 # 服务端 + 安卓：部署与联调
 
-后端与桌面共用 `BackendFacade` / `@worldseed/contracts`；服务器多一个 HTTP/WS 入口。安卓客户端见 [`android/mobile/README.md`](../android/mobile/README.md)。
+后端与桌面共用 `BackendFacade` / `@starseafolio/contracts`；服务器多一个 HTTP/WS 入口。安卓客户端见 [`android/mobile/README.md`](../android/mobile/README.md)。
 
 ## 安全
 
@@ -40,17 +40,17 @@ DEEPSEEK_API_KEY=sk-...
 ```bash
 corepack enable
 pnpm install
-pnpm --filter @worldseed/contracts build
-pnpm --filter @worldseed/config build
-pnpm --filter @worldseed/prompt-contracts build
-pnpm --filter @worldseed/backend build
+pnpm --filter @starseafolio/contracts build
+pnpm --filter @starseafolio/config build
+pnpm --filter @starseafolio/prompt-contracts build
+pnpm --filter @starseafolio/backend build
 ```
 
 前台试跑：
 
 ```bash
 set -a && source /etc/worldseed/worldseed.env && set +a
-pnpm --filter @worldseed/backend start:http
+pnpm --filter @starseafolio/backend start:http
 ```
 
 ### systemd 单元示例

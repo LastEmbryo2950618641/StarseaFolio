@@ -1,4 +1,4 @@
-import type { ProjectSettings } from "@worldseed/contracts"
+import type { ProjectSettings } from "@starseafolio/contracts"
 
 import { ModelConfigurationDialog, type ModelProfile } from "./ModelConfigurationDialog.js"
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog.js"

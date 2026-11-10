@@ -7,7 +7,7 @@ import {
   type TaskKind,
   type TurnContext,
   type TurnId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 export type CreateTurnContextInput = Readonly<{
   contextId: Id

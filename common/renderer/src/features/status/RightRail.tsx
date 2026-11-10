@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react"
 import { Activity, AlertCircle, BookOpen, Check, Circle, GitBranch, Network, Orbit, X } from "lucide-react"
-import { aiPhaseValues, type ChapterReviewRevisionPayload, type ChapterRevisionReadResult, type ChapterSummary, type ProjectSettings, type ResettableRuntimeMetricId } from "@worldseed/contracts"
+import { aiPhaseValues, type ChapterReviewRevisionPayload, type ChapterRevisionReadResult, type ChapterSummary, type ProjectSettings, type ResettableRuntimeMetricId } from "@starseafolio/contracts"
 
 import type { GraphSlice, OpenProject, PhaseRunSnapshot, TaskSnapshot } from "../../api/client.js"
-import type { SynopsisConversationStreamSnapshot } from "@worldseed/contracts"
+import type { SynopsisConversationStreamSnapshot } from "@starseafolio/contracts"
 import { UiTooltip, uiTooltipRich } from "../../components/UiTooltip.js"
 import { useWorkbenchStore, type RightTab } from "../../state/workbench-store.js"
 import { WorldGraph } from "./WorldGraph.js"

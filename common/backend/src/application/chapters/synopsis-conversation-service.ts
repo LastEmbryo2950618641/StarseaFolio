@@ -24,12 +24,12 @@ import {
   type DeductionGoal,
   type HookScheduleAudit,
   selectGoalsForChapterContext,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import {
   consumeDiscussToolExclusiveStrip,
   synopsisDiscussArtifactSchema,
-} from "@worldseed/prompt-contracts"
-import { defaultProjectSettings } from "@worldseed/config"
+} from "@starseafolio/prompt-contracts"
+import { defaultProjectSettings } from "@starseafolio/config"
 
 import {
   buildContextUsageBreakdown,
@@ -82,7 +82,7 @@ import {
 import {
   canProceedPastWorkStyleGate,
 } from "../../core/workspace/work-style-gate-state.js"
-import type { GoalProposalPayload } from "@worldseed/contracts"
+import type { GoalProposalPayload } from "@starseafolio/contracts"
 import type { AIModelPort, PromptResourcePort, TurnPhaseInput, TurnReadEvidence, TurnRetrievalGap } from "../turns/ports/ai-model-port.js"
 import type { WorkspacePort, InternalStorePort } from "../workspace/index.js"
 import type { WorkspaceCatalogPort } from "../retrieval/ports/workspace-catalog.js"
@@ -572,7 +572,7 @@ export class SynopsisConversationService {
      */
     batchProceed?: boolean
     /** Claude Code–style discuss mode. */
-    agentMode?: import("@worldseed/contracts").DiscussAgentMode
+    agentMode?: import("@starseafolio/contracts").DiscussAgentMode
   }>): Promise<SynopsisConversationSendResult> {
     const focusLocked = input.focusLocked === true
     const batchAutomation = input.automation === "batch_chapter"
@@ -2466,7 +2466,7 @@ export class SynopsisConversationService {
     allowWorkflowTools?: boolean
     allowChapterWorkflowTools?: boolean
     volumePlanning?: VolumePlanningContext
-    agentMode?: import("@worldseed/contracts").DiscussAgentMode
+    agentMode?: import("@starseafolio/contracts").DiscussAgentMode
     signal?: AbortSignal
     maxModelCalls?: number
     deadlineMs?: number
@@ -5656,13 +5656,13 @@ function formatVolumePlanningWriteCount(count: number | undefined): string {
   return count === 1 ? "首次写入" : `写入${String(count)}次`
 }
 
-function synopsisSearchLabel(read: import("@worldseed/contracts").ReadRequest): string {
+function synopsisSearchLabel(read: import("@starseafolio/contracts").ReadRequest): string {
   return isTemporalReadRequest(read) ? formatTemporalSearchLabel(read) : formatSynopsisSearchLabel(read)
 }
 
 function evidenceMatchesRead(
   item: TurnReadEvidence,
-  read: import("@worldseed/contracts").ReadRequest,
+  read: import("@starseafolio/contracts").ReadRequest,
 ): boolean {
   const normalize = (value: string) => value.trim().toLocaleLowerCase().replaceAll("\\", "/")
   const path = normalize(item.ownerId)

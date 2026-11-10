@@ -582,9 +582,9 @@ common/backend/test/architecture.test.ts
 每批实现都必须通过：
 
 ```powershell
-pnpm --filter @worldseed/contracts typecheck
-pnpm --filter @worldseed/backend typecheck
-pnpm --filter @worldseed/desktop typecheck
+pnpm --filter @starseafolio/contracts typecheck
+pnpm --filter @starseafolio/backend typecheck
+pnpm --filter @starseafolio/desktop typecheck
 pnpm vitest run common/backend/test/turn-orchestrator.test.ts
 pnpm vitest run common/backend/test/sqlite-repositories.test.ts
 pnpm vitest run common/backend/test/sqlite-migrations.test.ts

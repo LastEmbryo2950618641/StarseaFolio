@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { ChapterRevisionReadResult, ChapterSummary } from "@worldseed/contracts"
+import type { ChapterRevisionReadResult, ChapterSummary } from "@starseafolio/contracts"
 
 import { ChapterBrowseDetailRail } from "../editor/ChapterBrowseDetailRail.js"
 import { ChapterPanel } from "../editor/ChapterPanel.js"

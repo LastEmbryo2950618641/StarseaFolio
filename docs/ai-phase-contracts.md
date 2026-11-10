@@ -1,4 +1,4 @@
-# Worldseed AI 阶段契约
+# StarseaFolio AI 阶段契约
 
 ## 1. 目标
 

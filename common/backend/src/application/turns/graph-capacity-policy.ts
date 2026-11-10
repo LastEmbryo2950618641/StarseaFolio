@@ -1,5 +1,5 @@
-import type { GraphLink, ProjectId } from "@worldseed/contracts"
-import type { GraphGovernanceArtifact, GraphStructurePlanArtifact } from "@worldseed/prompt-contracts"
+import type { GraphLink, ProjectId } from "@starseafolio/contracts"
+import type { GraphGovernanceArtifact, GraphStructurePlanArtifact } from "@starseafolio/prompt-contracts"
 
 import type { GraphDegreeEntry, GraphDegreeProfile, GraphRepository } from "./ports/index.js"
 

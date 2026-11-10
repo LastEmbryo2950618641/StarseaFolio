@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowLeft, ChevronRight, Plus, CheckCircle2, Eye, EyeOff, KeyRound, LoaderCircle, RefreshCw, Server, Trash2 } from "lucide-react"
 
-import type { ModelDescriptor, ModelListResult } from "@worldseed/contracts"
+import type { ModelDescriptor, ModelListResult } from "@starseafolio/contracts"
 
 import { listModelCatalog } from "../../api/client.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
@@ -315,7 +315,7 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
               </select>
             </label>
             <div className="model-field">
-              <span>服务端响应存储<small>关闭后仅保留 Worldseed 本地历史</small></span>
+              <span>服务端响应存储<small>关闭后仅保留 StarseaFolio 本地历史</small></span>
               <button className={`model-toggle ${selectedProfile.disableResponseStorage ? "" : "enabled"}`} type="button" role="switch" aria-checked={!selectedProfile.disableResponseStorage} onClick={() => { updateSelected({ disableResponseStorage: !selectedProfile.disableResponseStorage }); }}><i /><strong>{selectedProfile.disableResponseStorage ? "已关闭" : "已开启"}</strong></button>
             </div>
             <div className="model-field">

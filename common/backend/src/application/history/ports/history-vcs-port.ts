@@ -1,4 +1,4 @@
-import type { HistoryManifest } from "@worldseed/contracts"
+import type { HistoryManifest } from "@starseafolio/contracts"
 
 export type HistorySnapshotFile = Readonly<{
   gitPath: string

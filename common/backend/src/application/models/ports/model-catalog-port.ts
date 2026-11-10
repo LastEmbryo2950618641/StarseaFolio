@@ -1,4 +1,4 @@
-import type { ModelListPayload, ModelListResult } from "@worldseed/contracts"
+import type { ModelListPayload, ModelListResult } from "@starseafolio/contracts"
 
 export type ModelCatalogPort = Readonly<{
   list(input: ModelListPayload): Promise<ModelListResult>

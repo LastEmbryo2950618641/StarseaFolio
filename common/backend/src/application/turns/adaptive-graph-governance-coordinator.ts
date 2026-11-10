@@ -1,4 +1,4 @@
-import { graphGovernanceArtifactSchema, type GraphGovernanceArtifact } from "@worldseed/prompt-contracts"
+import { graphGovernanceArtifactSchema, type GraphGovernanceArtifact } from "@starseafolio/prompt-contracts"
 
 export type AdaptiveGraphGovernanceMode =
   | "no_change"

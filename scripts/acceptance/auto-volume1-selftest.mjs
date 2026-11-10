@@ -2,7 +2,7 @@
  * Self-test: create a new book, pause once for volume outline, then Auto one-shot volume 1.
  *
  * Requires Electron with CDP:
- *   WORLDSEED_CDP_PORT=9230 corepack pnpm --filter @worldseed/desktop dev
+ *   WORLDSEED_CDP_PORT=9230 corepack pnpm --filter @starseafolio/desktop dev
  *
  * Usage (repo root):
  *   node scripts/acceptance/auto-volume1-selftest.mjs

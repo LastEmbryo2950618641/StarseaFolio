@@ -5,7 +5,7 @@ import {
   persistentIdPrefixSchema,
   type PersistentIdPrefix,
   type ProjectId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { ProjectIdAllocatorPort } from "../../../application/ids/index.js"
 import type { ProjectDatabase } from "../database-types.js"

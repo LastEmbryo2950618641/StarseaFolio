@@ -1,4 +1,4 @@
-import type { ModelContextMessage, ProjectId } from "@worldseed/contracts"
+import type { ModelContextMessage, ProjectId } from "@starseafolio/contracts"
 
 import { estimateModelMessageTokens } from "../context/context-window-manager.js"
 import { runtimeLog } from "../../infrastructure/diagnostics/index.js"

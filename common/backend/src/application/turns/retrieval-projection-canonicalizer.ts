@@ -1,4 +1,4 @@
-import type { ProjectId, ScopeId } from "@worldseed/contracts"
+import type { ProjectId, ScopeId } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 

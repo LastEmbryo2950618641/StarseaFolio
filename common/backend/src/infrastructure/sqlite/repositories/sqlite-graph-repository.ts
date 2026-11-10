@@ -5,7 +5,7 @@ import type {
   GraphNode,
   ProjectId,
   ScopeId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import {
   digest,

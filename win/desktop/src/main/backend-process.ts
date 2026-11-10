@@ -6,9 +6,9 @@ import {
   type MessagePortMain,
   type UtilityProcess,
 } from "electron"
-import type { ClientRequest, ClientResponse } from "@worldseed/contracts"
-import { errorDetails, runtimeLog } from "@worldseed/backend"
-import type { RuntimeDiagnosticsConfig } from "@worldseed/config"
+import type { ClientRequest, ClientResponse } from "@starseafolio/contracts"
+import { errorDetails, runtimeLog } from "@starseafolio/backend"
+import type { RuntimeDiagnosticsConfig } from "@starseafolio/config"
 
 export type BackendProcessOptions = Readonly<{
   applicationDataRoot: string
@@ -67,7 +67,7 @@ export class BackendProcess {
     })
     const child = utilityProcess.fork(join(import.meta.dirname, "backend-host.js"), [], {
       env: { ...process.env },
-      serviceName: "Worldseed Backend",
+      serviceName: "StarseaFolio Backend",
       stdio: "pipe",
     })
     const { port1, port2 } = new MessageChannelMain()

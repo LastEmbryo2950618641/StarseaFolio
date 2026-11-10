@@ -1,4 +1,4 @@
-import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@worldseed/contracts"
+import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
 
 export type ChoiceVariant = Readonly<{
   original: string

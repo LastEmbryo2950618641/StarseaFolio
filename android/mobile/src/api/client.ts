@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type BackendMethod, type ClientResponse } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type BackendMethod, type ClientResponse } from "@starseafolio/contracts"
 
 export type MobileSession = Readonly<{
   apiBaseUrl: string

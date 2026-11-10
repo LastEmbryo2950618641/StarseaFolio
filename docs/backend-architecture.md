@@ -1,4 +1,4 @@
-# Worldseed：后端代码架构设计
+# StarseaFolio：后端代码架构设计
 
 ## 1. 目标与边界
 
@@ -452,7 +452,7 @@ type ModelExecutionResult<TOutput> = {
 
 用户主动取消使用另一条运行时 signal：`BackendFacade` 为每个 start/resume 执行代次持有独立 `AbortController`，经 `TurnExecutionHooks -> AIModelPort.execute options -> DeepSeek SDK request options` 传递，并与单请求及整轮超时 signal 合并。controller 不进入任何持久化协议。取消会中止当前网络请求并在阶段边界停止编排；异步完成回调必须校验当前 controller 身份，不能在取消后覆盖任务状态。取消只终止执行，保留 pending scope 和检查点，不提交也不物理删除它们。
 
-V1 不依赖 Tool Calling。模型需要查询或提出修改时，先返回 Worldseed 自己的结构化 JSON，应用层执行 `request_read` 或暂存 mutation，再把结果放入下一次模型输入。未来接入 Tool Calling 时，只能在 `DeepSeekAdapter` 内转换为相同的 `AIPhaseResult`，不能改变应用层协议。
+V1 不依赖 Tool Calling。模型需要查询或提出修改时，先返回 StarseaFolio 自己的结构化 JSON，应用层执行 `request_read` 或暂存 mutation，再把结果放入下一次模型输入。未来接入 Tool Calling 时，只能在 `DeepSeekAdapter` 内转换为相同的 `AIPhaseResult`，不能改变应用层协议。
 
 供应商适配器负责认证、流式传输、重试限制、token 统计和原始错误转换。它不能修改阶段输出的世界含义。
 
@@ -698,7 +698,7 @@ SemanticReviewPlanner
 ### 16.2 内部目录
 
 ```text
-<app-data>/Worldseed/
+<app-data>/StarseaFolio/
 ├── registry.sqlite
 └── projects/<projectId>/
     ├── project.sqlite
@@ -943,6 +943,6 @@ Debug 级性能剖析必须保持世界语义无关，并覆盖以下边界：
 
 ## 26. 最终定义
 
-Worldseed 后端是一个本地优先、模块化、无领域 schema 的 AI 推演基础设施：
+StarseaFolio 后端是一个本地优先、模块化、无领域 schema 的 AI 推演基础设施：
 
 > 应用层负责组织 AI 阶段和机械任务，核心层提供图、修订、作用域、原文和检索原语，基础设施层负责数据库、文件、索引和模型接入；世界里存在什么、如何变化、如何查询和是否合理，始终由 AI 决定。

@@ -1,7 +1,7 @@
 import type { Kysely } from "kysely"
 import { sql } from "kysely"
 
-import type { ProjectId, ScopeId } from "@worldseed/contracts"
+import type { ProjectId, ScopeId } from "@starseafolio/contracts"
 
 import type {
   RetrievalProjection,

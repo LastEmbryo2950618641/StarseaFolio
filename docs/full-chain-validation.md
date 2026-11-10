@@ -1,8 +1,8 @@
-# Worldseed 全链路自动化验证
+# StarseaFolio 全链路自动化验证
 
 ## 1. 目标
 
-本验证用于证明 Worldseed 在真实 Electron、真实 DeepSeek、真实项目数据库和真实 Markdown 工作区中形成完整产品闭环。Fake 模型、单元测试、静态原型和模型自报审核结果只能作为辅助证据，不能把能力标记为通过。
+本验证用于证明 StarseaFolio 在真实 Electron、真实 DeepSeek、真实项目数据库和真实 Markdown 工作区中形成完整产品闭环。Fake 模型、单元测试、静态原型和模型自报审核结果只能作为辅助证据，不能把能力标记为通过。
 
 全链路验收必须同时覆盖：
 

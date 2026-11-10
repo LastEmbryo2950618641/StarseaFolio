@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { X } from "lucide-react"
-import type { DeductionGoalsSnapshot } from "@worldseed/contracts"
+import type { DeductionGoalsSnapshot } from "@starseafolio/contracts"
 
 import { invokeBackend } from "../../api/client.js"
 import { listReviewableProgress } from "./creation-desk-goals.js"

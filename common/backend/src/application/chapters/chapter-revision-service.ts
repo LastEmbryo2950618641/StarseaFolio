@@ -13,7 +13,7 @@ import {
   type RevisionDraftVersion,
   type RevisionDraftVersionListResult,
   type RevisionDraftVersionSource,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import {
   assembleChapterDocument,
@@ -26,7 +26,7 @@ import {
 } from "../../core/index.js"
 import { buildSourceUnitExactKeys } from "../retrieval/index.js"
 import type { AIModelPort, PromptResourcePort } from "../turns/ports/ai-model-port.js"
-import { revisionReviewArtifactSchema } from "@worldseed/prompt-contracts"
+import { revisionReviewArtifactSchema } from "@starseafolio/prompt-contracts"
 import type { ProjectIdAllocatorPort } from "../ids/index.js"
 import type { InternalProjectStore, InternalStorePort, WorkspacePort } from "../workspace/index.js"
 import type { DocumentRepository, RetrievalRepository, ScopeCommitRepository, TaskScopeRepository } from "../turns/index.js"

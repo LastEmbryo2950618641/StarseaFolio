@@ -1,5 +1,5 @@
 {
-  "name": "@worldseed/config",
+  "name": "@starseafolio/config",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,7 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@worldseed/contracts": "workspace:*",
+    "@starseafolio/contracts": "workspace:*",
     "zod": "^4.0.0"
   }
 }

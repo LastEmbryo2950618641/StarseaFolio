@@ -8,7 +8,7 @@
 
 ```bash
 # 仓库根
-pnpm --filter @worldseed/contracts build
+pnpm --filter @starseafolio/contracts build
 
 cd android/mobile
 npm ci

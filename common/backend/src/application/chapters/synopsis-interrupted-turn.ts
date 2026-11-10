@@ -1,7 +1,7 @@
 import type {
   SynopsisConversationMessage,
   SynopsisConversationStreamSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { normalizeThinkingDisplayText } from "./synopsis-thinking-text.js"
 

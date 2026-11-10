@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { projectSettingsSchema, type ProjectSettings, type WorldDivergenceMode } from "@worldseed/contracts"
+import { projectSettingsSchema, type ProjectSettings, type WorldDivergenceMode } from "@starseafolio/contracts"
 
 import type {
   AppUpdateInfoResult,
@@ -65,7 +65,7 @@ const sections: readonly SectionDefinition[] = [
   { id: "history", label: "推演历史", group: "项目", keywords: "保存 历史 世界线 保留 上限 删除", icon: History },
   { id: "model", label: "模型服务", group: "应用", keywords: "base url api key deepseek 模型", icon: Bot },
   { id: "workDirectory", label: "工作目录", group: "应用", keywords: "书籍 存放 路径 目录 新建 默认", icon: FolderOpen },
-  { id: "about", label: "关于", group: "应用", keywords: "版本 构建号 更新 检查 关于 worldseed", icon: Info },
+  { id: "about", label: "关于", group: "应用", keywords: "版本 构建号 更新 检查 关于 星海余页 starseafolio", icon: Info },
 ]
 
 const appOnlySections = new Set<SettingsSection>(["workDirectory", "about"])

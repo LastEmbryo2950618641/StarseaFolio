@@ -9,14 +9,14 @@ import {
   type ModelContextMessageDraft,
   type PhaseRequestEnvelope,
   type VisibleModelContextMessage,
-} from "@worldseed/contracts"
-import type { DeepSeekRuntimeConfig } from "@worldseed/config"
+} from "@starseafolio/contracts"
+import type { DeepSeekRuntimeConfig } from "@starseafolio/config"
 import {
   FictionDeliveryError,
   fictionDeliveryReminder,
   inspectPhaseFictionDelivery,
   isFictionDeliveryPhase,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 import type {
   AIModelPort,
@@ -34,7 +34,7 @@ import {
 import { createModelReferenceView, type ModelReferenceView } from "./model-reference-view.js"
 import { errorDetails, runtimeLog } from "../../diagnostics/index.js"
 
-const OPENAI_COMPATIBLE_USER_AGENT = "Worldseed/0.1"
+const OPENAI_COMPATIBLE_USER_AGENT = "StarseaFolio/0.1"
 
 export type SecretProvider = Readonly<{
   getSecret(reference: string): Promise<string>
@@ -126,7 +126,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       this.clientPromise,
     ])
     const protocolMessage = [
-      `Worldseed protocol ${PROTOCOL_VERSION}.`,
+      `StarseaFolio protocol ${PROTOCOL_VERSION}.`,
       `Current phase: ${request.phase}.`,
       "Return exactly one JSON object and no Markdown fences or commentary.",
       "The system prefix contains the complete mandatory output schema; the final user message contains current request-specific requirements.",

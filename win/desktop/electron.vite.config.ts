@@ -16,7 +16,7 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin({ exclude: ["@worldseed/contracts"] })],
+    plugins: [externalizeDepsPlugin({ exclude: ["@starseafolio/contracts"] })],
     build: {
       rollupOptions: {
         input: resolve(import.meta.dirname, "src/preload/index.ts"),

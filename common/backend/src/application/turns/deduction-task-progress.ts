@@ -1,4 +1,4 @@
-import type { DeductionTask } from "@worldseed/contracts"
+import type { DeductionTask } from "@starseafolio/contracts"
 
 const draftProgressStages = [
   "interpret",

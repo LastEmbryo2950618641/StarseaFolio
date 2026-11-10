@@ -5,7 +5,7 @@ import {
   idSchema,
   storedObjectReferenceIdSchema,
   type ProjectId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type {
   InternalProjectStore,

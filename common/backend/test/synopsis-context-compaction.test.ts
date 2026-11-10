@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { rmSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 import type { AIModelPort, TurnPhaseInput } from "../src/application/turns/ports/ai-model-port.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
 import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"

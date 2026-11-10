@@ -1,4 +1,4 @@
-import type { AIPhase } from "@worldseed/contracts"
+import type { AIPhase } from "@starseafolio/contracts"
 
 export const FICTION_DELIVERY_OPENING_WINDOW = 160
 

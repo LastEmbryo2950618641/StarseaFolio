@@ -1,4 +1,4 @@
-import type { GraphLink, GraphNode, ProjectId, ScopeId } from "@worldseed/contracts"
+import type { GraphLink, GraphNode, ProjectId, ScopeId } from "@starseafolio/contracts"
 
 import type { GraphRevision } from "../../../core/index.js"
 

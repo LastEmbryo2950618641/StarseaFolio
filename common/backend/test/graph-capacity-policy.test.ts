@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { graphGovernanceArtifactSchema } from "@worldseed/prompt-contracts"
+import { graphGovernanceArtifactSchema } from "@starseafolio/prompt-contracts"
 
 import { assessGraphGovernanceCapacity } from "../src/index.js"
 

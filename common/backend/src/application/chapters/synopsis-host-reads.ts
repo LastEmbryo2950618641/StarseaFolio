@@ -1,7 +1,7 @@
 import { lstat, readdir, realpath } from "node:fs/promises"
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path"
 
-import type { PhaseResultEnvelope } from "@worldseed/contracts"
+import type { PhaseResultEnvelope } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 import type { TurnReadEvidence } from "../turns/ports/ai-model-port.js"

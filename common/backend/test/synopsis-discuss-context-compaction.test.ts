@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { ModelContextMessage } from "@worldseed/contracts"
+import type { ModelContextMessage } from "@starseafolio/contracts"
 import { MODEL_CONTEXT_DELTA_HEADER } from "../src/application/context/model-context-appender.js"
 import {
   compactDiscussContextHistory,

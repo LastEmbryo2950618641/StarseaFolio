@@ -3,7 +3,7 @@ import type {
   ProjectId,
   ReadRequest,
   WorkspaceCatalogSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 import type { TurnReadEvidence } from "../turns/ports/ai-model-port.js"

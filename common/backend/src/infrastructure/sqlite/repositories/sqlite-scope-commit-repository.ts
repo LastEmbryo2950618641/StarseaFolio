@@ -1,7 +1,7 @@
 import type { Kysely, Transaction } from "kysely"
 import { sql } from "kysely"
 
-import type { ScopeId } from "@worldseed/contracts"
+import type { ScopeId } from "@starseafolio/contracts"
 
 import type {
   ResetPendingOptions,

@@ -5,7 +5,7 @@ import type {
   SynopsisConversationStreamSearch,
   SynopsisConversationStreamSnapshot,
   SynopsisConversationThinkingRound,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 export type DiscussResultField = Readonly<{
   id: string

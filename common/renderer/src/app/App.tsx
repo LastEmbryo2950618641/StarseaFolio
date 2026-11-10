@@ -24,7 +24,7 @@ import type {
   SynopsisConversationBudgetAdvisory,
   SynopsisConversationStreamUsage,
   SynopsisStagingPromoteProposal,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import {
   browserDemoProject,

@@ -20,7 +20,7 @@ import {
   type HistoryRetentionPreview,
   type ProjectId,
   type TurnContext,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type {
   BeginHistorySaveInput,

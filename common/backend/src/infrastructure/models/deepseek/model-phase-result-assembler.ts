@@ -9,7 +9,7 @@ import {
   type PhaseRequestEnvelope,
   type PhaseResultEnvelope,
   type ReadRequest,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import {
   assertFrontierSettlementCoversReview,
   assertCommitReviewCoversTemporalClaims,
@@ -24,7 +24,7 @@ import {
   semanticReviewArtifactSchema,
   phaseArtifactJsonSchema,
   parsePhaseArtifact,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 import {
   canonicalizeEvidenceReadId,

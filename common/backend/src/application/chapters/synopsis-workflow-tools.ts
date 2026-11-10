@@ -3,7 +3,7 @@ import type {
   ProjectId,
   SynopsisConversationTodo,
   VisibleModelContextMessage,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import type { AIModelPort } from "../turns/ports/ai-model-port.js"
 import type { SynopsisBashResult } from "./synopsis-host-bash.js"
 

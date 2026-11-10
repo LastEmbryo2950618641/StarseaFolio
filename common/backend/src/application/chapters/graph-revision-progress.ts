@@ -1,4 +1,4 @@
-import type { GraphRevisionTask } from "@worldseed/contracts"
+import type { GraphRevisionTask } from "@starseafolio/contracts"
 const revisionProgressStages = [
   { phase: "graph_governance", phases: ["graph_governance", "interpret", "rule_assembly", "source_retrieval", "emergence_planning", "emergence_review"] },
   { phase: "dependency_audit", phases: ["dependency_audit"] },

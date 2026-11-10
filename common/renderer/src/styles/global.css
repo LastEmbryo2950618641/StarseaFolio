@@ -1,5 +1,5 @@
 @font-face {
-  font-family: "Worldseed Yuan";
+  font-family: "StarseaFolio Yuan";
   src: local("YouYuan"), local("幼圆"), local("Yuanti SC"), local("STYuanti");
   font-weight: 100 900;
   font-style: normal;
@@ -53,7 +53,7 @@
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  --font-ui: "Worldseed Yuan", "YouYuan", "幼圆", "Yuanti SC", "STYuanti", "Microsoft YaHei UI", sans-serif;
+  --font-ui: "StarseaFolio Yuan", "YouYuan", "幼圆", "Yuanti SC", "STYuanti", "Microsoft YaHei UI", sans-serif;
   --font-mono: Consolas, "Cascadia Code", ui-monospace, monospace;
   color: var(--text);
   background: var(--bg-app);

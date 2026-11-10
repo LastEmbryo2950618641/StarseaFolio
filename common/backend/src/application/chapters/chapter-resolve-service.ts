@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely"
 
-import type { ProjectId } from "@worldseed/contracts"
+import type { ProjectId } from "@starseafolio/contracts"
 
 import type { ChapterIndexRecord, SqliteChapterIndexRepository } from "../../infrastructure/sqlite/repositories/sqlite-chapter-index-repository.js"
 import type { ChapterRevisionRepository } from "./ports/chapter-revision-repository.js"

@@ -8,7 +8,7 @@ import {
   type DeductionGoalsSnapshot,
   type ProjectSettings,
   type TurnDeductionGoalBundle,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 

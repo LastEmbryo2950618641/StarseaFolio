@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { graphGovernanceReviewProjectionSchema } from "@worldseed/prompt-contracts"
+import { graphGovernanceReviewProjectionSchema } from "@starseafolio/prompt-contracts"
 
 import {
   buildCommitReviewProjection,

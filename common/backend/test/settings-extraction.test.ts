@@ -3,7 +3,7 @@ import { rmSync } from "node:fs"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { PROTOCOL_VERSION, type SettingsExtractionSnapshot } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type SettingsExtractionSnapshot } from "@starseafolio/contracts"
 
 import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 

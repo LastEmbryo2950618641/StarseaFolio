@@ -1,4 +1,4 @@
-import { modelListResultSchema, type ModelListPayload, type ModelListResult } from "@worldseed/contracts"
+import { modelListResultSchema, type ModelListPayload, type ModelListResult } from "@starseafolio/contracts"
 
 import type { ModelCatalogPort } from "../../../application/index.js"
 import { DeepSeekModelError } from "./deepseek-model-adapter.js"

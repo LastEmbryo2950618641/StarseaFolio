@@ -9,7 +9,7 @@ import {
   type GraphRetrievalDesignArtifact,
   type GraphSpacetimeSettlementArtifact,
   type GraphStructurePlanArtifact,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 export type GraphGovernanceResponsibility = "structure" | "capacity" | "spacetime" | "retrieval"
 

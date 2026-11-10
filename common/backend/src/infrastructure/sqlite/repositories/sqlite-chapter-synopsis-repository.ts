@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely"
 
-import type { ChapterSynopsis, ProjectId } from "@worldseed/contracts"
+import type { ChapterSynopsis, ProjectId } from "@starseafolio/contracts"
 
 import type { ProjectDatabase } from "../database-types.js"
 

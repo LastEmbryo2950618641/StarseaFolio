@@ -3,8 +3,8 @@ import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 import { fileURLToPath } from "node:url"
 
-import { defaultDeepSeekRuntimeConfig } from "@worldseed/config"
-import { PROTOCOL_VERSION, type PhaseRequestEnvelope, type PhaseResultEnvelope } from "@worldseed/contracts"
+import { defaultDeepSeekRuntimeConfig } from "@starseafolio/config"
+import { PROTOCOL_VERSION, type PhaseRequestEnvelope, type PhaseResultEnvelope } from "@starseafolio/contracts"
 import { APIConnectionError } from "openai"
 import { describe, expect, it } from "vitest"
 import { createGraphRevisionModel } from "../src/application/chapters/graph-revision-model.js"
@@ -156,7 +156,7 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(completionMessages.slice(0, 4).map((message) => message.role)).toEqual(["system", "system", "system", "system"])
     expect(completionMessages[0]?.content).toBe("stable system rules")
     expect(completionMessages[1]?.content).toBe("prepared phase instruction")
-    expect(completionMessages[2]?.content).toContain("Worldseed protocol")
+    expect(completionMessages[2]?.content).toContain("StarseaFolio protocol")
     expect(completionMessages[3]?.content).toContain("complete model-facing result schema")
     expect(completionMessages[3]?.content).toContain('"outcome":"continue"')
     expect(completionMessages.some((message) => message.content === "# synopsis_discuss\n旧阶段提示")).toBe(true)
@@ -1515,7 +1515,7 @@ describe("DeepSeekAiModelAdapter", () => {
     try {
       const execution = await adapter.execute(phaseRequest)
       expect(receivedPath).toBe("/responses")
-      expect(receivedUserAgent).toBe("Worldseed/0.1")
+      expect(receivedUserAgent).toBe("StarseaFolio/0.1")
       expect(receivedBody.store).toBe(false)
       expect(receivedBody.service_tier).toBe("fast")
       expect(receivedBody.reasoning).toEqual({ effort: "xhigh", summary: "detailed" })

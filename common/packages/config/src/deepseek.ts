@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { deepSeekReasoningEffortSchema } from "@worldseed/contracts"
+import { deepSeekReasoningEffortSchema } from "@starseafolio/contracts"
 
 import { defaultTurnWallTimeMs } from "./profiles.js"
 

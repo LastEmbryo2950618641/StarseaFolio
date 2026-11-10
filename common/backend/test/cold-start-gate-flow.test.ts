@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import Database from "better-sqlite3"
 
-import { PROTOCOL_VERSION, type PhaseRequestEnvelope, type SynopsisConversationChoice } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type PhaseRequestEnvelope, type SynopsisConversationChoice } from "@starseafolio/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
 import { assessWorkStyleMarkdown, WORK_STYLE_RULE_PATH } from "../src/core/workspace/work-style-gate.js"

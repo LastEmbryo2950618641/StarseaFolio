@@ -1,4 +1,4 @@
-# Worldseed：通用时空锚点设计
+# StarseaFolio：通用时空锚点设计
 
 ## 1. 目标
 

@@ -1,4 +1,4 @@
-import type { DiscussAgentMode } from "@worldseed/contracts"
+import type { DiscussAgentMode } from "@starseafolio/contracts"
 
 export function discussAgentModePromptAppendix(
   mode: DiscussAgentMode,

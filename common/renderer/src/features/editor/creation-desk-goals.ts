@@ -3,12 +3,12 @@ import type {
   DeductionGoalProgress,
   DeductionGoalProposal,
   DeductionGoalsSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import {
   isGoalRelevantToChapter,
   labelForGoalProgressStatus,
   labelForGoalRowChip,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 export const CREATION_DESK_GOALS_PAGE_SIZE = 8
 

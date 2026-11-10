@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises"
 import { resolve } from "node:path"
 
-import { PROTOCOL_VERSION, type ProjectId } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type ProjectId } from "@starseafolio/contracts"
 
 import {
   PROJECT_MANIFEST_VERSION,

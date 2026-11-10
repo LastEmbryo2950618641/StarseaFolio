@@ -4,8 +4,8 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
-import { synopsisDiscussArtifactSchema } from "@worldseed/prompt-contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
+import { synopsisDiscussArtifactSchema } from "@starseafolio/prompt-contracts"
 
 import { applySearchReplace } from "../src/application/chapters/markdown-search-replace.js"
 import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"

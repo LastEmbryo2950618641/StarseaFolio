@@ -5,7 +5,7 @@ import {
   PLATFORM_BASE_RULE_RESOURCES,
   WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES,
   defaultSkillIdsForPhase,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 import { resolveWhitelistedSkillScript } from "../src/application/chapters/skill-script-whitelist.js"
 import { NodePromptResourceAdapter } from "../src/infrastructure/prompts/node-prompt-resource-adapter.js"

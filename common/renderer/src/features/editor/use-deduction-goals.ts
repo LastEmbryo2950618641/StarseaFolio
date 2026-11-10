@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import type { DeductionGoalsSnapshot } from "@worldseed/contracts"
+import type { DeductionGoalsSnapshot } from "@starseafolio/contracts"
 
 import { invokeBackend } from "../../api/client.js"
 import {

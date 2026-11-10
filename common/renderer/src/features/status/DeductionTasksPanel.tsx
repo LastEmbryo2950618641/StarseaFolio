@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, CheckCircle2, Circle, Loader2, RefreshCw, RotateCcw, X } from "lucide-react"
-import type { DeductionTask, ResettableRuntimeMetricId } from "@worldseed/contracts"
+import type { DeductionTask, ResettableRuntimeMetricId } from "@starseafolio/contracts"
 import { invokeBackend, type OpenProject, type TaskSnapshot } from "../../api/client.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
 import { PhaseIoDetails, PhaseIoPending } from "./phase-io-details.js"

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { rmSync } from "node:fs"
 
 import { afterEach, describe, expect, it } from "vitest"
-import { PROTOCOL_VERSION, type DeductionTask } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type DeductionTask } from "@starseafolio/contracts"
 
 import { deductionTaskProgress } from "../src/application/turns/deduction-task-progress.js"
 import { openChapterHarness, waitForTask } from "./helpers/chapter-coordination-harness.js"

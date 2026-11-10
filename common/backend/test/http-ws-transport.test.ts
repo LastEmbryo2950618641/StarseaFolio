@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { randomUUID } from "node:crypto"
 
 import { afterEach, describe, expect, it } from "vitest"
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 
 import { BackendContainer } from "../src/bootstrap/container.js"
 import { BackendFacade } from "../src/bootstrap/backend-facade.js"

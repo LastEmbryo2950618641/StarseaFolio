@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { MODEL_CONTEXT_DELTA_HEADER } from "../src/application/context/model-context-appender.js"
 import { buildContextUsageBreakdown } from "../src/application/context/context-usage-breakdown.js"
 import { estimateModelMessageTokens } from "../src/application/context/context-window-manager.js"
-import type { ModelContextMessage } from "@worldseed/contracts"
+import type { ModelContextMessage } from "@starseafolio/contracts"
 
 function message(
   partial: Pick<ModelContextMessage, "kind" | "content" | "sequence"> & Partial<ModelContextMessage>,

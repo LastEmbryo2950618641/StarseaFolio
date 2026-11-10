@@ -4,13 +4,13 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 import type {
   SettingsLineageCommitResult,
   SettingsLineageListResult,
   SettingsLineagePathsResult,
   SettingsLineageReadAsOfResult,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 

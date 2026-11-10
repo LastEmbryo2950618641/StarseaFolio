@@ -4,7 +4,7 @@ import type {
   GraphNode,
   ScopeId,
   Visibility,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 export type GraphTargetKind = "node" | "link"
 export type GraphRevisionOperation = "create" | "edit" | "retire"

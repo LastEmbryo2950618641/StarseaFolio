@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import Database from "better-sqlite3"
 
-import { PROTOCOL_VERSION, type ProjectSettings } from "@worldseed/contracts"
+import { PROTOCOL_VERSION, type ProjectSettings } from "@starseafolio/contracts"
 
 import {
   isExplicitWholeVolumePlanningRequest,

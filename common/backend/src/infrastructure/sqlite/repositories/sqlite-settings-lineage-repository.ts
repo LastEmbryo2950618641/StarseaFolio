@@ -6,7 +6,7 @@ import type {
   SettingsLineageEntry,
   SettingsLineageOp,
   SettingsLineageSourceKind,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { ProjectDatabase, SettingsCommitRow } from "../database-types.js"
 

@@ -1,4 +1,4 @@
-import type { ProjectId, SynopsisConversationChoice, SynopsisConversationMessage } from "@worldseed/contracts"
+import type { ProjectId, SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
 import type { WorkspacePort } from "../workspace/index.js"
 import { digest } from "../../core/identity/digest.js"
 import type { SqliteCreativeSetupRepository } from "../../infrastructure/sqlite/repositories/sqlite-creative-setup-repository.js"

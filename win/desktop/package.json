@@ -1,5 +1,5 @@
 {
-  "name": "@worldseed/desktop",
+  "name": "@starseafolio/desktop",
   "version": "0.1.1",
   "private": true,
   "description": "星海余页 (StarseaFolio) desktop novel writing app",
@@ -17,9 +17,9 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-query": "^5.83.0",
-    "@worldseed/backend": "workspace:*",
-    "@worldseed/config": "workspace:*",
-    "@worldseed/contracts": "workspace:*",
+    "@starseafolio/backend": "workspace:*",
+    "@starseafolio/config": "workspace:*",
+    "@starseafolio/contracts": "workspace:*",
     "graphology": "^0.26.0",
     "lucide-react": "^0.468.0",
     "monaco-editor": "^0.52.2",

@@ -1,6 +1,6 @@
 import { resolve } from "node:path"
 
-import { listPlatformSkills } from "@worldseed/prompt-contracts"
+import { listPlatformSkills } from "@starseafolio/prompt-contracts"
 
 /**
  * Resolve a skill script under prompt-contracts resources/skills/<id>/scripts/.

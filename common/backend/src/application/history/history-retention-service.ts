@@ -1,4 +1,4 @@
-import type { HistoryRetentionPreview, ProjectId } from "@worldseed/contracts"
+import type { HistoryRetentionPreview, ProjectId } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 import type {

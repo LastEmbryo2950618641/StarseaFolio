@@ -1,4 +1,4 @@
-import type { WorkspaceCatalogSnapshot } from "@worldseed/contracts"
+import type { WorkspaceCatalogSnapshot } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 import { scoreWebSearchHit } from "../retrieval/web-search-relevance.js"

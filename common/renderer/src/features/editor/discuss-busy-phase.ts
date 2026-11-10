@@ -1,4 +1,4 @@
-import type { SynopsisConversationStreamSnapshot } from "@worldseed/contracts"
+import type { SynopsisConversationStreamSnapshot } from "@starseafolio/contracts"
 
 /** Creation-desk discuss busy phase while synopsis.conversation.send is in flight. */
 export type DiscussBusyPhase = "idle" | "generating" | "previewing" | "finalizing"

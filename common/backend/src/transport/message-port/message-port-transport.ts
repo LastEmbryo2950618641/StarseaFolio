@@ -1,4 +1,4 @@
-import type { ClientResponse } from "@worldseed/contracts"
+import type { ClientResponse } from "@starseafolio/contracts"
 import { randomUUID } from "node:crypto"
 
 import type { BackendFacade } from "../../bootstrap/backend-facade.js"

@@ -1,6 +1,6 @@
 import { useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Pencil, RefreshCw, X } from "lucide-react"
-import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@worldseed/contracts"
+import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
 
 import { useChoiceComposer } from "./SynopsisChoiceComposerContext.js"
 import {

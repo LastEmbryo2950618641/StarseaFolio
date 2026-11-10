@@ -3,8 +3,8 @@ import type { Kysely } from "kysely"
 import type {
   SynopsisStagingPromoteProposal,
   SynopsisStagingPromoteStatus,
-} from "@worldseed/contracts"
-import { synopsisStagingPromoteProposalSchema } from "@worldseed/contracts"
+} from "@starseafolio/contracts"
+import { synopsisStagingPromoteProposalSchema } from "@starseafolio/contracts"
 
 import type { ProjectDatabase } from "../database-types.js"
 import { decodeJson, encodeJson } from "../json-codec.js"

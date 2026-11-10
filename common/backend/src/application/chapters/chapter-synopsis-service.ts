@@ -1,6 +1,6 @@
-import type { ChapterSynopsis, ProjectId } from "@worldseed/contracts"
+import type { ChapterSynopsis, ProjectId } from "@starseafolio/contracts"
 
-import type { ChapterArtifactContentState } from "@worldseed/contracts"
+import type { ChapterArtifactContentState } from "@starseafolio/contracts"
 import type { WorkspacePort } from "../workspace/index.js"
 import type { SqliteChapterSynopsisRepository } from "../../infrastructure/sqlite/repositories/sqlite-chapter-synopsis-repository.js"
 import type { SqliteSynopsisConversationRepository } from "../../infrastructure/sqlite/repositories/sqlite-synopsis-conversation-repository.js"

@@ -4,7 +4,7 @@
 
 ## 1. 评测对象与现有缺口
 
-Worldseed 的图治理维护可修订的知识图谱，并通过检索投影和 Source 返回事实及原文。应分别评测事实入图、证据检索、最终回答与修订可靠性，不能仅凭节点数量、流程完成或模型自评认定图谱有效。
+StarseaFolio 的图治理维护可修订的知识图谱，并通过检索投影和 Source 返回事实及原文。应分别评测事实入图、证据检索、最终回答与修订可靠性，不能仅凭节点数量、流程完成或模型自评认定图谱有效。
 
 当前可复用的实现：
 
@@ -175,9 +175,9 @@ corepack pnpm verify:knowledge-graph:validate
 corepack pnpm exec vitest run scripts/acceptance/test/knowledge-graph-evaluation.test.mjs scripts/acceptance/test/knowledge-graph-trace.test.mjs scripts/acceptance/test/knowledge-graph-compare.test.mjs
 
 # 需要已构建的后端、运行中的桌面应用及其 CDP 端口和已配置模型。
-corepack pnpm --filter @worldseed/backend build
+corepack pnpm --filter @starseafolio/backend build
 $env:WORLDSEED_ACCEPTANCE_REAL='1'
-corepack pnpm verify:knowledge-graph --mode graph --desktop-user-data 'C:/Users/liuqi/AppData/Roaming/@worldseed/desktop' --book reed-canal --cases reed-canal-alias,reed-canal-gauge,reed-canal-password,reed-canal-ferry-steward,reed-canal-alias-water,reed-canal-unknown-future --limit 6
+corepack pnpm verify:knowledge-graph --mode graph --desktop-user-data 'C:/Users/liuqi/AppData/Roaming/@starseafolio/desktop' --book reed-canal --cases reed-canal-alias,reed-canal-gauge,reed-canal-password,reed-canal-ferry-steward,reed-canal-alias-water,reed-canal-unknown-future --limit 6
 ```
 
 可通过 `--cdp`、`--timeout`、`--output`、`--benchmark` 指定配置；默认 CDP 为 `http://127.0.0.1:9333`，单轮超时 300 秒。`--mode source-only` 跳过图治理，只保留同样的 Source 与词法索引，使用相同查询编排器，作为 B 组。默认仅选择首本开发书的前 6 题；明确指定 `--book` 和 `--limit 40` 才会选择一本书的全部 40 题。真实调用会消耗当前模型额度。

@@ -12,13 +12,13 @@ import type {
   AIPhase,
   PhaseRequestEnvelope,
   PhaseResultEnvelope,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import {
   dependencyAuditArtifactSchema,
   graphGovernanceArtifactSchema,
   type GraphGovernanceArtifact,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 export class FakeAiModelAdapter implements AIModelPort {
   public readonly info = {

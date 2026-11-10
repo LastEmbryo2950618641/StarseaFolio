@@ -1,4 +1,4 @@
-import { evidenceSchema, type Evidence } from "@worldseed/contracts"
+import { evidenceSchema, type Evidence } from "@starseafolio/contracts"
 import type { Kysely } from "kysely"
 
 import type {

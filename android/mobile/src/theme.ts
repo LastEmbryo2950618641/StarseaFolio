@@ -31,5 +31,5 @@ export const theme = {
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
   },
-  fontUi: '"Worldseed Yuan", YouYuan, "幼圆", "Yuanti SC", "Microsoft YaHei UI", system-ui, sans-serif',
+  fontUi: '"StarseaFolio Yuan", YouYuan, "幼圆", "Yuanti SC", "Microsoft YaHei UI", system-ui, sans-serif',
 } as const

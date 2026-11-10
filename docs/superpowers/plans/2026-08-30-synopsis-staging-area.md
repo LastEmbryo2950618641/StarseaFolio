@@ -6,7 +6,7 @@
 
 **Architecture:** Sixth fixed root + `staging` catalog role; `stagingDelta` merged into fixed Markdown files on send; promote proposals approved via IPC; settled entries retained until char-budget eviction.
 
-**Tech Stack:** TypeScript monorepo (`@worldseed/contracts`, backend workspace core, synopsis service, desktop creation desk).
+**Tech Stack:** TypeScript monorepo (`@starseafolio/contracts`, backend workspace core, synopsis service, desktop creation desk).
 
 **Spec:** `docs/superpowers/specs/2026-08-30-synopsis-staging-area-design.md`
 

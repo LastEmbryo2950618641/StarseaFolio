@@ -26,7 +26,7 @@
 
 ```powershell
 pnpm exec vitest run common/backend/test/lncrawl-reference-service.test.ts common/backend/test/original-work-tool-gates.test.ts common/backend/test/original-work-evidence-gate.test.ts
-pnpm --filter @worldseed/backend build
+pnpm --filter @starseafolio/backend build
 node scripts/acceptance/lncrawl-reference-run.mjs "作品搜索词" "可选来源" "简介中的身份线索1" "简介中的身份线索2"
 ```
 

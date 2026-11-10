@@ -1,7 +1,7 @@
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { RevisionDraftVersion } from "@worldseed/contracts"
+import type { RevisionDraftVersion } from "@starseafolio/contracts"
 
 import { invokeBackend } from "../src/api/client.js"
 import { ChapterDraftDetailPanel, loadChapterDraftHistory } from "../src/features/editor/ChapterBrowseDetailRail.js"

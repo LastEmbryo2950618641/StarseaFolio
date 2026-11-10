@@ -55,10 +55,10 @@ await mkdir(reportDir, { recursive: true })
 
 if (process.env.WORLDSEED_SKIP_BUILD !== "1") {
   console.log("Building packages for DOM settings-extraction e2e…")
-  await run("pnpm", ["--filter", "@worldseed/contracts", "build"])
-  await run("pnpm", ["--filter", "@worldseed/prompt-contracts", "build"])
-  await run("pnpm", ["--filter", "@worldseed/backend", "build"])
-  await run("pnpm", ["--filter", "@worldseed/desktop", "build"])
+  await run("pnpm", ["--filter", "@starseafolio/contracts", "build"])
+  await run("pnpm", ["--filter", "@starseafolio/prompt-contracts", "build"])
+  await run("pnpm", ["--filter", "@starseafolio/backend", "build"])
+  await run("pnpm", ["--filter", "@starseafolio/desktop", "build"])
 }
 
 const electronVite = join(repoRoot, "win/desktop/node_modules/.bin/electron-vite.CMD")

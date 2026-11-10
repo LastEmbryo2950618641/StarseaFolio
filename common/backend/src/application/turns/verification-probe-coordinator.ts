@@ -1,8 +1,8 @@
-import type { ReadRequest } from "@worldseed/contracts"
+import type { ReadRequest } from "@starseafolio/contracts"
 import {
   graphGovernanceArtifactSchema,
   type GraphGovernanceArtifact,
-} from "@worldseed/prompt-contracts"
+} from "@starseafolio/prompt-contracts"
 
 import { digest } from "../../core/index.js"
 import type { VerificationProbeExecution } from "./ports/ai-model-port.js"

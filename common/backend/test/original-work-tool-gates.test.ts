@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { rm } from "node:fs/promises"
 import { expect, it, vi } from "vitest"
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { LncrawlReferenceService } from "../src/infrastructure/web-research/lncrawl-reference-service.js"
 import { openChapterHarness } from "./helpers/chapter-coordination-harness.js"

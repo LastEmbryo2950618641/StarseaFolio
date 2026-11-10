@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { ContextWindowManager, estimateModelMessageTokens } from "../src/index.js"
-import type { ModelContextMessage } from "@worldseed/contracts"
+import type { ModelContextMessage } from "@starseafolio/contracts"
 
 function message(input: Partial<ModelContextMessage> & Pick<ModelContextMessage, "messageId" | "sequence" | "kind" | "tokenEstimate">): ModelContextMessage {
   return {

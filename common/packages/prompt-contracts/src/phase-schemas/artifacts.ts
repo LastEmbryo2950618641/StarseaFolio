@@ -5,7 +5,7 @@ import {
   creationDeskSettingsUpdateSchema,
   discussFocusKindSchema,
   type AIPhase,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 const continuityStatusSchema = z.enum(["pass", "revise", "unknown"])
 const referenceSchema = z.string().min(1)

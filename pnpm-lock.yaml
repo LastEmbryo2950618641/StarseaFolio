@@ -35,13 +35,13 @@ importers:
 
   common/backend:
     dependencies:
-      '@worldseed/config':
+      '@starseafolio/config':
         specifier: workspace:*
         version: link:../packages/config
-      '@worldseed/contracts':
+      '@starseafolio/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
-      '@worldseed/prompt-contracts':
+      '@starseafolio/prompt-contracts':
         specifier: workspace:*
         version: link:../packages/prompt-contracts
       better-sqlite3:
@@ -75,7 +75,7 @@ importers:
 
   common/packages/config:
     dependencies:
-      '@worldseed/contracts':
+      '@starseafolio/contracts':
         specifier: workspace:*
         version: link:../contracts
       zod:
@@ -90,7 +90,7 @@ importers:
 
   common/packages/prompt-contracts:
     dependencies:
-      '@worldseed/contracts':
+      '@starseafolio/contracts':
         specifier: workspace:*
         version: link:../contracts
       zod:
@@ -105,10 +105,10 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.83.0
         version: 5.101.4(react@19.2.8)
-      '@worldseed/config':
+      '@starseafolio/config':
         specifier: workspace:*
         version: link:../packages/config
-      '@worldseed/contracts':
+      '@starseafolio/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
       graphology:
@@ -163,10 +163,10 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.83.0
         version: 5.101.4(react@19.2.8)
-      '@worldseed/config':
+      '@starseafolio/config':
         specifier: workspace:*
         version: link:../packages/config
-      '@worldseed/contracts':
+      '@starseafolio/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
       graphology:
@@ -224,13 +224,13 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.83.0
         version: 5.101.4(react@19.2.8)
-      '@worldseed/backend':
+      '@starseafolio/backend':
         specifier: workspace:*
         version: link:../../common/backend
-      '@worldseed/config':
+      '@starseafolio/config':
         specifier: workspace:*
         version: link:../../common/packages/config
-      '@worldseed/contracts':
+      '@starseafolio/contracts':
         specifier: workspace:*
         version: link:../../common/packages/contracts
       graphology:

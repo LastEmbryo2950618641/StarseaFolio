@@ -1,4 +1,4 @@
-import type { ProjectId } from "@worldseed/contracts"
+import type { ProjectId } from "@starseafolio/contracts"
 
 import type { ChapterIndexRecord } from "../../infrastructure/sqlite/repositories/sqlite-chapter-index-repository.js"
 import { runtimeLog } from "../../infrastructure/diagnostics/index.js"

@@ -71,8 +71,8 @@
 **Files:**
 - Modify: `docs/implementation-status.md` only if the repository status format requires it.
 
-- [ ] Run `pnpm --filter @worldseed/prompt-contracts test`.
-- [ ] Run `pnpm --filter @worldseed/backend test`.
+- [ ] Run `pnpm --filter @starseafolio/prompt-contracts test`.
+- [ ] Run `pnpm --filter @starseafolio/backend test`.
 - [ ] Run `pnpm typecheck` and `pnpm build`.
 - [ ] Run the focused revision acceptance path with the fake model and inspect adaptive routing logs.
 - [ ] Confirm no `turn` or `evolution` phase-order regression before reporting completion.

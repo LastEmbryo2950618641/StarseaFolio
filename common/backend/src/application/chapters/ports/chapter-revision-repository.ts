@@ -4,7 +4,7 @@ import type {
   ChapterRevisionDecision,
   ChapterRevisionReview,
   ProjectId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 export type StoredChapterRevision = ChapterRevision & Readonly<{
   contentRef: string

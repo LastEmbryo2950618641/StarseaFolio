@@ -3,7 +3,7 @@ import {
   assessWorkStyleMarkdown,
   type WorkStyleAssessment,
 } from "../../core/workspace/work-style-gate.js"
-import type { SynopsisConversationChoice } from "@worldseed/contracts"
+import type { SynopsisConversationChoice } from "@starseafolio/contracts"
 
 export type ColdStartAssistSlice = Readonly<{
   synopsisBody?: string

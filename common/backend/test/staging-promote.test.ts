@@ -4,8 +4,8 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { PROTOCOL_VERSION } from "@worldseed/contracts"
-import type { SynopsisConversationSendResult, SynopsisStagingPromoteListResult } from "@worldseed/contracts"
+import { PROTOCOL_VERSION } from "@starseafolio/contracts"
+import type { SynopsisConversationSendResult, SynopsisStagingPromoteListResult } from "@starseafolio/contracts"
 
 import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 

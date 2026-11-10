@@ -1,4 +1,4 @@
-import type { ProjectId, TaskId, WorkspaceCatalogSnapshot } from "@worldseed/contracts"
+import type { ProjectId, TaskId, WorkspaceCatalogSnapshot } from "@starseafolio/contracts"
 
 export type CreateWorkspaceCatalogSnapshotInput = Readonly<{
   snapshotId: string

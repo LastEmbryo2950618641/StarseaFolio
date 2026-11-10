@@ -1,5 +1,5 @@
 {
-  "name": "@worldseed/backend",
+  "name": "@starseafolio/backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,9 +17,9 @@
     "start:http": "node dist/bootstrap/http-entry.js"
   },
   "dependencies": {
-    "@worldseed/config": "workspace:*",
-    "@worldseed/contracts": "workspace:*",
-    "@worldseed/prompt-contracts": "workspace:*",
+    "@starseafolio/config": "workspace:*",
+    "@starseafolio/contracts": "workspace:*",
+    "@starseafolio/prompt-contracts": "workspace:*",
     "better-sqlite3": "^13.0.2",
     "isomorphic-git": "^1.41.2",
     "kysely": "^0.29.4",

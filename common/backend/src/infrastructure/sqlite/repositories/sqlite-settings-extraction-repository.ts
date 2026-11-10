@@ -3,8 +3,8 @@ import type { Kysely } from "kysely"
 import type {
   SettingsExtractionProposal,
   SettingsProposalStatus,
-} from "@worldseed/contracts"
-import { settingsProposalPayloadSchema } from "@worldseed/contracts"
+} from "@starseafolio/contracts"
+import { settingsProposalPayloadSchema } from "@starseafolio/contracts"
 
 import type { ProjectDatabase } from "../database-types.js"
 import { decodeJson, encodeJson } from "../json-codec.js"

@@ -4,7 +4,7 @@ import type {
   SynopsisStagingPromoteListResult,
   SynopsisStagingPromoteProposal,
   SynopsisStagingPromoteWrite,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import { assertWorkspaceMutationAllowed } from "../../core/index.js"
 import type { WorkspacePort } from "../workspace/index.js"
 import type { DeductionGoalsService } from "./deduction-goals-service.js"

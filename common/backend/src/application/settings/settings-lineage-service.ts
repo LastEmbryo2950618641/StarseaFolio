@@ -6,7 +6,7 @@ import type {
   SettingsLineageListResult,
   SettingsLineagePathsResult,
   SettingsLineageSourceKind,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { WorkspacePort } from "../workspace/index.js"
 import {

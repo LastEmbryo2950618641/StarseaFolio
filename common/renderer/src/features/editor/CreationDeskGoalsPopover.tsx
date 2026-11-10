@@ -21,12 +21,12 @@ import type {
   DeductionGoalProgress,
   DeductionGoalProposal,
   DeductionGoalsSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import {
   chapterSituationEmptyHint,
   chapterSituationSectionTitle,
   editChapterSituationLabel,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import { UiTooltip } from "../../components/UiTooltip.js"
 import {

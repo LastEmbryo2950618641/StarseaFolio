@@ -1,7 +1,7 @@
 import {
   workspaceCatalogSnapshotSchema,
   type WorkspaceCatalogSnapshot,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import type { Kysely } from "kysely"
 
 import type { WorkspaceCatalogSnapshotRepository } from "../../../application/index.js"

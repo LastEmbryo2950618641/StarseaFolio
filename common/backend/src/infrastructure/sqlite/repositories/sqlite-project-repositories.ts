@@ -3,7 +3,7 @@ import type { Kysely } from "kysely"
 import {
   PROTOCOL_VERSION,
   type ProjectId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type {
   ProjectManifest,

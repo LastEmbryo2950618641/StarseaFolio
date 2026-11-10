@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@worldseed/contracts"
+import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@starseafolio/contracts"
 
 import { ModelContextAppender } from "../src/index.js"
 

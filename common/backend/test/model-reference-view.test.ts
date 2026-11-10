@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { PhaseRequestEnvelope } from "@worldseed/contracts"
+import type { PhaseRequestEnvelope } from "@starseafolio/contracts"
 
 import { createModelReferenceView } from "../src/infrastructure/models/deepseek/model-reference-view.js"
 

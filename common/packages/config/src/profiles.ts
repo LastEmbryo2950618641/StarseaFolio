@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { projectSettingsSchema } from "@worldseed/contracts"
+import { projectSettingsSchema } from "@starseafolio/contracts"
 
 const positiveInteger = z.number().int().positive()
 const nonnegativeInteger = z.number().int().nonnegative()

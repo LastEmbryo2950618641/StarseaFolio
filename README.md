@@ -1,52 +1,72 @@
-# Worldseed
+# 星海余页 · StarseaFolio
 
-源码已按 `win/`、`android/`、`common/` 划分。Windows 平台入口位于 `win/desktop`，Android 入口位于 `android/mobile`，共享后端、工作台、契约、配置和提示词位于 `common/`。目录职责、运行入口和当前 Android 本地运行边界见 [平台源码目录](docs/platform-source-layout.md)。
+与结衣一起，把一个小小的构思写成长篇故事。
 
-Worldseed 是一个以 AI 自治动态图为目标的实验项目。目标设计、当前代码和已经验收的能力必须分开判断；权威状态见 [设计与实施状态](docs/implementation-status.md)。
+**星海余页（StarseaFolio）**是一款 AI 辅助小说创作软件。你决定故事的方向，智能助手结衣协助选择文风、完善主角、规划每一卷，并逐章生成梗概、大纲和草稿。知识图谱保存故事中的事实与原文依据，让长篇创作中的人物、设定和事件有据可查。
 
-核心目标：
+## 写作工作台
 
-- 万事万物都是节点；
-- 代码不预设人物、地点、势力、时间、状态或边类型；
-- AI拥有节点和连接的新增、编辑、合并、拆分、迁移和归档权限，不物理删除旧结构；
-- AI每次重要修改都说明原因、依据原则自审，并在修改后复核；
-- 候选正文和图修订先进入同一 `pending` 作用域，完整结算后才共同提交；正式正文单独以连续小说形式保存，图通过原文引用返回准确内容；
-- 正文按不可变原文单元生成结算映射，正文中实际出现的全部内容都持久化，同一内容再次出现时优先复用已有局部图；
-- 每次图修改都保留不可变前后修订，当前状态变化连接前置修订、生效时间和新的当前入口；
-- 任意持久记录都有统一检索投影，任意载荷都能通过精确键和 AI生成的语义文本重新召回；
-- 持久化图独立于模型上下文，上下文压缩不能造成世界失忆或状态回退；
-- 每轮推演只使用实际读取的旧图和本轮新内容，正式场景必须具有连续的时间与地点锚点；
-- AI在每轮变化后强制结算演化前沿，并用可调自主度和每轮总调用、总 token、总耗时预算有限推进用户视野外的局部世界；
-- 自主行动只使用行动主体实际可获得的信息，联合演化负责处理局部碰撞和共同世界约束；
-- 正文草稿前扫描当前场景可达的自治局部，主推演整体受调用、token、耗时和循环次数上限约束；
-- AI按版本化 Prompt Contract 分阶段完成依赖审计、图治理、自审、正文结算、前沿结算和提交复核；
-- 基础规则对用户可见但不可修改；用户规则以 Markdown 在明确适用范围内优先于平台默认创作建议，范围外或无法判断时回退默认规则；设定集与参考资料通过 Skill manifest、索引和按需片段选择性注入；
-- 正文只投影少量有依据的自主变化，并通过近期来源去重让不同局部共同形成世界活力感；
-- 新人物、新势力、新事件或其他新内容不按类型和章节配额触发，而由已读取世界无法被现有局部承担的“出现压力”统一决定；
-- 世界活力不要求后台事实俱备，长期未加载区域在重新进入前执行惰性追赶；
-- AI优先在已有结构上生长，避免重复和同义结构；
-- 节点任一方向的直接邻接达到上限时，AI自主提炼更高层含义并递归重构，保证连接从两端都可重新发现；
-- 查询先召回入口再围绕锚点局部展开，地图、关系网、历史、普查和回忆都是临时图投影；
-- 固定长篇测试同时验收历史召回、状态连续、表现控制、矛盾输入处理和读者可感知的世界活力。
-- 提供 IDE 式桌面工作台：左侧管理 Markdown 工作目录，中央进行编辑与正文推演，右侧展示流程、底层图和自洽演化。
-- 每次正式推演由 AI生成连续章节序号和章节名，以 `第一章 xxxx.md` 保存到固定的 `章节正文` 目录，标题同时属于正文并参与图结算。
-- 第一阶段使用 DeepSeek API 作为统一模型基线，采用 JSON Mode，不把运行时绑定到 Claude Code 或某一种 Tool Calling 格式。
+- **从构思到章节**：讨论创作方向、目标读者与笔风，完善主角设定，再确定每卷的主线、支线、章节数和预计字数。
+- **梗概、大纲、草稿与正文**：分别编辑和保留草稿版本；草稿经过审核与图治理后才能成为正式正文。
+- **按你的节奏推进**：逐章引导，或按卷规划批量推进；任务面板展示进度、失败原因和可用的恢复操作。
+- **故事资料与长期记忆**：用 Markdown 管理设定集、描写规则和参考资料，用知识图谱召回已保存的事实及原文证据。
+- **同人资料核实**：结合本地设定、网络检索与内置小说抓取工具查找依据；资料的可用性取决于来源站点与原作形式。
+- **自己的模型配置**：配置模型服务和凭据，在工作台查看上下文与 Token 用量。
 
-当前设计、实现、原型和验收状态首先查看 [docs/implementation-status.md](docs/implementation-status.md)。完整底层设计见 [docs/system-design.md](docs/system-design.md)，项目技术栈、Monorepo 和 Electron 进程边界见 [docs/project-code-architecture.md](docs/project-code-architecture.md)，后端模块、端口、存储和执行管线见 [docs/backend-architecture.md](docs/backend-architecture.md)，后端复用、隔离和依赖约束见 [docs/backend-coding-principles.md](docs/backend-coding-principles.md)，单轮上下文、选择性读取和 KV 缓存复用见 [docs/context-and-kv-cache.md](docs/context-and-kv-cache.md)，AI 阶段输入输出与回流契约见 [docs/ai-phase-contracts.md](docs/ai-phase-contracts.md)，世界内容何时复用、扩展、揭示、创建、延后或拒绝见 [docs/world-emergence-rules.md](docs/world-emergence-rules.md)，规则与资料层级见 [docs/rule-and-source-layers.md](docs/rule-and-source-layers.md)，三种章节修改入口的上下文协调见 [docs/chapter-modification-coordination.md](docs/chapter-modification-coordination.md)，IDE 工作台见 [docs/ui-design.md](docs/ui-design.md)。
+这些是当前产品的工作方式，不代表全部长期设计目标都已验收。具体边界与验证记录见 [设计与实施状态](docs/implementation-status.md)，图谱内核的长期目标见 [图谱与推演设计目标](docs/graph-design-goals.md)。
 
-编码前冻结基线见 [docs/v1-freeze.md](docs/v1-freeze.md)，其中集中定义 V1 最小闭环、接口契约、SQLite 迁移、DeepSeek 代理与缓存配置、默认参数以及基础 Prompt 资源。
+## 下载
 
-## Backend 冒烟运行
+前往 [GitHub Releases](https://github.com/LastEmbryo2950618641/StarseaFolio/releases/latest) 下载：
 
-当前 Backend Utility Process 已支持测试显式注入的 Fake AI、DeepSeek JSON Mode、项目创建、异步回合推演、任务状态查询和 MessagePort/stdio 两种协议入口。桌面应用运行时不会自动使用 Fake AI。
+- **Windows**：`Starsea-Folio-<version>-Setup.exe` 安装包，或 `Starsea-Folio-<version>-Portable.exe` 便携包。
+- **Android**：`Starsea-Folio-<version>-Android-preview.apk` 预览包。
+
+Windows 版在本机保存书库并运行后端，调用模型服务需要网络和自己的服务配置。**目前 APK 是依赖 HTTP 后端的 Expo 预览客户端，尚未包含完整共享工作台或 Android 本地后端**；手机完整工作台可通过开发预览体验。APK 使用开发签名，当前平台差异见 [Android 说明](android/mobile/README.md)。
+
+## 开发与打包
+
+源码按平台组织，共享业务与界面只维护一份：
+
+| 目录 | 职责 |
+| --- | --- |
+| `win/desktop` | Windows Electron 窗口、系统集成与安装包 |
+| `android/mobile` | Expo 原生客户端与 Android 配置 |
+| `android/scripts` | 手机工作台预览与 APK 构建入口 |
+| `common/backend` | 创作流程、状态门禁、图治理、检索和任务 |
+| `common/renderer` | 共享 React 写作工作台 |
+| `common/web` | 浏览器入口与 HTTP 桥接 |
+| `common/packages` | 共享契约、配置、提示词与 Markdown 预设 |
+
+安装 Node.js 22 和 Corepack 后，在仓库根目录运行：
 
 ```bash
-pnpm build
-pnpm backend:stdio
+corepack pnpm install --frozen-lockfile
+
+# Windows 开发
+corepack pnpm dev:win
+
+# 手机共享工作台预览：http://localhost:8081/
+corepack pnpm dev:android
+
+# Windows Setup 与 Portable EXE
+corepack pnpm package:exe
+
+# Android 预览 APK
+npm --prefix android/mobile ci
+corepack pnpm package:apk
 ```
 
-stdio 每行接收一个 `ClientRequest` JSON，并输出一个 `ClientResponse` JSON。默认内部数据位于仓库根目录的 `.worldseed-data`；可通过 `WORLDSEED_APP_DATA_ROOT` 修改。未设置 `DEEPSEEK_API_KEY` 时，正式推演会明确失败，不生成伪造章节；设置后使用 DeepSeek。
+EXE 输出到 `win/desktop/release/`，APK 输出到 `android/mobile/release/`。Windows 打包需要 Visual Studio 2022 C++ Build Tools；Android 打包需要 JDK 17 和 Android SDK。完整要求见 [Windows 说明](win/README.md)、[Android 说明](android/mobile/README.md) 和 [平台源码目录](docs/platform-source-layout.md)。
 
-开发模式可将 `.env.example` 复制为仓库根目录 `.env` 并填写 `DEEPSEEK_API_KEY`。`pnpm dev` 启动的 Electron Main 会在创建 Backend Utility Process 前加载该文件；`.env` 已被 Git 忽略，不得提交真实密钥。
+推送 `master` 或 `dev-0.0.1` 会触发 **Build EXE and APK**，可在 Actions 的 Artifacts 下载构建产物；**Release Windows** 负责更新 Windows Release 和自动更新清单。
 
-DeepSeek 开发环境支持 `WORLDSEED_DEEPSEEK_BASE_URL`、`WORLDSEED_DEEPSEEK_MODEL`、`WORLDSEED_DEEPSEEK_PROXY_URL`、`WORLDSEED_DEEPSEEK_TIMEOUT_MS`、`WORLDSEED_DEEPSEEK_MAX_ATTEMPTS`、`WORLDSEED_DEEPSEEK_MAX_SCHEMA_REPAIR_ATTEMPTS`、`WORLDSEED_DEEPSEEK_JSON_MODE_ENABLED`、`WORLDSEED_DEEPSEEK_THINKING_MODE_ENABLED` 和 `WORLDSEED_DEEPSEEK_REASONING_EFFORT`。代理只作用于模型适配器，不修改进程全局网络配置。
+## 技术文档
+
+- [设计与实施状态](docs/implementation-status.md)：区分设计、实现、原型和实际验收。
+- [代码架构](docs/project-code-architecture.md)、[后端架构](docs/backend-architecture.md)、[后端开发原则](docs/backend-coding-principles.md)。
+- [图谱与推演设计目标](docs/graph-design-goals.md)、[系统设计](docs/system-design.md)、[规则与资料层级](docs/rule-and-source-layers.md)。
+- [上下文与 KV 缓存](docs/context-and-kv-cache.md)、[AI 阶段契约](docs/ai-phase-contracts.md)、[章节修改协调](docs/chapter-modification-coordination.md)。
+- [工作台设计](docs/ui-design.md)、[世界内容生成规则](docs/world-emergence-rules.md)、[V1 冻结基线](docs/v1-freeze.md)。
+
+为兼容已有书库、凭据和部署配置，存储键、历史数据路径、应用标识与部分环境变量仍接受原有技术标识。这些兼容标识不作为产品名称展示，已有数据无需手工改名。开发环境变量见 [.env.example](.env.example)，后端运行方式见 [HTTP 后端说明](docs/deploy-server-android.md)。

@@ -8,7 +8,7 @@ import {
   type ChapterRevisionDecision,
   type ChapterRevisionReview,
   type ProjectId,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { ChapterRevisionRepository, StoredChapterRevision } from "../../../application/index.js"
 import type {

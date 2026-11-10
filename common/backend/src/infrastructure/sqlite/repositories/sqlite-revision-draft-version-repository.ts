@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely"
 
-import type { ProjectId, RevisionDraftVersion, RevisionDraftVersionSource } from "@worldseed/contracts"
+import type { ProjectId, RevisionDraftVersion, RevisionDraftVersionSource } from "@starseafolio/contracts"
 
 import { digest } from "../../../core/index.js"
 import type { ProjectDatabase } from "../database-types.js"

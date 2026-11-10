@@ -2,8 +2,8 @@ import React, { act } from "react"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { defaultProjectSettings } from "@worldseed/config"
-import type { ChapterWorkflowGate, RuntimeMetricsSnapshot } from "@worldseed/contracts"
+import { defaultProjectSettings } from "@starseafolio/config"
+import type { ChapterWorkflowGate, RuntimeMetricsSnapshot } from "@starseafolio/contracts"
 
 import { invokeBackend } from "../src/api/client.js"
 import { EditorArea } from "../src/features/editor/EditorArea.js"
@@ -1941,7 +1941,7 @@ describe("browser demo client contract", () => {
       relativePath: "世界推演规则/基础规则/base-rules.md",
     })
 
-    expect(result.content).toContain("# Worldseed V1 基础规则")
+    expect(result.content).toContain("# StarseaFolio V1 基础规则")
     expect(result.content).toContain("平台锁定")
     expect(result.content).not.toContain("# 盐雾城")
   })

@@ -1,4 +1,4 @@
-import type { SynopsisConversationTodo } from "@worldseed/contracts"
+import type { SynopsisConversationTodo } from "@starseafolio/contracts"
 
 export const DISCUSS_TODO_REQUIRED_HINT = [
   "本轮尚未调用 todo_write，创作台 Todo 面板仍为空。",

@@ -1,4 +1,4 @@
-import type { AIPhase } from "@worldseed/contracts"
+import type { AIPhase } from "@starseafolio/contracts"
 
 /** Short index always injected into system_rules (not full skill bodies). */
 export const SKILL_INDEX_RESOURCE = "resources/v1/skill-index.md" as const

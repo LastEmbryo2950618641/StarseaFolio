@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react"
-import type { ChapterNarrativeIntent, CreationDeskSettingsUpdate } from "@worldseed/contracts"
+import type { ChapterNarrativeIntent, CreationDeskSettingsUpdate } from "@starseafolio/contracts"
 
 import { AUTO_DESCRIPTION_RULE_PATH } from "../workspace/workspace-locks.js"
 

@@ -1,4 +1,4 @@
-import type { Evidence, ProjectId } from "@worldseed/contracts"
+import type { Evidence, ProjectId } from "@starseafolio/contracts"
 
 export type EvidenceWriteInput = Readonly<{
   evidenceId: string

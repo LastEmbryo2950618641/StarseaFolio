@@ -11,14 +11,14 @@ import type {
   GoalProposalPayload,
   ProjectId,
   TurnDeductionGoalBundle,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 import {
   assertCompleteHookScheduleForKind,
   buildHookScheduleAudit,
   goalProposalPayloadSchema,
   listIncompleteHookSchedules,
   selectGoalsForChapterContext,
-} from "@worldseed/contracts"
+} from "@starseafolio/contracts"
 
 import type { SqliteDeductionGoalsRepository } from "../../infrastructure/sqlite/repositories/sqlite-deduction-goals-repository.js"
 
