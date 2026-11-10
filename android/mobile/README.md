@@ -54,7 +54,7 @@ corepack pnpm package:apk
 
 脚本构建共享契约、生成原生工程，再调用 Gradle。无需 Expo 账号或额外部署构建服务，但首次构建需要联网下载 Gradle、SDK 和 Maven 依赖。生成目录 `android/`、`ios/` 和 `release/` 不提交。
 
-产物为 `android/mobile/release/Starsea-Folio-0.1.0-Android-preview.apk`，默认支持 arm64。可通过环境变量 `STARSEAFOLIO_ANDROID_ARCHITECTURES=arm64-v8a,x86_64` 增加模拟器架构；`--debug` 生成调试包，`--prepare-only` 仅生成原生工程。
+产物为 `android/mobile/release/Starsea-Folio-0.0.1-Android-preview.apk`，默认支持 arm64。可通过环境变量 `STARSEAFOLIO_ANDROID_ARCHITECTURES=arm64-v8a,x86_64` 增加模拟器架构；`--debug` 生成调试包，`--prepare-only` 仅生成原生工程。
 
 默认包使用生成的调试签名，仅用于开发预览；正式发行前需配置并保管固定私钥。首次启动需填写自己的 HTTP 后端地址与访问令牌，包中没有预置账户。**当前 APK 是旧 Expo 原生客户端，尚未包含完整共享工作台或 Android 本地后端。** 手机完整工作台仍通过上述 Web 预览验收。
 

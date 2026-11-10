@@ -3,11 +3,13 @@ import { join } from "node:path"
 import process from "node:process"
 import console from "node:console"
 import { repository, runCli } from "./build-utils.mjs"
+import { assertProductVersion } from "./version.mjs"
 
 const options = process.argv.slice(2)
 if (options.some((arg) => arg !== "--dir")) throw new Error("Usage: pnpm package:win [--dir]")
 if (process.platform !== "win32") throw new Error("Windows packaging requires Windows (or the Windows GitHub Actions job)")
 const desktop = join(repository, "win/desktop")
+await assertProductVersion()
 await runCli(repository, "typescript", "tsc", ["-b", "common/backend"])
 await runCli(desktop, "electron-vite", "electron-vite", ["build"])
 // Publishing is handled explicitly by the release workflow, never by a local package command.

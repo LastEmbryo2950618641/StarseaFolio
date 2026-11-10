@@ -9,10 +9,6 @@ name: Release Windows
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Optional version override (e.g. 0.1.1). Leave empty to use win/desktop/package.json."
-        required: false
-        type: string
       prerelease:
         description: "Mark GitHub Release as prerelease (not used by /releases/latest)"
         required: false
@@ -26,7 +22,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-windows-${{ github.event.inputs.version || github.ref }}
+  group: release-windows-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -55,15 +51,11 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $version = "${{ github.event.inputs.version }}".Trim()
-          if ([string]::IsNullOrWhiteSpace($version) -and $env:GITHUB_REF_TYPE -eq "tag") {
-            $version = $env:GITHUB_REF_NAME
-            if ($version.StartsWith("v")) { $version = $version.Substring(1) }
+          $version = (Get-Content "package.json" -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag must match product version v$version"
           }
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            $version = (Get-Content "win/desktop/package.json" -Raw | ConvertFrom-Json).version
-          }
-          if ($version -notmatch '^\d+\.\d+\.\d+') {
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
             throw "Invalid version: $version"
           }
           $buildNumber = if ($env:GITHUB_RUN_NUMBER) { $env:GITHUB_RUN_NUMBER } else { "0" }
@@ -71,13 +63,6 @@ jobs:
           "tag=v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "buildNumber=$buildNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Release version=$version tag=v$version buildNumber=$buildNumber"
-
-      - name: Apply package version
-        shell: pwsh
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          node -e "const fs=require('fs'); const p='win/desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.RELEASE_VERSION; fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n'); console.log('Set @starseafolio/desktop version to', j.version)"
 
       - name: Stamp build-info.json
         shell: pwsh

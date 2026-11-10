@@ -5,12 +5,14 @@ import { delimiter, dirname, join, resolve } from "node:path"
 import process from "node:process"
 import console from "node:console"
 import { repository, run, runCli } from "../../scripts/packaging/build-utils.mjs"
+import { assertProductVersion } from "../../scripts/packaging/version.mjs"
 
 const options = process.argv.slice(2)
 if (options.some((arg) => !["--debug", "--prepare-only", "--check"].includes(arg))) {
   throw new Error("Usage: pnpm package:apk [--debug] [--prepare-only] [--check]")
 }
 const mobile = join(repository, "android/mobile")
+await assertProductVersion()
 const env = { ...process.env, CI: "1", EXPO_NO_TELEMETRY: "1" }
 // Do not load the repository .env: a distribution must not bake in development credentials.
 env.EXPO_NO_DOTENV = "1"

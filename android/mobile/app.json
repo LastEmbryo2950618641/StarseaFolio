@@ -2,7 +2,7 @@
   "expo": {
     "name": "星海余页",
     "slug": "starseafolio-mobile",
-    "version": "0.1.0",
+    "version": "0.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "android": {
