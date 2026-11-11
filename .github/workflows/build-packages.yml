@@ -1,4 +1,4 @@
-name: Build EXE and APK
+name: Build APK
 
 on:
   workflow_dispatch:
@@ -13,45 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  windows:
-    runs-on: windows-2022
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Enable pnpm
-        run: corepack enable
-      - name: Use HTTPS for public Git dependencies
-        run: |
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
-      - name: Use hoisted dependencies for electron-builder
-        shell: pwsh
-        run: Set-Content .npmrc "node-linker=hoisted`nshamefully-hoist=true`nblockExoticSubdeps=false"
-      - name: Install dependencies
-        run: corepack pnpm install --frozen-lockfile
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-          vsversion: "2022"
-      - name: Stamp build number
-        shell: pwsh
-        run: |
-          @{ buildNumber = "$env:GITHUB_RUN_NUMBER" } | ConvertTo-Json | Set-Content win/desktop/build-info.json -Encoding utf8
-      - name: Package EXE
-        run: corepack pnpm package:exe
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          npm_config_msvs_version: "2022"
-          GYP_MSVS_VERSION: "2022"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: StarseaFolio-Windows-${{ github.run_number }}
-          path: win/desktop/release/*.exe
-          if-no-files-found: error
-
   android:
     runs-on: ubuntu-22.04
     timeout-minutes: 90

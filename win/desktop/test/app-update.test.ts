@@ -16,7 +16,7 @@ const local: LocalAppIdentity = {
 }
 
 describe("app update compare", () => {
-  it("treats any version or build change as available in any_change mode", () => {
+  it("keeps detecting higher versions for legacy any_change preferences", () => {
     const sameBuildNewVersion: UpdateManifest = {
       version: "0.1.1",
       buildNumber: "1",
@@ -36,7 +36,7 @@ describe("app update compare", () => {
     }, "any_change")).toBe(false)
   })
 
-  it("only accepts greater semver in semver mode", () => {
+  it("accepts higher product or build versions and rejects downgrades", () => {
     expect(isUpdateAvailable(local, {
       version: "0.2.0",
       buildNumber: "1",
@@ -46,12 +46,29 @@ describe("app update compare", () => {
       version: "0.1.0",
       buildNumber: "99",
       downloadUrl: "https://example.com/setup.exe",
-    }, "semver")).toBe(false)
+    }, "semver")).toBe(true)
     expect(isUpdateAvailable(local, {
       version: "0.0.9",
       buildNumber: "99",
       downloadUrl: "https://example.com/setup.exe",
     }, "semver")).toBe(false)
+  })
+
+  it("orders the numeric 0.0.1-N release suffix and migrates legacy build identities", () => {
+    const current: LocalAppIdentity = { ...local, version: "0.0.1-18", buildNumber: "18" }
+    const manifest = (version: string, buildNumber = "18"): UpdateManifest => ({ version, buildNumber, downloadUrl: "https://example.com/setup.exe" })
+    expect(isUpdateAvailable(current, manifest("0.0.1-19", "19"))).toBe(true)
+    expect(isUpdateAvailable(current, manifest("0.0.1-9", "9"))).toBe(false)
+    expect(isUpdateAvailable(current, manifest("0.0.1-18", "18"))).toBe(false)
+    expect(isUpdateAvailable({ ...current, version: "0.0.1", buildNumber: "17" }, manifest("0.0.1-18", "18"))).toBe(true)
+    expect(isUpdateAvailable(current, manifest("0.0.2", "1"))).toBe(true)
+    for (const mode of ["any_change", "semver"] as const) {
+      expect(isUpdateAvailable(current, manifest("0.0.1", "17"), mode)).toBe(false)
+      expect(isUpdateAvailable(current, manifest("0.0.1-17", "17"), mode)).toBe(false)
+      expect(isUpdateAvailable({ ...current, version: "0.0.1-9", buildNumber: "9" }, manifest("0.0.1-10", "10"), mode)).toBe(true)
+      expect(isUpdateAvailable(current, manifest("unknown", "999"), mode)).toBe(false)
+    }
+    expect(compareSemver("0.0.1-10", "0.0.1-9")).toBeGreaterThan(0)
   })
 
   it("compares semver numbers", () => {

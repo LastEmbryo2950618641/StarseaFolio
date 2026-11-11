@@ -30,6 +30,12 @@ function formatCheckedAt(ms: number | undefined): string {
   }
 }
 
+function formatRemoteIdentity(manifest: UpdateManifest): string {
+  return manifest.version.endsWith(`-${manifest.buildNumber}`)
+    ? manifest.version
+    : `${manifest.version}（构建 ${manifest.buildNumber}）`
+}
+
 export function AboutSettingsPanel({
   info,
   checking,
@@ -156,7 +162,7 @@ export function AboutSettingsPanel({
         <div className="settings-field-row">
           <span>
             <strong>上次检测</strong>
-            <small>{statusMessage ?? (remote === null ? "—" : `远端 ${remote.version} / ${remote.buildNumber}`)}</small>
+            <small>{statusMessage ?? (remote === null ? "—" : `远端 ${formatRemoteIdentity(remote)}`)}</small>
           </span>
           <div className="settings-readonly-value" data-testid="about-last-checked">
             {formatCheckedAt(info?.update.lastCheckedAtMs)}
