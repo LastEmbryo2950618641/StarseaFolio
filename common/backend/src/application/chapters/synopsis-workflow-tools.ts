@@ -4,6 +4,7 @@ import type {
   SynopsisConversationTodo,
   VisibleModelContextMessage,
 } from "@starseafolio/contracts"
+import { characterUpdateSchema, type CharacterUpdate } from "@starseafolio/contracts"
 import type { AIModelPort } from "../turns/ports/ai-model-port.js"
 import type { SynopsisBashResult } from "./synopsis-host-bash.js"
 
@@ -121,6 +122,7 @@ export type SynopsisReferenceResult = Readonly<{
   candidateUrls?: readonly string[]
 }>
 export type SynopsisWorkflowToolCallbacks = Readonly<{
+  updateCharacter?: (input: SynopsisToolContext & { update: CharacterUpdate }) => Promise<{ relativePath: string; content: string }>
   executeWorkflowTool?: (input: SynopsisWorkflowToolInput) => Promise<SynopsisWorkflowToolResult>
   publishDraft?: (input: SynopsisPublishDraftInput) => Promise<SynopsisPublishDraftResult>
   restageChapter?: (input: SynopsisRestageInput) => Promise<SynopsisRestageResult>
@@ -132,6 +134,7 @@ export type SynopsisWorkflowToolCallbacks = Readonly<{
   crawlOriginalWork?: (input: SynopsisReferenceCrawlInput) => Promise<SynopsisReferenceResult>
 }>
 export type SynopsisToolName =
+  | "character_update"
   | "chapter_workflow"
   | "publish_draft"
   | "restage_chapter"
@@ -155,6 +158,11 @@ export type SynopsisDraftReference = Readonly<{
 
 const protocol = "synopsis-tools-v1"
 const descriptions = {
+  character_update: {
+    parameters: { relativePath: "设定集/人物/人物名.json", mode: "create | update",
+      operations: 'Array<{op:"set",field:string,value:JSON值}|{op:"delete",field:string}>', expectedContent: "可选，读取到的原文，用于防止覆盖并发更新" },
+    writingGuide: "先读取世界推演规则/人物设定.md及已有人物 JSON。一人一档；可以新增、删除、更改 fields 字段，不能直接编辑 JSON 文本或 schemaVersion。创建用 create，已存在用 update，不能替换整个文档。用户确认与正文事实优先。",
+  },
   chapter_workflow: {
     parameters: {
       userInput: "string (required)",
@@ -273,6 +281,7 @@ function callbackForTool(
   name: SynopsisToolName,
   callbacks: SynopsisWorkflowToolCallbacks,
 ): ((input: never) => Promise<unknown>) | undefined {
+  if (name === "character_update") return callbacks.updateCharacter
   if (name === "chapter_workflow") return callbacks.executeWorkflowTool as ((input: never) => Promise<unknown>) | undefined
   if (name === "publish_draft") return callbacks.publishDraft as ((input: never) => Promise<unknown>) | undefined
   if (name === "restage_chapter") return callbacks.restageChapter as ((input: never) => Promise<unknown>) | undefined
@@ -292,6 +301,11 @@ export function synopsisToolCatalog(callbacks: SynopsisWorkflowToolCallbacks): s
       "工具与正文通道流程以《创作台讨论工作流》为准（系统规则已注入）；每次请求只带 assistantMessage、finalSelfReview、toolRequest；锁定本轮 chapterSequence。",
     ].join(""),
     tools: [
+      ...(callbacks.updateCharacter === undefined ? [] : [{
+        name: "character_update", displayName: "人物字段工具",
+        definition: "在设定集/人物下一人一个 JSON，通过字段操作新建人物或增删改资料，禁止直接编辑 JSON。",
+        scenario: "准备新角色、完善主角或修订任何人物设定时；先读取世界推演规则/人物设定.md。",
+      }]),
       ...(callbacks.executeWorkflowTool === undefined ? [] : [{
         name: "chapter_workflow",
         displayName: "正文推演工具",
@@ -463,6 +477,12 @@ export async function executeSynopsisTool(input: Readonly<{
     }
     if (!hasVisibleToolDescription(input.visibleMessages, request.name)) {
       return { ...envelope, status: "error", code: "describe_required", message: "请先 describe 获取参数格式与撰写说明，再 invoke" }
+    }
+    if (request.name === "character_update") {
+      const update = characterUpdateSchema.parse(JSON.parse(request.arguments ?? "{}"))
+      if (callbacks.updateCharacter === undefined) throw new Error("人物字段工具不可用")
+      const result = await callbacks.updateCharacter({ ...context, update })
+      return { ...envelope, status: "character_updated", result }
     }
     if (request.name === "chapter_workflow") {
       const args = parseArguments(request.arguments, ["userInput", "heading", "chapterSequences"])

@@ -1,3 +1,5 @@
+import { parseCharacterProfile } from "@starseafolio/contracts"
+
 export type CreativeSetupScope = "protagonist" | `volume:${string}`
 
 export type CreativeSetupState = {
@@ -221,7 +223,7 @@ export function buildCreativeSetupPrompt(state: CreativeSetupState, volumeName?:
     return [
       "主角七项用户核心均已明确确认，状态为 awaiting_write；现在仅生成 AI 补充设定，不再提问。",
       `完整用户核心（七项均不可修改、覆盖、省略或重新解释）：\n${JSON.stringify(parsed.answers, null, 2)}`,
-      "仅返回 artifact.protagonistSupplementMarkdown（非空 Markdown 字符串），补充符合本书题材与世界观的姓名、能力、关系等细节。用户已指定的姓名、能力、关系及其他核心必须原样保留；AI 只可完善未明确的内容，所有补充须与七项核心一致。",
+      "仅返回 artifact.protagonistSupplementFields（字段名到值的对象，不含 schemaVersion 或 fields 外壳），补充符合本书题材与世界观的姓名、身份、性别、能力、人物关系等独立字段；必须有非空姓名。能力可为列表，人物关系可为对象。不要把所有资料写成 Markdown 长文或塞入单个补充字段。用户已指定的姓名、能力、关系及其他核心必须原样保留；AI 只可完善未明确的内容，所有补充须与七项核心一致。",
       "禁止调用任何工具、请求工具调用、读取或写入文件；禁止输出章节、梗概、卷规划、synopsis、outline、正文、其他 artifact 写入字段或讨论选项。",
       "AI 返回的补充不是写入成功证明，不得宣布 ready；由宿主合并用户核心与补充，实际保存并读回核对后才能确认写入。",
     ].join("\n\n")
@@ -292,6 +294,12 @@ function completeForSerialization(state: CreativeSetupState, protagonist: boolea
 /** Check the documented user core, while permitting later substantive edits to its values. */
 export function protagonistCreativeSetupMarkdownHasContent(markdown: string): boolean {
   try {
+    if (markdown.trimStart().startsWith("{")) {
+      // The persisted interview state enforces the initial core write. Later field
+      // additions/deletions must not reopen the questionnaire or restore removed fields.
+      parseCharacterProfile(markdown)
+      return true
+    }
     const bounds = sectionBounds(markdown, coreStart, coreEnd)
     if (bounds === undefined) return false
     const lines = markdown.slice(bounds.start + coreStart.length, bounds.end - coreEnd.length).split(/\r?\n/u)

@@ -6,6 +6,7 @@ import {
   type ProjectId,
   type ProjectSettings,
   type ChapterNarrativeIntent,
+  type CharacterFieldValue,
   type CreationDeskSettingsUpdate,
   type DiscussFocusKind,
   type SynopsisConversationListResult,
@@ -2473,6 +2474,7 @@ export class SynopsisConversationService {
   }>): Promise<Readonly<{
     content: string
     protagonistSupplementMarkdown?: string
+    protagonistSupplementFields?: Record<string, CharacterFieldValue>
     reasoningContent?: string
     chapterTitle?: string
     titleAlignTarget?: "body" | "planning"
@@ -2565,7 +2567,10 @@ export class SynopsisConversationService {
     const deadlineAtMs = wallLimitMs === undefined ? Number.MAX_SAFE_INTEGER : nowMs + wallLimitMs
     const maxRetrievalRounds = settings?.execution.maxRetrievalRounds
       ?? defaultProjectSettings.execution.maxRetrievalRounds
+    // Ordinary discussion has an advisory threshold, not a call deadline.
+    // Explicit caps are still used by bounded internal operations (e.g. setup questions).
     const maxModelCalls = Math.max(1, input.maxModelCalls ?? (maxRetrievalRounds + 3))
+    const hasExplicitCallLimit = input.maxModelCalls !== undefined
     let catalog = await this.dependencies.catalog.createSnapshot({
       snapshotId: this.dependencies.createId(),
       projectId: input.projectId,
@@ -2726,7 +2731,8 @@ export class SynopsisConversationService {
     let lastRequestInputTokens = await this.dependencies.conversation.loadDiscussContextInputTokens(input.projectId, input.sessionId)
     const contextId = this.dependencies.createId()
     let retrievalGaps: TurnRetrievalGap[] = []
-    let remainingCalls = maxModelCalls
+    let remainingCalls = hasExplicitCallLimit ? maxModelCalls : Number.MAX_SAFE_INTEGER
+    let retrievalRounds = 0
     let budgetGraceUsed = false
     let consecutiveTodoWrites = 0
     let todoNoProgressStreak = 0
@@ -2862,6 +2868,7 @@ export class SynopsisConversationService {
             ? {} : { crawlOriginalWork: this.dependencies.crawlOriginalWork }),
         }
       : {
+          ...(this.dependencies.updateCharacter === undefined ? {} : { updateCharacter: this.dependencies.updateCharacter }),
           ...(allowChapterWorkflowTools && chapterWorkflowEnabled && this.dependencies.executeWorkflowTool !== undefined
             ? { executeWorkflowTool: this.dependencies.executeWorkflowTool }
             : {}),
@@ -2920,7 +2927,7 @@ export class SynopsisConversationService {
           "梗概讨论超时：检索与模型调用未在截止前完成（可在 项目设置 › 执行 › 讨论最长运行时间 调整，0 为无上限）",
         )
       }
-      if (attempt > maxModelCalls + maxRetrievalRounds + 8) {
+      if (hasExplicitCallLimit && attempt > maxModelCalls + maxRetrievalRounds + 8) {
         return stopDiscussLoop("本轮重复尝试过多，已暂停自动推进。已保存的结果与未完成任务均已保留，请检查当前阻塞原因后重试。")
       }
       if (remainingCalls <= 0) {
@@ -3151,13 +3158,15 @@ export class SynopsisConversationService {
             "模型未返回完整讨论结果（缺少 artifact）。请重试发送；若反复失败，可先简化指令或检查模型是否支持 JSON 模式。",
           )
         }
-        // Gate-style recovery: never dump toolRequest exclusivity to the chat UI.
+        // Only tool-exclusivity violations may change the tool/write Todo gate.
         if (isRecoverableDiscussPhaseContractError(error) && remainingCalls > 1) {
           missingArtifactRetries += 1
           remainingCalls -= 1
-          this.applyToolExclusiveTodoGate(input.projectId, input.sessionId, [
-            "choices", "focusChange", "synopsisBody", "outlineBody", "chapterDraftProposal",
-          ])
+          if (isDiscussToolExclusiveContractError(error)) {
+            this.applyToolExclusiveTodoGate(input.projectId, input.sessionId, [
+              "choices", "focusChange", "synopsisBody", "outlineBody", "chapterDraftProposal",
+            ])
+          }
           repairHints.push(discussPhaseContractRepairHint(error))
           runtimeLog("warn", "synopsis-conversation", "phase_contract.gate_retry", {
             projectId: input.projectId,
@@ -3170,16 +3179,18 @@ export class SynopsisConversationService {
           continue
         }
         if (isRecoverableDiscussPhaseContractError(error)) {
-          this.applyToolExclusiveTodoGate(input.projectId, input.sessionId, [
-            "choices", "focusChange", "synopsisBody", "outlineBody", "chapterDraftProposal",
-          ])
-          runtimeLog("warn", "synopsis-conversation", "phase_contract.soft_stop", {
+          if (isDiscussToolExclusiveContractError(error)) {
+            this.applyToolExclusiveTodoGate(input.projectId, input.sessionId, [
+              "choices", "focusChange", "synopsisBody", "outlineBody", "chapterDraftProposal",
+            ])
+          }
+          runtimeLog("warn", "synopsis-conversation", "phase_contract.call_limit_reached", {
             projectId: input.projectId,
             sessionId: input.sessionId,
             attempt,
             error: error instanceof Error ? error.message : String(error),
           })
-          return stopDiscussLoop("模型反复混合提交工具与写入，本轮调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留；重试时应先单独调用工具，再提交章节内容。")
+          return stopDiscussLoop(`本次显式设置的模型调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留。最后校验原因：${error instanceof Error ? error.message : String(error)}`)
         }
         throw error
       }
@@ -3316,9 +3327,9 @@ export class SynopsisConversationService {
         if (!toolArtifact.success || toolArtifact.data.toolRequest !== undefined
           || (input.creativeSetup.status === "collecting" && interviewChoices.length < 2)
           || (input.creativeSetup.status === "awaiting_write" && input.creativeSetup.scope === "protagonist"
-            && toolArtifact.data.protagonistSupplementMarkdown === undefined)) {
+            && toolArtifact.data.protagonistSupplementFields === undefined)) {
           if (remainingCalls > 0 && attempt < 2) {
-            repairHints.push("当前是用户必答的主角罗盘/卷主支线问答，禁止调用工具或写章节。请只提出当前字段问题和至少两个贴合主题的 continue_discuss 选项；收集完成时仅补充 protagonistSupplementMarkdown，不得替换用户核心。")
+            repairHints.push("当前是用户必答的主角罗盘/卷主支线问答，禁止调用工具或写章节。请只提出当前字段问题和至少两个贴合主题的 continue_discuss 选项；收集完成时仅补充 protagonistSupplementFields，必须有非空姓名，身份、能力、人物关系等分别填入字段，不得替换用户核心。")
             attempt += 1
             continue
           }
@@ -3332,6 +3343,8 @@ export class SynopsisConversationService {
           })) }),
           ...(toolArtifact.data.protagonistSupplementMarkdown === undefined
             ? {} : { protagonistSupplementMarkdown: toolArtifact.data.protagonistSupplementMarkdown }),
+          ...(toolArtifact.data.protagonistSupplementFields === undefined
+            ? {} : { protagonistSupplementFields: toolArtifact.data.protagonistSupplementFields }),
         }
       }
       const originalWorkStage = readOriginalWorkEvidenceStage(storedContext)
@@ -3446,7 +3459,7 @@ export class SynopsisConversationService {
               sessionId: input.sessionId,
               chapterSequence: input.chapterSequence,
               model: input.model,
-              maxModelCalls: Math.max(1, remainingCalls),
+              ...(hasExplicitCallLimit ? { maxModelCalls: Math.max(1, remainingCalls) } : {}),
               ...(remainingMs === undefined ? {} : { deadlineMs: remainingMs }),
               signal: toolSignal,
               ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
@@ -3509,7 +3522,7 @@ export class SynopsisConversationService {
           })
           // The next model round must see the result it is expected to act on.
           storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
-          if (toolResult.status === "reference_imported") {
+          if (toolResult.status === "reference_imported" || toolResult.status === "character_updated") {
             // Imports add files mid-send. Both the next model request and the
             // read executor must use the refreshed inventory, not the bootstrap snapshot.
             catalog = await this.dependencies.catalog.createSnapshot({
@@ -4001,7 +4014,7 @@ export class SynopsisConversationService {
       }
 
       pendingWrites = undefined
-      if (attempt >= maxRetrievalRounds || budgetGraceUsed) {
+      if (retrievalRounds >= maxRetrievalRounds || budgetGraceUsed) {
         runtimeLog("warn", "synopsis-conversation", "retrieval.exhausted", {
           projectId: input.projectId,
           sessionId: input.sessionId,
@@ -4198,6 +4211,7 @@ export class SynopsisConversationService {
       todoNoProgressStreak = 0
       todoLoopRepairIssued = false
 
+      retrievalRounds += 1
       const searchRound = attempt + 1
       for (const read of requestedReads) {
         const label = synopsisSearchLabel(read)
@@ -5425,7 +5439,7 @@ export function isRecoverableDiscussPhaseContractError(error: unknown): boolean 
 
 export function discussPhaseContractRepairHint(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
-  if (message.includes("toolRequest")) {
+  if (isDiscussToolExclusiveContractError(error)) {
     return [
       "上一轮 phase contract 失败：toolRequest 不可与章节写入、草稿提案、choices、focusChange 等动作同回。",
       "本轮只做一件事：若需工具，outcome=continue 且 artifact 仅含 assistantMessage、finalSelfReview、toolRequest；",
@@ -5433,6 +5447,10 @@ export function discussPhaseContractRepairHint(error: unknown): string {
     ].join("")
   }
   return `上一轮 phase contract 失败：${message.slice(0, 400)}。请按校验错误整份重写合法 artifact，不要复述无效 JSON。`
+}
+
+function isDiscussToolExclusiveContractError(error: unknown): boolean {
+  return (error instanceof Error ? error.message : String(error)).includes("toolRequest 不可与")
 }
 
 function mapSynopsisStagingPatch(patch: {

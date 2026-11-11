@@ -321,6 +321,11 @@ function settingsProposalPath(proposal: SettingsExtractionProposal): string {
 }
 
 function settingsProposalMarkdown(proposal: SettingsExtractionProposal): string {
+  if (proposal.payload.kind !== "merge" && proposal.payload.characterOperations !== undefined) {
+    return proposal.payload.characterOperations.map(operation => operation.op === "delete"
+      ? `删除字段：${operation.field}`
+      : `${operation.field}：${typeof operation.value === "string" ? operation.value : JSON.stringify(operation.value)}`).join("\n\n")
+  }
   return proposal.payload.markdown
 }
 

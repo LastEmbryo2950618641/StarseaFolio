@@ -12,6 +12,16 @@ import {
 } from "../src/features/workspace/workspace-locks.js"
 
 describe("workspace locks", () => {
+  it("keeps the characters folder fixed and exposes only character creation there", () => {
+    expect(resolveWorkspaceLockKind("设定集/人物")).toBe("immutable_scaffold")
+    expect(canDeleteWorkspacePath("设定集/人物")).toBe(false)
+    expect(canCreateFolderInDirectory("设定集/人物")).toBe(false)
+    expect(canCreateMarkdownInDirectory("设定集/人物")).toBe(true)
+    expect(canCreateMarkdownInDirectory("设定集/人物/子目录")).toBe(false)
+    expect(resolveCreateDestination("设定集/人物/林照.json")).toBe("设定集/人物")
+    expect(resolveWorkspaceLockKind("世界推演规则/人物设定.md")).toBe("platform_readonly")
+    expect(canDeleteWorkspacePath("设定集/人物/林照.json")).toBe(true)
+  })
   it("locks platform rules and scaffolding without treating every top-level folder as read-only", () => {
     expect(resolveWorkspaceLockKind("设定集")).toBe("immutable_scaffold")
     expect(resolveWorkspaceLockKind("设定集/readme.md")).toBe("immutable_scaffold")

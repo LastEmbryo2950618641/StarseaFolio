@@ -40,6 +40,10 @@ export type ProjectManifest = Readonly<{
 }>
 
 export const fixedWorkspaceEntries: readonly FixedWorkspaceEntry[] = Object.freeze([
+  { key: "characters", role: "settings", relativePath: "设定集/人物", entryKind: "directory",
+    immutablePath: true, allowedExtensions: [".json"], allowUserFolders: false, allowUserMarkdown: false },
+  { key: "character-guide", role: "world_rules", relativePath: "世界推演规则/人物设定.md", entryKind: "file",
+    immutablePath: true, allowedExtensions: [".md"], allowUserFolders: false, allowUserMarkdown: false },
   {
     key: "world-rules",
     role: "world_rules",

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import { PROTOCOL_VERSION, type SettingsExtractionSnapshot } from "@starseafolio/contracts"
 
-import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { openChapterHarness, prepareChapterPlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 const temporaryRoots: string[] = []
 const previousSettingsFixture = process.env.WORLDSEED_FAKE_SETTINGS_EXTRACTION
@@ -52,9 +52,10 @@ describe("settings extraction", () => {
         proposals: [{
           payload: {
             kind: "create",
-            relativePath: "设定集/人物/林照.md",
-            markdown: "# 林照\n\n> 适用范围：第 1 章起\n",
-            readmeEntry: "`设定集/人物/林照.md` · 林照 · 第 1 章",
+            relativePath: "设定集/人物/林照.json",
+            markdown: "",
+            characterOperations: [{ op: "set", field: "姓名", value: "林照" }],
+            readmeEntry: "`设定集/人物/林照.json` · 林照 · 第 1 章",
           },
           reason: "正文首次出现该人物",
         }],
@@ -75,10 +76,10 @@ describe("settings extraction", () => {
       })
       expect(approved.proposals.every((proposal) => proposal.status === "approved")).toBe(true)
 
-      const content = await runtime.readMarkdown("设定集/人物/林照.md")
-      expect(content).toContain("# 林照")
+      const content = await runtime.readMarkdown("设定集/人物/林照.json")
+      expect(JSON.parse(content).fields.姓名).toBe("林照")
       const readme = await runtime.readMarkdown("设定集/readme.md")
-      expect(readme).toContain("设定集/人物/林照.md")
+      expect(readme).toContain("设定集/人物/林照.json")
     })
   })
 
@@ -150,6 +151,7 @@ describe("settings extraction", () => {
   it("completes a turn without pausing at settings extraction", { timeout: 120_000 }, async () => {
     process.env.WORLDSEED_FAKE_SETTINGS_EXTRACTION = "1"
     await withHarness(async (harness) => {
+      await prepareChapterPlanning(harness)
       const handle = await invoke<{ taskId: string }>(harness, "turn.start", {
         projectId: harness.projectId,
         workspaceRootRef: harness.workspaceRootRef,

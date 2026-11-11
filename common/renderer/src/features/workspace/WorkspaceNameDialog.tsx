@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { FilePlus2, FolderPlus } from "lucide-react"
+import { CHARACTER_DIRECTORY } from "@starseafolio/contracts"
 
 type Props = Readonly<{
   kind: "file" | "directory"
@@ -9,7 +10,8 @@ type Props = Readonly<{
 }>
 
 export function WorkspaceNameDialog({ kind, parentPath, onConfirm, onCancel }: Props): React.JSX.Element {
-  const [draft, setDraft] = useState(kind === "file" ? "未命名.md" : "未命名文件夹")
+  const character = kind === "file" && parentPath === CHARACTER_DIRECTORY
+  const [draft, setDraft] = useState(kind === "file" ? character ? "新人物" : "未命名.md" : "未命名文件夹")
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -23,7 +25,7 @@ export function WorkspaceNameDialog({ kind, parentPath, onConfirm, onCancel }: P
     onConfirm(trimmed)
   }
 
-  const title = kind === "file" ? "新建 Markdown" : "新建文件夹"
+  const title = character ? "新增人物" : kind === "file" ? "新建 Markdown" : "新建文件夹"
   const label = kind === "file" ? "文件名" : "文件夹名称"
   const Icon = kind === "file" ? FilePlus2 : FolderPlus
 
@@ -62,7 +64,7 @@ export function WorkspaceNameDialog({ kind, parentPath, onConfirm, onCancel }: P
           />
         </label>
         {kind === "file"
-          ? <p>可省略扩展名，保存时会自动补上 .md。</p>
+          ? <p>{character ? "每个人物独立保存，自动创建 .json 人物资料。" : "可省略扩展名，保存时会自动补上 .md。"}</p>
           : <p>文件夹名称不能包含斜杠。</p>}
       </div>
       <footer>

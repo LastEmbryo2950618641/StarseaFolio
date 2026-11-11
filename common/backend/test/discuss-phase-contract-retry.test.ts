@@ -20,4 +20,10 @@ describe("discuss phase contract retry", () => {
     const error = Object.assign(new Error("phase contract network boom"), { kind: "network" as const })
     expect(isRecoverableDiscussPhaseContractError(error)).toBe(false)
   })
+
+  it("does not mislabel other tool field errors as tool/write exclusivity", () => {
+    const error = Object.assign(new Error("DeepSeek response could not satisfy the phase contract: toolRequest.arguments must be a string"), { kind: "schema" })
+    expect(discussPhaseContractRepairHint(error)).toContain("toolRequest.arguments must be a string")
+    expect(discussPhaseContractRepairHint(error)).not.toContain("只做一件事")
+  })
 })

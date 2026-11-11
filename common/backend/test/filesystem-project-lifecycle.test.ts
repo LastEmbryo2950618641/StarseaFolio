@@ -20,6 +20,7 @@ import {
   openProjectDatabase,
   openRegistryDatabase,
   ProjectLifecycleService,
+  projectMigrations,
   SqliteProjectRegistryRepository,
   SqliteProjectRepositoryFactory,
 } from "../src/index.js"
@@ -112,9 +113,9 @@ describe("Node workspace adapter", () => {
     await expect(adapter.saveUserMarkdown(workspaceRoot, "参考文件/data.json", "{}"))
       .rejects.toThrow("工作区只允许 .md 文件")
 
-    await adapter.saveUserMarkdown(workspaceRoot, "设定集/人物/临时.md", "# 临时\n")
-    await adapter.removeUserMarkdown(workspaceRoot, "设定集/人物/临时.md")
-    await expect(adapter.readMarkdown(workspaceRoot, "设定集/人物/临时.md")).rejects.toThrow()
+    await adapter.updateCharacter(workspaceRoot, { relativePath: "设定集/人物/临时.json", mode: "create", operations: [{ op: "set", field: "姓名", value: "临时" }] })
+    await adapter.removeUserMarkdown(workspaceRoot, "设定集/人物/临时.json")
+    await expect(adapter.readMarkdown(workspaceRoot, "设定集/人物/临时.json")).rejects.toThrow()
     await expect(adapter.removeUserMarkdown(workspaceRoot, "设定集/readme.md"))
       .rejects.toThrow("固定脚手架")
 
@@ -381,7 +382,7 @@ describe("project lifecycle", () => {
     const internalStore = new NodeInternalStoreAdapter(appDataRoot)
     const store = await internalStore.prepareProject(projectId, workspaceRoot)
     const database = await openProjectDatabase(store.projectDatabaseRef)
-    expect(await database.selectFrom("schema_migrations").selectAll().execute()).toHaveLength(55)
+    expect(await database.selectFrom("schema_migrations").selectAll().execute()).toHaveLength(projectMigrations.length)
     await database.destroy()
   })
 })

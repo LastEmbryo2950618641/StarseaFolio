@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { characterUpdateSchema } from "./character.js"
 
 import { resolvedChapterSchema, revisionDraftVersionSourceSchema } from "./chapter.js"
 import {
@@ -211,6 +212,10 @@ export type WorkspaceReadPayload = z.infer<typeof workspaceReadPayloadSchema>
 
 export const workspaceSavePayloadSchema = workspaceReadPayloadSchema.extend({ content: z.string() })
 export type WorkspaceSavePayload = z.infer<typeof workspaceSavePayloadSchema>
+export const workspaceCharacterUpdatePayloadSchema = characterUpdateSchema.extend({
+  projectId: idSchema,
+  workspaceRootRef: z.string().min(1),
+})
 
 export const workspaceDeletePayloadSchema = workspaceReadPayloadSchema
 export type WorkspaceDeletePayload = z.infer<typeof workspaceDeletePayloadSchema>
@@ -716,6 +721,7 @@ export const backendPayloadSchemas = {
   "workspace.list": projectWorkspacePayloadSchema,
   "workspace.read": workspaceReadPayloadSchema,
   "workspace.save": workspaceSavePayloadSchema,
+  "workspace.character.update": workspaceCharacterUpdatePayloadSchema,
   "workspace.delete": workspaceDeletePayloadSchema,
   "workspace.createDirectory": workspaceCreateDirectoryPayloadSchema,
   "workspace.importFiles": workspaceImportFilesPayloadSchema,

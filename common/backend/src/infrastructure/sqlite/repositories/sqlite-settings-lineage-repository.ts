@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { isCharacterProfilePath } from "@starseafolio/contracts"
 
 import type { Kysely } from "kysely"
 
@@ -16,7 +17,7 @@ export function digestSettingsMarkdown(markdown: string): string {
 
 export function isSettingsLineagePath(relativePath: string): boolean {
   const normalized = relativePath.replaceAll("\\", "/")
-  return normalized.startsWith("设定集/") && normalized.endsWith(".md")
+  return normalized.startsWith("设定集/") && (normalized.endsWith(".md") || isCharacterProfilePath(normalized))
 }
 
 export type SettingsLineageRecordInput = Readonly<{

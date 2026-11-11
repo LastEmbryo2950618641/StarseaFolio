@@ -260,7 +260,7 @@ describe("creative setup prompts and serialization", () => {
     const before = JSON.stringify(state)
     const prompt = buildCreativeSetupPrompt(state)
     for (const answer of Object.values(state.answers)) expect(prompt).toContain(answer)
-    expect(prompt).toContain("artifact.protagonistSupplementMarkdown")
+    expect(prompt).toContain("artifact.protagonistSupplementFields")
     expect(prompt).toContain("姓名")
     expect(prompt).toContain("能力")
     expect(prompt).toContain("关系")

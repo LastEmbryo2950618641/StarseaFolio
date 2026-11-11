@@ -1,3 +1,4 @@
+import { CHARACTER_RULE_PATH, isCharacterProfilePath, parseCharacterProfile } from "@starseafolio/contracts"
 import { Buffer } from "node:buffer"
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { isAbsolute, relative, resolve } from "node:path"
@@ -64,12 +65,13 @@ async function replaceWorkspaceFiles(
   for (const file of current.files) {
     const relativePath = normalizeHistoryPath(file.relativePath)
     if (isSharedPresentationPath(relativePath)) continue
-    if (!targetByPath.has(relativePath)) await rm(resolveInside(root, relativePath), { force: true })
+    if (relativePath !== CHARACTER_RULE_PATH && !targetByPath.has(relativePath)) await rm(resolveInside(root, relativePath), { force: true })
   }
   for (const [relativePath, file] of targetByPath) {
     if (digest(file.content) !== file.digest || Buffer.byteLength(file.content, "utf8") !== file.size) {
       throw new Error(`History workspace file failed integrity validation: ${relativePath}`)
     }
+    if (isCharacterProfilePath(relativePath)) parseCharacterProfile(file.content)
     const path = resolveInside(root, relativePath)
     await mkdir(resolve(path, ".."), { recursive: true })
     await writeFile(path, file.content, "utf8")
@@ -78,7 +80,7 @@ async function replaceWorkspaceFiles(
 
 function normalizeHistoryPath(path: string): string {
   const normalized = normalizeWorkspacePath(path)
-  if (!normalized.endsWith(".md") || normalized === baseRulesPath) {
+  if ((!normalized.endsWith(".md") && !isCharacterProfilePath(normalized)) || normalized === baseRulesPath) {
     throw new Error(`History snapshot contains a non-restorable workspace path: ${path}`)
   }
   return normalized

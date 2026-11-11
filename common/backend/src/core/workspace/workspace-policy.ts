@@ -1,3 +1,4 @@
+import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, isCharacterProfilePath } from "@starseafolio/contracts"
 import {
   isChapterPlanningMarkdownPath,
   isOutlineMarkdownPath,
@@ -71,7 +72,7 @@ export function normalizeWorkspacePath(path: string): string {
 /** Platform-projected base rules: never user-editable. */
 export function isPlatformLockedPath(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
-  return normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
+  return normalized === CHARACTER_RULE_PATH || normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
 }
 
 /** Fixed manifest entry whose path must not be deleted or renamed by the user. */
@@ -149,6 +150,9 @@ export function assertWorkspaceMutationAllowed(
     throw new WorkspacePolicyError("基础规则为平台只读投影，不能编辑、新建或删除")
   }
 
+  if (normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) {
+    throw new WorkspacePolicyError("人物资料只能通过人物字段接口创建或更新，不能直接写文件或新建子目录")
+  }
   const root = findWritableRoot(normalized)
   if (root === undefined) {
     throw new WorkspacePolicyError(`路径不在固定工作区根目录下：${normalized}`)
@@ -210,6 +214,7 @@ export function assertUserCanDeleteMarkdown(path: string): string {
   if (isPathImmutable(normalized)) {
     throw new WorkspacePolicyError(`固定脚手架文件不可删除：${normalized}`)
   }
+  if (isCharacterProfilePath(normalized)) return normalized
   if (normalized === "章节正文" || normalized.startsWith("章节正文/")) {
     if (isChapterPlanningMarkdownPath(normalized)) {
       const validation = isOutlineMarkdownPath(normalized)
@@ -261,7 +266,7 @@ export function validateWorkspaceInventory(entries: readonly WorkspaceInventoryE
         })
       }
 
-      if (entry.kind === "file" && !path.endsWith(".md") && !isBookCoverEntry) {
+      if (entry.kind === "file" && !path.endsWith(".md") && !isCharacterProfilePath(path) && !isBookCoverEntry) {
         issues.push({ code: "invalid_file_type", path, message: "Only .md files are allowed" })
       }
 

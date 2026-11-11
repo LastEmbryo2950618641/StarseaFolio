@@ -6,7 +6,7 @@ import type {
   SettingsProposalPayload,
   WorldDivergenceMode,
 } from "@starseafolio/contracts"
-import { settingsProposalPayloadSchema } from "@starseafolio/contracts"
+import { settingsProposalPayloadSchema, isCharacterProfilePath } from "@starseafolio/contracts"
 
 import { assertWorkspaceMutationAllowed } from "../../core/index.js"
 import type { WorkspacePort } from "../workspace/index.js"
@@ -121,6 +121,7 @@ export class SettingsExtractionService {
   private isValidPayload(payload: SettingsProposalPayload): boolean {
     try {
       if (payload.kind === "create" || payload.kind === "update") {
+        if (isCharacterProfilePath(payload.relativePath)) return payload.characterOperations !== undefined
         assertWorkspaceMutationAllowed(payload.relativePath, "file", "user")
       } else {
         assertWorkspaceMutationAllowed(payload.targetPath, "file", "user")
@@ -143,7 +144,13 @@ export class SettingsExtractionService {
       ? undefined
       : await this.dependencies.resolveCausingChapterSequence(proposal.taskId)
     const record = async (relativePath: string, markdown: string): Promise<void> => {
-      await this.dependencies.workspace.saveUserMarkdown(workspaceRootRef, relativePath, markdown)
+      if (isCharacterProfilePath(relativePath) && payload.kind !== "merge") {
+        if (this.dependencies.workspace.updateCharacter === undefined || payload.characterOperations === undefined) throw new Error("人物字段接口不可用")
+        markdown = await this.dependencies.workspace.updateCharacter(workspaceRootRef, {
+          relativePath, mode: payload.kind, operations: payload.characterOperations,
+          ...(payload.expectedContent === undefined ? {} : { expectedContent: payload.expectedContent }),
+        })
+      } else await this.dependencies.workspace.saveUserMarkdown(workspaceRootRef, relativePath, markdown)
       await this.dependencies.lineage?.recordUpsert({
         relativePath,
         markdown,

@@ -4,10 +4,11 @@ import { join } from "node:path"
 
 import Database from "better-sqlite3"
 import { describe, expect, it, vi } from "vitest"
-import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@starseafolio/contracts"
+import { PROTOCOL_VERSION, type PhaseResultEnvelope, type SynopsisConversationSendResult } from "@starseafolio/contracts"
 
 import type { AIModelPort, ModelExecutionOptions, TurnPhaseInput } from "../src/application/turns/ports/ai-model-port.js"
 import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
+import { peekSynopsisModelBudgetAdvisory } from "../src/application/chapters/synopsis-model-budget-tracker.js"
 import { serializeVolumePlanningState } from "../src/application/chapters/volume-planning-gate.js"
 import { ChapterRevisionService, RevisionInvalidStateError } from "../src/application/chapters/chapter-revision-service.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
@@ -21,7 +22,9 @@ const tool = (name: string, action = "describe", args?: unknown) => ({
 })
 
 async function withScript(
-  script: (call: number, request: Parameters<AIModelPort["execute"]>[0], options?: ModelExecutionOptions) => Record<string, unknown>,
+  script: (call: number, request: Parameters<AIModelPort["execute"]>[0], options?: ModelExecutionOptions) => Record<string, unknown> & {
+    requestedReads?: PhaseResultEnvelope["requestedReads"]
+  },
   run: (harness: ChapterHarness, send: (extra?: Record<string, unknown>) => Promise<SynopsisConversationSendResult>) => Promise<void>,
 ): Promise<void> {
   let calls = 0
@@ -30,11 +33,12 @@ async function withScript(
     info: { provider: "test", model: "token-loop", available: true, contextWindowTokens: 64_000 },
     async execute(request, options) {
       if (request.phase !== "synopsis_discuss") return fake.execute(request, options)
-      const artifact = { assistantMessage: "正在处理当前章。", finalSelfReview: "Scripted regression.", ...script(++calls, request, options) }
+      const { requestedReads = [], ...scriptedArtifact } = script(++calls, request, options)
+      const artifact = { assistantMessage: "正在处理当前章。", finalSelfReview: "Scripted regression.", ...scriptedArtifact }
       return {
         result: {
           schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
-          outcome: "continue", artifact, requestedReads: [], citedReadIds: [...request.committedReadIds],
+          outcome: requestedReads.length > 0 ? "request_read" : "continue", artifact, requestedReads, citedReadIds: [...request.committedReadIds],
           producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [], reason: "Regression", selfReview: "Regression",
         },
         usage: { inputTokens: 100, lastRequestInputTokens: 100, outputTokens: 20, latencyMs: 0, modelCalls: 1 },
@@ -391,6 +395,88 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       } finally {
         rejected.mockRestore()
       }
+    })
+  })
+
+  it("continues productive discussion past the advisory and old attempt limits", async () => {
+    let calls = 0
+    await withScript((call, request, options) => {
+      calls = call
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      expect(options?.contextMessages?.some((message) => message.content.includes("这是最后一轮模型调用"))).toBe(false)
+      if (call > 33) expect(peekSynopsisModelBudgetAdvisory(request.projectId)?.callsUsed).toBe(call - 1)
+      if (call === 1) return tool("memory_write")
+      if (call < 76) return tool("memory_write", "invoke", {
+        target: "index", markdown: `# 记忆\n\n已经核对第${String(call)}项不同的线索。`,
+      })
+      return { chapterDraftProposal: draft, choices }
+    }, async (_harness, send) => {
+      const sent = await send()
+      expect(calls).toBe(76)
+      expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
+      expect(sent.budgetAdvisory).toMatchObject({ callsUsed: 76, softLimit: 33 })
+      expect(sent.messages.at(-1)?.content).not.toContain("预算已耗尽")
+    })
+  })
+
+  it("repairs a schema error at the advisory threshold and still saves the draft", async () => {
+    let calls = 0
+    await withScript((call, request) => {
+      calls = call
+      if (call === 34) expect(synopsisConversationStreamHub.peek(request.projectId, request.taskId).todos)
+        .toEqual(todos.map((todo) => ({ ...todo, status: "completed" })))
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      if (call === 1) return tool("memory_write")
+      if (call < 33) return tool("memory_write", "invoke", {
+        target: "index", markdown: `# 记忆\n\n已经核对第${String(call)}项不同的线索。`,
+      })
+      if (call === 33) throw Object.assign(new Error("DeepSeek response could not satisfy the phase contract: reason / selfReview missing"), { kind: "schema" })
+      return { chapterDraftProposal: draft, choices }
+    }, async (_harness, send) => {
+      const sent = await send()
+      expect(calls).toBe(34)
+      expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
+      expect(sent.budgetAdvisory).toBeDefined()
+      expect(sent.messages.at(-1)?.content).not.toContain("混合提交")
+    })
+  })
+
+  it("counts retrieval rounds separately from productive tool calls", async () => {
+    let calls = 0
+    await withScript((call, request) => {
+      calls = call
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      if (call === 1) return tool("memory_write")
+      if (call < 7) return tool("memory_write", "invoke", {
+        target: "index", markdown: `# 记忆\n\n已经核对第${String(call)}项不同的线索。`,
+      })
+      if (call === 7) return { requestedReads: [{
+        requestId: randomUUID(), reason: "读取暂存区说明", expectedEvidence: "暂存区说明",
+        query: { exactKeys: ["暂存区/readme.md"], semanticTexts: [], anchorIds: [], directions: ["both"],
+          maxCandidates: 2, maxDepth: 1, sourceKinds: ["reference"] },
+      }] }
+      expect((request.input as TurnPhaseInput).readEvidence.some((item) => item.ownerId === "暂存区/readme.md")).toBe(true)
+      return { chapterDraftProposal: draft, choices }
+    }, async (harness, send) => {
+      const runtime = harness.container.getCurrentRuntime()
+      if (runtime === undefined) throw new Error("Test runtime is not open")
+      const settings = await runtime.readSettings()
+      await runtime.saveSettings({ ...settings, execution: { ...settings.execution, maxRetrievalRounds: 1 } })
+      const sent = await send()
+      expect(calls).toBe(8)
+      expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
+      expect(sent.budgetAdvisory).toMatchObject({ softLimit: 4 })
+    })
+  })
+
+  it("still stops on three consecutive contract failures instead of reporting budget exhaustion", async () => {
+    let calls = 0
+    await withScript((call) => {
+      calls = call
+      throw Object.assign(new Error("DeepSeek response could not satisfy the phase contract: reason / selfReview missing"), { kind: "schema" })
+    }, async (_harness, send) => {
+      await expect(send()).rejects.toThrow(/model_contract 连续失败 3 次.*reason \/ selfReview missing/)
+      expect(calls).toBe(3)
     })
   })
 

@@ -141,9 +141,14 @@ async function seedCreativeSetup(harness: ChapterHarness): Promise<void> {
       "谨慎坚韧，喜欢追查旧事", "黑发灰眼，左手有旧伤", "二十七岁", "在旧站台长大的旅人，故友突然失踪",
       "找到失踪的故友并查明真相", "姓名林烬", "无",
     ])
-    const protagonistPath = "设定集/人物/主角.md"
-    const protagonistMarkdown = await saveFixtureMarkdown(harness, protagonistPath,
-      serializeProtagonistCreativeSetupMarkdown(protagonist, { aiAdditions: "林烬善于辨认笔迹，与失踪的故友自幼相识。" }))
+    const protagonistPath = "设定集/人物/主角.json"
+    const protagonistMarkdown = await harness.container.workspace.updateCharacter!(harness.workspaceRootRef, {
+      relativePath: protagonistPath, mode: "create", operations: [
+        ...[["性格爱好", "personality"], ["样貌", "appearance"], ["年龄", "age"], ["身世背景", "background"], ["目标", "goal"], ["其他设定", "other"], ["备注", "remarks"]].map(([field, key]) => ({ op: "set" as const, field: field!, value: protagonist.answers[key!]! })),
+        { op: "set", field: "姓名", value: "林烬" },
+        { op: "set", field: "AI补充设定", value: "林烬善于辨认笔迹，与失踪的故友自幼相识。" },
+      ],
+    })
     await repository.save(harness.projectId, markCreativeSetupWritten(protagonist, {
       path: protagonistPath, digest: digest(protagonistMarkdown), now: Date.now(),
     }))

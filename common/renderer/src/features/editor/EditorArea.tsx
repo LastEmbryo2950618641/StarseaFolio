@@ -6,6 +6,8 @@ import { WORLDSEED_EDITOR_THEME, ensureWorldseedEditorTheme } from "../../monaco
 import { SynopsisConversationComposer } from "./SynopsisConversationComposer.js"
 import type { BatchDeductionPhase } from "./batch-chapter-deduction.js"
 import { ChapterPanel } from "./ChapterPanel.js"
+import { isCharacterProfilePath } from "@starseafolio/contracts"
+import { CharacterInfoPanel } from "./CharacterInfoPanel.js"
 import { isChapterPlanningMarkdownPath, type DiscussFocusChapterOption } from "./synopsis-path.js"
 import { AlertTriangle, BookOpenText, FilePlus2, LayoutList, PanelRightClose, PanelRightOpen, RotateCcw, Save, Sparkles, X } from "lucide-react"
 import { ChapterDraftDiffView } from "./ChapterDraftDiffView.js"
@@ -197,6 +199,8 @@ export function EditorArea(props: Props): React.JSX.Element {
     ? "chapters"
     : props.selectedPath === undefined
       ? "home"
+      : isCharacterProfilePath(props.selectedPath)
+        ? "character"
       : isChapterPlanningMarkdownPath(props.selectedPath)
         ? "synopsis"
         : props.selectedPath.startsWith("章节正文/")
@@ -309,6 +313,8 @@ export function EditorArea(props: Props): React.JSX.Element {
         onActiveModelIdChange={props.onActiveModelIdChange}
         onReasoningEffortChange={props.onReasoningEffortChange}
       />
+    : mode === "character"
+      ? <CharacterInfoPanel key={props.selectedPath} content={props.content} readOnly={props.readOnly} onContentChange={props.onContentChange} />
     : mode === "synopsis"
       ? <MarkdownEditor key={props.selectedPath} content={props.content} readOnly={false} onContentChange={props.onContentChange} />
     : mode === "chapter" ? <ChapterRevisionEditor

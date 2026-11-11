@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { defaultDeepSeekRuntimeConfig } from "@starseafolio/config"
-import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@starseafolio/contracts"
+import { PROTOCOL_VERSION, parseCharacterProfile, type SynopsisConversationSendResult } from "@starseafolio/contracts"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { DeepSeekAiModelAdapter, NodePromptResourceAdapter, type DeepSeekCompletionClient } from "../src/index.js"
@@ -63,6 +63,7 @@ describe("creative setup real model boundary", () => {
         artifact = setup.status === "awaiting_write" ? {
           assistantMessage: "补充与已确认核心一致的姓名、能力和关系。",
           protagonistSupplementMarkdown: "## AI 补充\n林烬善于修补矿具，与矿友沈砚相互照应。",
+          protagonistSupplementFields: { 姓名: "林烬", 身份: "矿场学徒", 能力: ["修补矿具"], 人物关系: { 沈砚: "矿友" } },
           finalSelfReview: "七项核心由用户确认，补充不会覆盖核心。",
         } : {
           assistantMessage: `请确认${setup.pendingQuestion?.field ?? "当前设定"}，可以多选或填写你的想法。`,
@@ -174,8 +175,12 @@ describe("creative setup real model boundary", () => {
           await expect(send("更改旧问题的回答", id)).rejects.toThrow(/问题|过期|确认/u)
         }
       }
-      const settings = await invoke<{ content: string }>(h, "workspace.read", { relativePath: "设定集/人物/主角.md" })
+      const settings = await invoke<{ content: string }>(h, "workspace.read", { relativePath: "设定集/人物/主角.json" })
       expect(protagonistCreativeSetupMarkdownHasContent(settings.content)).toBe(true)
+      expect(parseCharacterProfile(settings.content).fields).toMatchObject({
+        姓名: "林烬", 身份: "矿场学徒", 能力: ["修补矿具"], 人物关系: { 沈砚: "矿友" },
+        性格爱好: protagonistAnswers[0],
+      })
       for (const answer of protagonistAnswers) expect(settings.content).toContain(answer)
       expect(settings.content).toContain("矿友沈砚")
       expect((await repository.find(h.projectId, "protagonist"))?.status).toBe("ready")

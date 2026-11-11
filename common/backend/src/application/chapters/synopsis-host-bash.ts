@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import { writeTextFileUtf8, windowsUtf8ProcessEnv } from "./text-utf8.js"
+import { withProtectedCharacterFiles } from "../../infrastructure/filesystem/character-file-protection.js"
 
 const DEFAULT_TIMEOUT_MS = 30_000
 const MAX_OUTPUT_CHARS = 48_000
@@ -176,6 +177,12 @@ export async function executeSynopsisHostBash(input: Readonly<{
   cwd?: string
   timeoutMs?: number
   signal?: AbortSignal
+}>): Promise<SynopsisBashResult> {
+  return withProtectedCharacterFiles(input.workspaceRootRef, () => executeUnprotectedHostBash(input))
+}
+
+async function executeUnprotectedHostBash(input: Readonly<{
+  workspaceRootRef: string; command: string; cwd?: string; timeoutMs?: number; signal?: AbortSignal
 }>): Promise<SynopsisBashResult> {
   const command = input.command.trim()
   assertBashCommandRespectsWorkspaceWrites(input.workspaceRootRef, command)

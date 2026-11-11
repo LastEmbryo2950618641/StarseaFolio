@@ -1,4 +1,5 @@
 import type { WorkspaceCatalogSnapshot } from "@starseafolio/contracts"
+import { isCharacterProfilePath } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
 import { scoreWebSearchHit } from "../retrieval/web-search-relevance.js"
@@ -61,7 +62,7 @@ export async function readLocalOriginalWorkReferences(input: Readonly<{
   const entries = input.local.catalog.entries.filter((entry) => (
     entry.entryKind === "file" && entry.size <= 256_000
     && /^(?:设定集\/|参考文件\/原作资料\/)/u.test(entry.relativePath.replace(/\\/gu, "/"))
-    && /\.md$/iu.test(entry.relativePath)
+    && (/\.md$/iu.test(entry.relativePath) || isCharacterProfilePath(entry.relativePath))
   )).sort((a, b) => {
     const priority = (path: string): number => (path.startsWith("设定集/") ? 100 : 0)
       + entitySearchQueries(input.queries).filter((term) => path.includes(term)).length

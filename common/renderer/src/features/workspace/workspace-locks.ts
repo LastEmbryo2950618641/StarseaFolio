@@ -1,4 +1,5 @@
 /** UI-side lock classification — keep aligned with backend workspace-policy. */
+import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, isCharacterProfilePath } from "@starseafolio/contracts"
 
 import {
   isChapterPlanningMarkdownPath,
@@ -14,6 +15,7 @@ const BASE_RULES_PREFIX = "世界推演规则/基础规则"
 
 /** Fixed scaffold files: content editable, path not deletable. */
 const IMMUTABLE_FILE_PATHS = new Set([
+  CHARACTER_RULE_PATH,
   "设定集/readme.md",
   "参考文件/readme.md",
   "暂存区/readme.md",
@@ -33,6 +35,7 @@ const IMMUTABLE_FILE_PATHS = new Set([
 ])
 
 const IMMUTABLE_DIRECTORY_PATHS = new Set([
+  CHARACTER_DIRECTORY,
   "世界推演规则",
   "世界推演规则/基础规则",
   "世界推演规则/用户规则",
@@ -56,7 +59,7 @@ export function normalizeWorkspacePath(path: string): string {
 
 export function isPlatformLockedPath(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
-  return normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
+  return normalized === CHARACTER_RULE_PATH || normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
 }
 
 const VOLUME_FOLDER_PATTERN = /^第(?:\d+|[零一二三四五六七八九十百]+)卷\s+\S.*$/u
@@ -169,6 +172,7 @@ function isUnderRoot(path: string, root: string): boolean {
 
 export function canCreateMarkdownInDirectory(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
+  if (normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) return false
   if (isPlatformLockedPath(normalized)) return false
   if (normalized === "章节正文" || normalized.startsWith("章节正文/")) return false
   return USER_WRITABLE_CREATE_ROOTS.some((root) => isUnderRoot(normalized, root))
@@ -176,6 +180,7 @@ export function canCreateMarkdownInDirectory(path: string): boolean {
 
 export function canCreateFolderInDirectory(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
+  if (normalized === CHARACTER_DIRECTORY || normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) return false
   if (isPlatformLockedPath(normalized)) return false
   // Volume folders are created directly under 章节正文 with「第N卷 标题」names.
   if (normalized === "章节正文") return true
@@ -213,7 +218,7 @@ export function resolveCreateDestination(selectedPath: string | undefined): stri
   if (isPlatformLockedPath(normalized) || normalized === "章节正文" || normalized.startsWith("章节正文/")) {
     return "设定集"
   }
-  const directory = normalized.endsWith(".md")
+  const directory = normalized.endsWith(".md") || isCharacterProfilePath(normalized)
     ? (normalized.includes("/") ? normalized.slice(0, normalized.lastIndexOf("/")) : "")
     : normalized
   if (directory.length > 0 && canCreateMarkdownInDirectory(directory)) return directory
@@ -231,5 +236,5 @@ export function canDeleteWorkspacePath(
   if (isChapterVolumeContainerPath(normalized)) {
     return options?.hasChapterBodies !== true
   }
-  return resolveWorkspaceLockKind(normalized) === undefined && normalized.endsWith(".md")
+  return resolveWorkspaceLockKind(normalized) === undefined && (normalized.endsWith(".md") || isCharacterProfilePath(normalized))
 }

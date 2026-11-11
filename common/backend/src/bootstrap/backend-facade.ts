@@ -2,6 +2,7 @@ import { resolve } from "node:path"
 
 import {
   PROTOCOL_VERSION,
+  workspaceCharacterUpdatePayloadSchema,
   backendErrorSchema,
   clientRequestSchema,
   idSchema,
@@ -386,6 +387,12 @@ export class BackendFacade {
         await runtime.ensureWritableHistoryBranch(this.container.now())
         await runtime.saveMarkdown(payload.relativePath, payload.content)
         return { relativePath: payload.relativePath, saved: true }
+      }
+      case "workspace.character.update": {
+        const { projectId, workspaceRootRef, ...update } = workspaceCharacterUpdatePayloadSchema.parse(request.payload)
+        const runtime = await this.container.getRuntime(projectId, workspaceRootRef)
+        await runtime.ensureWritableHistoryBranch(this.container.now())
+        return { relativePath: update.relativePath, content: await runtime.updateCharacter(update), saved: true }
       }
       case "workspace.delete": {
         const payload = workspaceDeletePayloadSchema.parse(request.payload)

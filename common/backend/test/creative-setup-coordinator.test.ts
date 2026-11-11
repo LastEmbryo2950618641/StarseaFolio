@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { emptyCharacterProfile, parseCharacterProfile, formatCharacterProfile, applyCharacterFieldOperations } from "@starseafolio/contracts"
 import { CreativeSetupCoordinator } from "../src/application/chapters/creative-setup-coordinator.js"
 import { answerCreativeSetupQuestion, initialCreativeSetupState, nextCreativeSetupField, openCreativeSetupQuestion,
   markCreativeSetupWritten, type CreativeSetupScope, type CreativeSetupState } from "../src/application/chapters/creative-setup-state.js"
@@ -24,7 +25,15 @@ function fixture(initial: CreativeSetupState) {
     find: (_project, scope) => Promise.resolve(states.get(scope as CreativeSetupScope)),
     save: (_project, state) => { states.set(state.scope, JSON.parse(JSON.stringify(state)) as CreativeSetupState); return Promise.resolve() },
   }, workspace: { readMarkdown: (_root, path) => { const text = files.get(path); return text === undefined ? Promise.reject(Error("missing")) : Promise.resolve(text) },
-    saveUserMarkdown: saveMarkdown }, now: () => time++, createId: () => `q-${String(time++)}`, recordSettings: () => Promise.resolve() })
+    saveUserMarkdown: saveMarkdown,
+    updateCharacter: async (_root, update) => {
+      const previous = files.get(update.relativePath)
+      const profile = previous === undefined ? emptyCharacterProfile("主角") : parseCharacterProfile(previous)
+      const content = formatCharacterProfile(applyCharacterFieldOperations(profile, update.operations))
+      await saveMarkdown(_root, update.relativePath, content)
+      return content
+    },
+  }, now: () => time++, createId: () => `q-${String(time++)}`, recordSettings: () => Promise.resolve() })
   const coordinator = createCoordinator()
   const input = { projectId: "project", workspaceRootRef: "isolated", volumeFolderName: "第一卷 待命名",
     chapterSequence: 1, message: "开始", priorMessages: [], generate }
@@ -115,6 +124,25 @@ describe("creative setup concurrent sends", () => {
 })
 
 describe("creative setup persistence failure recovery", () => {
+  it("writes AI-generated identity, abilities and relations into individual fields without overriding confirmed core", async () => {
+    const f = fixture(completed())
+    await f.coordinator.advance({ ...f.input, generate: async state => ({
+      ...await f.generate(state),
+      protagonistSupplementFields: {
+        姓名: "林烬", 身份: "矿场学徒", 能力: ["锻造", "修补矿具"],
+        人物关系: { 沈砚: "相互照应的矿友" }, 所属阵营: "散修",
+        性格爱好: "不得替换用户核心", 年龄: "不得替换用户核心",
+      },
+    }) })
+    const profile = parseCharacterProfile(f.files.get("设定集/人物/主角.json") ?? "")
+    expect(profile.fields).toMatchObject({
+      姓名: "林烬", 身份: "矿场学徒", 能力: ["锻造", "修补矿具"],
+      人物关系: { 沈砚: "相互照应的矿友" }, 所属阵营: "散修",
+      性格爱好: answers[0], 年龄: answers[2],
+    })
+    for (const answer of answers) expect(JSON.stringify(profile)).toContain(answer)
+  })
+
   it("durably closes a ready gate before attempting to restore a missing document", async () => {
     const f = fixture(markCreativeSetupWritten(completed(), { path: "设定集/人物/主角.md", digest: "previous", now: 10 }))
     f.generate.mockRejectedValueOnce(Error("model unavailable"))
@@ -133,7 +161,7 @@ describe("creative setup persistence failure recovery", () => {
     const result = await f.coordinator.advance(f.input)
     expect(f.states.get("protagonist")?.status).toBe("ready")
     expect(result?.field).toBe("opening")
-    for (const answer of answers) expect(f.files.get("设定集/人物/主角.md")).toContain(answer)
+    for (const answer of answers) expect(f.files.get("设定集/人物/主角.json")).toContain(answer)
   })
 
   it("retries an accepted answer after next-question generation fails without filling another field", async () => {

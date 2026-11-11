@@ -50,6 +50,9 @@ function fixtureModel(inputs: Record<string, unknown>[]): AIModelPort {
           { label: `${field}：修仙题材推荐方案二`, action: "continue_discuss" },
         ],
         protagonistSupplementMarkdown: interview.status === "awaiting_write" ? "## AI补充\n姓名林烬，习惯随身携带旧铜钱。" : undefined,
+        protagonistSupplementFields: interview.status === "awaiting_write" ? {
+          姓名: "林烬", 身份: "矿场学徒", 能力: ["修补矿具"], 人物关系: { 沈砚: "矿友" },
+        } : undefined,
         // Deliberately invalid side effect: an interview must never leak chapter writes.
         synopsisBody: "# 第一章 非法跳过\n不得写入。",
         continueTurn: true,
@@ -160,7 +163,7 @@ describe("user-confirmed protagonist and volume state machines", () => {
     const protagonist = ["谨慎坚韧，喜欢锻造", "黑发灰眼，左手有旧伤", "十七岁", "矿场孤儿，父母失踪", "取回家传信物并寻找父母", "姓名林烬", "不添加其他要求"]
     for (const answer of protagonist) result = await send(h, answer, result.awaitingSetupInput?.questionId)
     expect(result.awaitingSetupInput).toMatchObject({ scope: "volume:第一卷 待命名", field: "opening" })
-    const settings = await invoke<{ content: string }>(h, "workspace.read", { relativePath: "设定集/人物/主角.md" })
+    const settings = await invoke<{ content: string }>(h, "workspace.read", { relativePath: "设定集/人物/主角.json" })
     for (const answer of protagonist) expect(settings.content).toContain(answer)
     expect(settings.content).toContain("旧铜钱")
     const volume = ["矿场暴雨之夜被迫逃亡", "夺回信物；山门试炼反败为胜", "通过试炼进入宗门，保留父母线索", "开篇救下矿友；中段矿友助他找回信物；卷末分别"]

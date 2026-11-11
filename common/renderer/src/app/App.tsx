@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { CHARACTER_DIRECTORY, isCharacterProfilePath, emptyCharacterProfile, parseCharacterProfile, type CharacterUpdate } from "@starseafolio/contracts"
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels"
 import { ArrowLeft, BookOpen, ChevronDown, Cloud, Cpu, FolderOpen, PanelLeftClose, PanelRightClose, Save, Settings2, X } from "lucide-react"
 import type {
@@ -1255,12 +1256,27 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     const path = selectedPath
     const submittedContent = content
     try {
-      await invokeBackend("workspace.save", {
-        projectId: project.projectId,
-        workspaceRootRef: project.workspaceRootRef,
-        relativePath: path,
-        content: submittedContent,
-      })
+      if (isCharacterProfilePath(path)) {
+        const original = openedDocumentsRef.current.find(document => document.path === path)?.savedContent ?? savedContent
+        const before = parseCharacterProfile(original)
+        const after = parseCharacterProfile(submittedContent)
+        const operations: CharacterUpdate["operations"] = [
+          ...Object.entries(after.fields).filter(([field, value]) => JSON.stringify(before.fields[field]) !== JSON.stringify(value))
+            .map(([field, value]) => ({ op: "set" as const, field, value })),
+          ...Object.keys(before.fields).filter(field => !Object.hasOwn(after.fields, field)).map(field => ({ op: "delete" as const, field })),
+        ]
+        if (operations.length > 0) await invokeBackend("workspace.character.update", {
+          projectId: project.projectId, workspaceRootRef: project.workspaceRootRef, relativePath: path,
+          mode: "update", expectedContent: original, operations,
+        })
+      } else {
+        await invokeBackend("workspace.save", {
+          projectId: project.projectId,
+          workspaceRootRef: project.workspaceRootRef,
+          relativePath: path,
+          content: submittedContent,
+        })
+      }
       if (documentProjectRef.current !== project.projectId) return
       replaceOpenedDocuments(saveEditorDocument(openedDocumentsRef.current, path, submittedContent))
       if (selectedPathRef.current === path) setSavedContent(submittedContent)
@@ -1317,6 +1333,18 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     try {
       if (kind === "file") {
         const trimmed = rawName.trim().replaceAll("\\", "/").split("/").at(-1) ?? ""
+        if (parentPath === CHARACTER_DIRECTORY) {
+          const name = trimmed.replace(/\.(?:json|md)$/iu, "") || "新人物"
+          const relativePath = `${CHARACTER_DIRECTORY}/${name}.json`
+          await invokeBackend("workspace.character.update", {
+            projectId: project.projectId, workspaceRootRef: project.workspaceRootRef, relativePath, mode: "create",
+            operations: Object.entries(emptyCharacterProfile(name).fields).map(([field, value]) => ({ op: "set", field, value })),
+          })
+          await refreshWorkspace()
+          await openFile(relativePath)
+          setPostCommitNotice(`已新建人物「${name}」`)
+          return
+        }
         const filename = trimmed.length === 0
           ? "未命名.md"
           : trimmed.toLowerCase().endsWith(".md")
@@ -3507,7 +3535,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         : null}
     </PanelGroup>
     <footer className="statusbar">
-      <span>UTF-8</span><span>LF</span><span>Markdown</span><span className={dirty ? "unsaved" : "saved"}>{dirty ? <Cloud size={13} /> : <Save size={13} />}{dirty ? "未保存" : "已保存"}</span>
+      <span>UTF-8</span><span>LF</span><span>{isCharacterProfilePath(selectedPath ?? "") ? "人物信息" : "Markdown"}</span><span className={dirty ? "unsaved" : "saved"}>{dirty ? <Cloud size={13} /> : <Save size={13} />}{dirty ? "未保存" : "已保存"}</span>
       <span className="status-path"><FolderOpen size={13} />{selectedPath === undefined ? project.workspaceRootRef : `${documentRoot}\\${selectedPath.replaceAll("/", "\\")}`}</span>
       <span>继承环境：本轮 RuleSnapshot</span><span>归档：空闲</span>
     </footer>
@@ -3640,7 +3668,7 @@ function isSynopsisSendCancelledError(error: unknown): boolean {
 }
 
 function isWorkspaceFilePath(value: string | undefined): value is string {
-  return value !== undefined && value.trim().length > 0 && value.toLowerCase().endsWith(".md")
+  return value !== undefined && value.trim().length > 0 && (value.toLowerCase().endsWith(".md") || isCharacterProfilePath(value))
 }
 
 function isRecoverableDatabaseDisconnect(message: string): boolean {

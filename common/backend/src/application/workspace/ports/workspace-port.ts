@@ -1,4 +1,4 @@
-import type { ProjectId } from "@starseafolio/contracts"
+import type { CharacterUpdate, ProjectId } from "@starseafolio/contracts"
 
 import type {
   ProjectManifest,
@@ -45,6 +45,8 @@ export interface WorkspacePort {
   ensurePlatformDocuments(workspaceRootRef: string, defaults: WorkspaceDefaultDocuments): Promise<void>
   validate(workspaceRootRef: string): Promise<WorkspaceValidationReport>
   readMarkdown(workspaceRootRef: string, relativePath: string): Promise<string>
+  /** Character files can only be written through field operations. */
+  updateCharacter?(workspaceRootRef: string, update: CharacterUpdate): Promise<string>
   saveUserMarkdown(workspaceRootRef: string, relativePath: string, content: string): Promise<void>
   createUserDirectory(workspaceRootRef: string, relativePath: string): Promise<void>
   removeUserMarkdown(workspaceRootRef: string, relativePath: string): Promise<void>

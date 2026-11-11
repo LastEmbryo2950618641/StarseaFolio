@@ -7,6 +7,7 @@ import type {
   SettingsLineagePathsResult,
   SettingsLineageSourceKind,
 } from "@starseafolio/contracts"
+import { isCharacterProfilePath, parseCharacterProfile, type CharacterUpdate } from "@starseafolio/contracts"
 
 import type { WorkspacePort } from "../workspace/index.js"
 import {
@@ -199,10 +200,21 @@ export class SettingsLineageService {
     if (!isSettingsLineagePath(commit.entry.relativePath)) {
       throw new Error(`not a settings lineage path: ${commit.entry.relativePath}`)
     }
-    await this.dependencies.workspace.saveUserMarkdown(
-      this.dependencies.workspaceRootRef,
-      commit.entry.relativePath,
-      commit.markdown,
+    if (isCharacterProfilePath(commit.entry.relativePath)) {
+      if (this.dependencies.workspace.updateCharacter === undefined) throw new Error("人物字段接口不可用")
+      const previous = await this.dependencies.workspace.readMarkdown(this.dependencies.workspaceRootRef, commit.entry.relativePath).catch(() => undefined)
+      const target = parseCharacterProfile(commit.markdown)
+      const existing = previous === undefined ? undefined : parseCharacterProfile(previous)
+      const operations: CharacterUpdate["operations"] = [
+        ...Object.keys(existing?.fields ?? {}).filter(field => !Object.hasOwn(target.fields, field)).map(field => ({ op: "delete" as const, field })),
+        ...Object.entries(target.fields).map(([field, value]) => ({ op: "set" as const, field, value })),
+      ]
+      if (operations.length > 0) await this.dependencies.workspace.updateCharacter(this.dependencies.workspaceRootRef, {
+        relativePath: commit.entry.relativePath, mode: previous === undefined ? "create" : "update", operations,
+        ...(previous === undefined ? {} : { expectedContent: previous }),
+      })
+    } else await this.dependencies.workspace.saveUserMarkdown(
+      this.dependencies.workspaceRootRef, commit.entry.relativePath, commit.markdown,
     )
     const recorded = await this.recordUpsert({
       relativePath: commit.entry.relativePath,

@@ -774,6 +774,16 @@ export class ProjectRuntime {
     return this.workspace.readMarkdown(this.workspaceRootRef, relativePath)
   }
 
+  public async updateCharacter(update: import("@starseafolio/contracts").CharacterUpdate): Promise<string> {
+    if (this.workspace.updateCharacter === undefined) throw new Error("人物字段接口不可用")
+    const content = await this.workspace.updateCharacter(this.workspaceRootRef, update)
+    await this.createSettingsLineageService().recordUpsert({
+      relativePath: update.relativePath, markdown: content,
+      sourceKind: "workspace_save", summary: "通过人物字段接口更新人物资料",
+    })
+    return content
+  }
+
   public async saveMarkdown(relativePath: string, content: string): Promise<void> {
     const chapterWrite = resolveChapterWriteContext(relativePath)
     if (chapterWrite !== undefined) {
@@ -1163,6 +1173,11 @@ export class ProjectRuntime {
           ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
           ...(input.signal === undefined ? {} : { signal: input.signal }),
         })
+      },
+      updateCharacter: async (input) => {
+        input.signal?.throwIfAborted()
+        const content = await this.updateCharacter(input.update)
+        return { relativePath: input.update.relativePath, content }
       },
       writeTodos: async (input) => {
         input.signal?.throwIfAborted()

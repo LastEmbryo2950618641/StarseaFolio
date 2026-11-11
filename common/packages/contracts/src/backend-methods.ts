@@ -13,6 +13,7 @@ export const backendMethodValues = [
   "workspace.list",
   "workspace.read",
   "workspace.save",
+  "workspace.character.update",
   "workspace.delete",
   "workspace.createDirectory",
   "workspace.importFiles",

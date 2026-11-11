@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { CHARACTER_DIRECTORY, isCharacterProfilePath } from "@starseafolio/contracts"
 import { Eye, EyeOff, FilePlus2, Folder, FolderOpen, FolderPlus, History, LockKeyhole, RefreshCw, Trash2 } from "lucide-react"
 
 import type { InventoryEntry } from "../../api/client.js"
@@ -79,10 +80,10 @@ export function WorkspaceTree({
             {showSceneCards ? <Eye size={15} /> : <EyeOff size={15} />}
           </button>
         </UiTooltip>
-        <UiTooltip label="新建 Markdown（相对当前选中位置）">
+        <UiTooltip label={selectedPath === CHARACTER_DIRECTORY || isCharacterProfilePath(selectedPath ?? "") ? "新增人物" : "新建 Markdown（相对当前选中位置）"}>
           <button
             type="button"
-            aria-label="新建 Markdown"
+            aria-label={selectedPath === CHARACTER_DIRECTORY || isCharacterProfilePath(selectedPath ?? "") ? "新增人物" : "新建 Markdown"}
             disabled={onCreateMarkdown === undefined}
             onClick={() => { onCreateMarkdown?.() }}
           >
@@ -241,11 +242,11 @@ function TreeRow({
         ? <LockBadge kind={lockKind} />
         : null}
       {canCreateFile
-        ? <UiTooltip label={`在「${node.name}」下新建 Markdown`}>
+        ? <UiTooltip label={node.path === CHARACTER_DIRECTORY ? "新增人物" : `在「${node.name}」下新建 Markdown`}>
             <button
               type="button"
               className="tree-row-action"
-              aria-label={`在 ${node.name} 下新建 Markdown`}
+              aria-label={node.path === CHARACTER_DIRECTORY ? "在 人物 下新增人物" : `在 ${node.name} 下新建 Markdown`}
               onClick={(event) => {
                 event.stopPropagation()
                 setExpanded(true)

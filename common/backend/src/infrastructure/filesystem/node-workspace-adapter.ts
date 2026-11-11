@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto"
+import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, CHARACTER_GUIDE, isCharacterProfilePath, characterUpdateSchema, emptyCharacterProfile, parseCharacterProfile, formatCharacterProfile, applyCharacterFieldOperations, type CharacterUpdate } from "@starseafolio/contracts"
 import { constants } from "node:fs"
 import {
   copyFile,
@@ -46,6 +48,7 @@ import {
 } from "../../core/index.js"
 import { BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT } from "../../core/workspace/batch-volume-deduction-plan-default.js"
 import { VOLUME_FIRST_WRITE_GATE_DEFAULT } from "../../core/workspace/volume-first-write-gate-default.js"
+import { withCharacterWriteLock } from "./character-file-protection.js"
 import type {
   WorkspaceDefaultDocuments,
   WorkspacePort,
@@ -119,6 +122,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
       encoding: "utf8",
       flag: "wx",
     })
+    await writeFile(resolveInside(root, CHARACTER_RULE_PATH), CHARACTER_GUIDE, { encoding: "utf8", flag: "wx" })
     await writeFile(resolveInside(root, "设定集/readme.md"), defaults.settingsReadme, {
       encoding: "utf8",
       flag: "wx",
@@ -177,6 +181,9 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     defaults: WorkspaceDefaultDocuments,
   ): Promise<void> {
     const root = await realpath(resolve(workspaceRootRef))
+    await assertParentChainContainsNoLinks(root, resolveInside(root, `${CHARACTER_DIRECTORY}/placeholder.json`))
+    await mkdir(resolveInside(root, CHARACTER_DIRECTORY), { recursive: true })
+    await writeFileIfMissing(resolveInside(root, CHARACTER_RULE_PATH), CHARACTER_GUIDE)
     await mkdir(resolveInside(root, "世界推演规则/基础规则"), { recursive: true })
     await writeFileIfMissing(
       resolveInside(root, "世界推演规则/基础规则/content-handling.md"),
@@ -267,7 +274,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
   public async readMarkdown(workspaceRootRef: string, relativePath: string): Promise<string> {
     const root = await this.documentRoot(workspaceRootRef, relativePath)
     const normalized = normalizeWorkspacePath(relativePath)
-    if (!normalized.endsWith(".md")) {
+    if (!normalized.endsWith(".md") && !isCharacterProfilePath(normalized)) {
       throw new Error("Only Markdown files can be read from the user workspace")
     }
     const path = await resolveExistingInside(root, normalized)
@@ -281,6 +288,33 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     await assertParentChainContainsNoLinks(root, path)
     await mkdir(resolve(path, ".."), { recursive: true })
     await writeFile(path, content, { encoding: "utf8" })
+  }
+
+  /** Serialized field operations and atomic replacement prevent malformed or lost JSON writes. */
+  public async updateCharacter(workspaceRootRef: string, rawUpdate: CharacterUpdate): Promise<string> {
+    const update = characterUpdateSchema.parse(rawUpdate)
+    const root = await realpath(resolve(workspaceRootRef))
+    const path = resolveInside(root, update.relativePath)
+    return withCharacterWriteLock(root, async () => {
+      await assertParentChainContainsNoLinks(root, path)
+      const existingStat = await lstat(path).catch((error: unknown) => { if (!isNotFoundError(error)) throw error; return undefined })
+      if (existingStat !== undefined && (!existingStat.isFile() || existingStat.isSymbolicLink())) throw new Error("人物资料必须为普通文件，禁止链接")
+      let previous: string | undefined
+      try { previous = await readFile(path, "utf8") } catch (error) { if (!isNotFoundError(error)) throw error }
+      if (update.mode === "create" && previous !== undefined) throw new Error("人物已存在，请使用字段更新，不能覆盖创建")
+      if (update.mode === "update" && previous === undefined) throw new Error("人物不存在，请先创建")
+      if (update.expectedContent !== undefined && previous !== update.expectedContent) throw new Error("人物资料已被其他操作更新，请重新打开后再保存")
+      const profile = previous === undefined ? emptyCharacterProfile(basename(path, ".json")) : parseCharacterProfile(previous)
+      const content = formatCharacterProfile(applyCharacterFieldOperations(profile, update.operations))
+      if (content.length > 1_000_000) throw new Error("人物资料过大")
+      await mkdir(resolve(path, ".."), { recursive: true })
+      const temporary = `${path}.${randomUUID()}.tmp`
+      try {
+        await writeFile(temporary, content, { encoding: "utf8", flag: "wx" })
+        await rename(temporary, path)
+      } finally { await rm(temporary, { force: true }) }
+      return content
+    })
   }
 
   public async createUserDirectory(workspaceRootRef: string, relativePath: string): Promise<void> {

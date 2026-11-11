@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import {
   aiPhaseSchema,
+  characterProfileSchema,
   creationDeskSettingsUpdateSchema,
   discussFocusKindSchema,
   type AIPhase,
@@ -624,6 +625,11 @@ export const synopsisPresentationWriteSchema = z.object({
 
 export const synopsisDiscussArtifactSchema = z.object({
   assistantMessage: z.string().min(1),
+  /** Structured additions; the host applies confirmed core fields last. */
+  protagonistSupplementFields: characterProfileSchema.shape.fields.refine(
+    fields => typeof fields.姓名 === "string" && fields.姓名.trim().length > 0,
+    "主角补充必须提供非空姓名字段",
+  ).optional(),
   /** Supplemental details only; confirmed protagonist core is written by the server. */
   protagonistSupplementMarkdown: z.string().trim().min(1).max(6_000).optional(),
   /** Parameters and writing guidance are disclosed only by a successful describe. */
@@ -637,6 +643,7 @@ export const synopsisDiscussArtifactSchema = z.object({
       "memory_write",
       "original_work_search",
       "original_work_crawl",
+      "character_update",
     ]),
     action: z.enum(["describe", "invoke"]),
     arguments: z.string().max(200_000).optional(),

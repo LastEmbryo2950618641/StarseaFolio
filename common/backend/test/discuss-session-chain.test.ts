@@ -22,6 +22,7 @@ import {
   type ProjectManifest,
 } from "../src/index.js"
 import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
 
 const temporaryDirectories: string[] = []
 
@@ -104,6 +105,14 @@ class RecordingFakeModel implements AIModelPort {
     request: PhaseRequestEnvelope,
     options?: ModelExecutionOptions,
   ): Promise<PhaseModelExecution> {
+    if (request.phase === "synopsis_discuss") {
+      // These tests isolate context deltas; their fake delivers completed work,
+      // so seed the required checklist rather than bypassing the production gate.
+      synopsisConversationStreamHub.setTodos(request.projectId, [
+        { id: "read", content: "读取本章资料", status: "completed" },
+        { id: "deliver", content: "交付本章梗概", status: "completed" },
+      ], Date.now())
+    }
     const execution = await this.inner.execute(request, options)
     const delta = parseDeltaContent(execution.contextExchange?.requestMessages[0]?.content)
     const input = (delta.input ?? {}) as Record<string, unknown>

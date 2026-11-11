@@ -229,9 +229,9 @@ export class FakeAiModelAdapter implements AIModelPort {
             proposals: [{
               payload: {
                 kind: "create",
-                relativePath: "设定集/人物/验收旅人.md",
-                markdown: "# 验收旅人\n\n> 适用范围：DOM 回归测试\n\n## 身份摘要\n旧站台尽头的无名持灯者。\n",
-                readmeEntry: "`设定集/人物/验收旅人.md` · 验收旅人 · DOM",
+                relativePath: "设定集/人物/验收旅人.json",
+                characterOperations: [{ op: "set", field: "姓名", value: "验收旅人" }, { op: "set", field: "身份", value: "旧站台尽头的无名持灯者" }],
+                readmeEntry: "`设定集/人物/验收旅人.json` · 验收旅人 · DOM",
               },
               reason: "正文首次出现该人物，适合沉淀为设定。",
             }],

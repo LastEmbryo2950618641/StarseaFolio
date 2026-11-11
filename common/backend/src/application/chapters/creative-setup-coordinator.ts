@@ -1,16 +1,17 @@
-import type { ProjectId, SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
+import { characterProfileSchema, type CharacterFieldValue, type ProjectId, type SynopsisConversationChoice, type SynopsisConversationMessage } from "@starseafolio/contracts"
+import { protagonistCreativeSetupFields } from "./creative-setup-state.js"
 import type { WorkspacePort } from "../workspace/index.js"
 import { digest } from "../../core/identity/digest.js"
 import type { SqliteCreativeSetupRepository } from "../../infrastructure/sqlite/repositories/sqlite-creative-setup-repository.js"
 import {
   initialCreativeSetupState, openCreativeSetupQuestion, answerCreativeSetupQuestion,
-  markCreativeSetupWritten, serializeProtagonistCreativeSetupMarkdown, invalidateCreativeSetupWritten,
+  markCreativeSetupWritten, invalidateCreativeSetupWritten,
   protagonistCreativeSetupMarkdownHasContent,
   type CreativeSetupState, type CreativeSetupScope,
 } from "./creative-setup-state.js"
 import { parseVolumePlanningState, serializeVolumePlanningState, type VolumePlanningState } from "./volume-planning-gate.js"
 
-export const PROTAGONIST_SETTINGS_PATH = "设定集/人物/主角.md"
+export const PROTAGONIST_SETTINGS_PATH = "设定集/人物/主角.json"
 
 const activeCreativeSetupAdvances = new Set<string>()
 
@@ -18,13 +19,14 @@ type InterviewReply = Readonly<{
   content: string
   choices?: readonly SynopsisConversationChoice[] | undefined
   protagonistSupplementMarkdown?: string
+  protagonistSupplementFields?: Record<string, CharacterFieldValue>
 }>
 
 /** Only explicit, nonce-bound user responses advance these gates. AI output has no transition authority. */
 export class CreativeSetupCoordinator {
   constructor(private readonly dependencies: Readonly<{
     repository: Pick<SqliteCreativeSetupRepository, "find" | "save">
-    workspace: Pick<WorkspacePort, "readMarkdown" | "saveUserMarkdown">
+    workspace: Pick<WorkspacePort, "readMarkdown" | "saveUserMarkdown" | "updateCharacter">
     now: () => number
     createId: () => string
     recordSettings: (path: string, markdown: string) => Promise<void>
@@ -100,11 +102,18 @@ export class CreativeSetupCoordinator {
           const reply = await input.generate(state)
           const path = PROTAGONIST_SETTINGS_PATH
           const previous = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, path).catch(() => "")
-          const complete = serializeProtagonistCreativeSetupMarkdown(state, {
-            existingMarkdown: previous || "# 主角设定\n",
-            ...(reply.protagonistSupplementMarkdown === undefined ? {} : { aiAdditions: reply.protagonistSupplementMarkdown }),
+          if (this.dependencies.workspace.updateCharacter === undefined) throw new Error("人物字段接口不可用，主角门禁未推进")
+          const complete = await this.dependencies.workspace.updateCharacter(input.workspaceRootRef, {
+            relativePath: path, mode: previous ? "update" : "create",
+            ...(previous ? { expectedContent: previous } : {}),
+            operations: [
+              ...Object.entries(reply.protagonistSupplementFields === undefined ? {}
+                : characterProfileSchema.parse({ schemaVersion: 1, fields: reply.protagonistSupplementFields }).fields)
+                .map(([field, value]) => ({ op: "set" as const, field, value })),
+              ...protagonistCreativeSetupFields.map(field => ({ op: "set" as const, field: field.label, value: state.answers[field.key] ?? "" })),
+              ...(reply.protagonistSupplementMarkdown === undefined ? [] : [{ op: "set" as const, field: "AI补充设定", value: reply.protagonistSupplementMarkdown }]),
+            ],
           })
-          await this.dependencies.workspace.saveUserMarkdown(input.workspaceRootRef, path, complete)
           const saved = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, path)
           if (digest(saved) !== digest(complete)) throw new Error("主角设定写入核对失败，门禁未推进")
           await this.dependencies.recordSettings(path, saved)
@@ -112,7 +121,7 @@ export class CreativeSetupCoordinator {
           const readme = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, readmePath).catch(() => "# 设定集索引\n")
           if (!readme.includes(path)) {
             await this.dependencies.workspace.saveUserMarkdown(input.workspaceRootRef, readmePath,
-              `${readme.trimEnd()}\n- [主角设定](人物/主角.md) · ${path}\n`)
+              `${readme.trimEnd()}\n- [主角设定](人物/主角.json) · ${path}\n`)
           }
           state = markCreativeSetupWritten(state, { path, digest: digest(saved), now: this.dependencies.now() })
           notices.push("主角罗盘已确认并写入设定集，接下来确认本卷主线与支线。")
