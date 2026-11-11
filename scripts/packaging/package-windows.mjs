@@ -30,7 +30,8 @@ try {
   const { extractFile } = builderRequire("@electron/asar")
   const archive = join(desktop, "release/win-unpacked/resources/app.asar")
   const packedManifest = JSON.parse(extractFile(archive, "package.json").toString("utf8"))
-  const packedIdentity = JSON.parse(extractFile(archive, "build-info.json").toString("utf8"))
+  // electron-builder moves extraResources outside app.asar, even if also listed in files.
+  const packedIdentity = JSON.parse(await readFile(join(desktop, "release/win-unpacked/resources/build-info.json"), "utf8"))
   if (packedManifest.version !== identity.version || packedIdentity.version !== identity.version || packedIdentity.buildNumber !== identity.buildNumber) {
     throw new Error("Packaged version differs from release identity")
   }
