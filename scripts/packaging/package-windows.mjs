@@ -15,7 +15,7 @@ const baseVersion = await assertProductVersion()
 const buildInfoPath = join(desktop, "build-info.json")
 const originalBuildInfo = await readFile(buildInfoPath, "utf8")
 const buildInfo = JSON.parse(originalBuildInfo)
-if (process.env.CI && !process.env.BUILD_NUMBER) throw new Error("CI must allocate BUILD_NUMBER through Release Windows")
+if (process.env.CI && !process.env.BUILD_NUMBER) throw new Error("CI must allocate BUILD_NUMBER through Build EXE and APK")
 const identity = windowsBuildIdentity(baseVersion, process.env.BUILD_NUMBER ?? buildInfo.buildNumber)
 try {
   await writeFile(buildInfoPath, `${JSON.stringify(identity, null, 2)}\n`)

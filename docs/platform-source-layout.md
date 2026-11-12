@@ -59,7 +59,7 @@ Windows 构建仍使用 `corepack pnpm package:win`，产物位于 `win/desktop/
 
 - Windows：`corepack pnpm package:exe`（也可用 `package:win`），生成 Setup 与 Portable EXE，需要 Windows 和 MSVC C++ 编译环境。
 - Android：先 `npm --prefix android/mobile ci`，再 `corepack pnpm package:apk`（也可用 `package:android`），产物在 `android/mobile/release/`，需要 JDK 17 与 Android SDK。该包仍为依赖 HTTP 后端的 Expo 原生客户端，不代表完整工作台或本地后端迁移完成。
-- `.github/workflows/build-packages.yml` 在推送 `master`、`dev-0.0.1` 或手动运行时分别构建 EXE、预览 APK，并上传 Artifacts；`.github/workflows/release-windows.yml` 继续负责正式 Windows Release。
+- `.github/workflows/build-packages.yml` 是唯一的构建与发布入口（Build EXE and APK）：在推送 `master`、`dev-0.0.1`、版本标签或手动运行时构建 EXE 与预览 APK，上传 Artifacts；两端都成功后，发布到同一个 GitHub Release 并更新 Windows 的 latest.json。
 
 具体环境、签名和架构选项见 `win/README.md`、`android/mobile/README.md`。
 
