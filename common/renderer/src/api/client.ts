@@ -433,12 +433,12 @@ export async function saveAppUpdatePrefs(input: AppUpdatePrefs): Promise<AppSett
   return bridge.saveAppUpdatePrefs(input)
 }
 
-export async function checkAppUpdate(force = false): Promise<UpdateCheckResult> {
+export async function checkAppUpdate(force = false, startup = false): Promise<UpdateCheckResult> {
   const bridge = getStarseaFolioBridge()
   if (bridge?.checkAppUpdate === undefined) {
     throw new Error("应用接口未更新，请完全退出并重启 StarseaFolio 后再试")
   }
-  return bridge.checkAppUpdate({ force })
+  return bridge.checkAppUpdate({ force, startup })
 }
 
 export type UpdateDownloadProgress = Readonly<{

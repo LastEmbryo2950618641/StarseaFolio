@@ -93,7 +93,7 @@ export type WorldseedBridge = Readonly<{
   removeWorkDirectory(input: Readonly<{ directoryPath: string; mode: RemoveWorkDirectoryMode }>): Promise<AppSettingsReadResult>
   getAppUpdateInfo(): Promise<AppUpdateInfoResult>
   saveAppUpdatePrefs(input: AppUpdatePrefs): Promise<AppSettingsReadResult>
-  checkAppUpdate(input?: { force?: boolean }): Promise<UpdateCheckResult>
+  checkAppUpdate(input?: { force?: boolean; startup?: boolean }): Promise<UpdateCheckResult>
   startAppUpdateDownload(input: Readonly<{
     downloadUrl: string
     version: string

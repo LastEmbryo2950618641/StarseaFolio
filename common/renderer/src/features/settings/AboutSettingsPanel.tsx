@@ -46,7 +46,7 @@ export function AboutSettingsPanel({
   onCheckNow,
 }: Props): React.JSX.Element {
   const [updateUrl, setUpdateUrl] = useState("")
-  const [intervalHours, setIntervalHours] = useState<UpdateCheckIntervalHours | 0>(24)
+  const [intervalHours, setIntervalHours] = useState<UpdateCheckIntervalHours | 0>(1)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string>()
   const [saveOk, setSaveOk] = useState(false)
@@ -90,7 +90,7 @@ export function AboutSettingsPanel({
         <span><Info size={18} /></span>
         <div>
           <h2>关于</h2>
-          <p>产品信息与自动更新检测。发现新版本后会在应用内下载安装包。</p>
+          <p>启动时检查更新，运行中默认每小时检查。发现新版本后提示，确认后下载安装。</p>
         </div>
       </header>
       <div className="settings-fields about-settings">
@@ -140,8 +140,8 @@ export function AboutSettingsPanel({
         </div>
         <div className="settings-field-row">
           <span>
-            <strong>自动检测间隔</strong>
-            <small>可选；关闭后仅手动检查</small>
+            <strong>运行中检测间隔</strong>
+            <small>启动时始终检查；关闭此项仅停止运行中的定时检测</small>
           </span>
           <select
             className="about-settings-interval"

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   compareSemver,
+  defaultUpdatePrefs,
   isUpdateAvailable,
   parseUpdateManifest,
   shouldAutoCheck,
@@ -108,5 +109,16 @@ describe("app update compare", () => {
       checkIntervalHours: 1,
       lastCheckedAtMs: now - 2 * 60 * 60 * 1000,
     }, now)).toBe(true)
+  })
+
+  it("checks on every startup even after a recent check or with periodic checks off", () => {
+    const now = 10_000_000
+    expect(defaultUpdatePrefs().checkIntervalHours).toBe(1)
+    expect(shouldAutoCheck({ ...defaultUpdatePrefs(), lastCheckedAtMs: now - 1000 }, now, true)).toBe(true)
+    expect(shouldAutoCheck({ updateUrl: "https://example.com/latest.json", lastCheckedAtMs: now }, now, true)).toBe(true)
+  })
+
+  it("recovers from a clock correction without suppressing checks indefinitely", () => {
+    expect(shouldAutoCheck({ ...defaultUpdatePrefs(), lastCheckedAtMs: 20_000_000 }, 10_000_000)).toBe(true)
   })
 })

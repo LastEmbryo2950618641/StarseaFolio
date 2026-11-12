@@ -132,12 +132,14 @@ function parseBuildNumber(value: string): number | undefined {
 export function shouldAutoCheck(
   prefs: AppUpdatePrefs,
   nowMs: number,
+  startup = false,
 ): boolean {
+  if (startup) return true
   const hours = prefs.checkIntervalHours
   if (hours === undefined) return false
   const last = prefs.lastCheckedAtMs
   if (last === undefined) return true
-  return nowMs - last >= hours * 60 * 60 * 1000
+  return nowMs < last || nowMs - last >= hours * 60 * 60 * 1000
 }
 
 export async function fetchUpdateManifest(updateUrl: string): Promise<UpdateManifest> {

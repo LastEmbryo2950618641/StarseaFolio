@@ -12,6 +12,7 @@ import {
   type UpdateManifest,
 } from "../api/client.js"
 import type { AppUpdateDialogState } from "../features/settings/AppUpdateDialog.js"
+import { scheduleAppUpdateChecks } from "./app-update-schedule.js"
 
 export type UseAppUpdateResult = Readonly<{
   info: AppUpdateInfoResult | null
@@ -41,7 +42,6 @@ export function useAppUpdate(): UseAppUpdateResult {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [dialog, setDialog] = useState<AppUpdateDialogState | null>(null)
   const [installerPath, setInstallerPath] = useState<string | null>(null)
-  const timerRef = useRef<number | null>(null)
   const checkingRef = useRef(false)
   const downloadingRef = useRef(false)
   const promptedVersionRef = useRef<string | null>(null)
@@ -104,12 +104,12 @@ export function useAppUpdate(): UseAppUpdateResult {
     }
   }, [])
 
-  const checkNow = useCallback(async (force = false): Promise<UpdateCheckResult | null> => {
+  const checkNow = useCallback(async (force = false, startup = false): Promise<UpdateCheckResult | null> => {
     if (checkingRef.current) return null
     checkingRef.current = true
     setChecking(true)
     try {
-      const result = await checkAppUpdate(force)
+      const result = await checkAppUpdate(force, startup)
       await refreshInfo()
       applyCheckResult(result, force)
       return result
@@ -224,29 +224,16 @@ export function useAppUpdate(): UseAppUpdateResult {
   }, [])
 
   useEffect(() => {
-    void refreshInfo().then(() => {
-      void checkNow(false)
-    })
-  }, [checkNow, refreshInfo])
+    void checkNow(false, true)
+  }, [checkNow])
 
   useEffect(() => {
-    if (timerRef.current !== null) {
-      window.clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-    const hours = info?.update.checkIntervalHours
-    if (hours === undefined) return
-    const ms = Math.max(1, hours) * 60 * 60 * 1000
-    timerRef.current = window.setInterval(() => {
-      void checkNow(false)
-    }, ms)
-    return () => {
-      if (timerRef.current !== null) {
-        window.clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-    }
-  }, [checkNow, info?.update.checkIntervalHours])
+    return scheduleAppUpdateChecks({
+      ...(info?.update.checkIntervalHours === undefined ? {} : { hours: info.update.checkIntervalHours }),
+      ...(info?.update.lastCheckedAtMs === undefined ? {} : { lastCheckedAtMs: info.update.lastCheckedAtMs }),
+      check: () => { void checkNow(false) },
+    })
+  }, [checkNow, info?.update.checkIntervalHours, info?.update.lastCheckedAtMs])
 
   return {
     info,

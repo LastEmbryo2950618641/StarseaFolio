@@ -155,9 +155,10 @@ export function registerIpcRouter(
   })
   ipcMain.handle("worldseed:app-update:check", async (_event, input: unknown) => {
     const force = input !== null && typeof input === "object" && (input as { force?: unknown }).force === true
+    const startup = input !== null && typeof input === "object" && (input as { startup?: unknown }).startup === true
     const stored = await readAppSettings(applicationDataRoot)
     const prefs = stored?.update ?? defaultUpdatePrefs()
-    if (!force && !shouldAutoCheck(prefs, Date.now())) {
+    if (!force && !shouldAutoCheck(prefs, Date.now(), startup)) {
       const local = await readLocalAppIdentity()
       return {
         checkedAtMs: prefs.lastCheckedAtMs ?? Date.now(),

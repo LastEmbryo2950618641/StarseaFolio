@@ -67,7 +67,7 @@ jobs:
           arch: x64
           vsversion: "2022"
       - name: Verify update and packaging rules
-        run: corepack pnpm exec vitest run win/desktop/test/app-update.test.ts scripts/packaging/test/release-version.test.mjs
+        run: corepack pnpm exec vitest run win/desktop/test/app-update.test.ts common/renderer/test/app-update-schedule.test.ts scripts/packaging/test/release-version.test.mjs
       - name: Package Windows installers
         run: corepack pnpm package:exe
         env:
