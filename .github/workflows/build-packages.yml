@@ -1,6 +1,7 @@
 name: Build EXE and APK
 
 # Build includes publishing: both platforms must succeed before Latest changes.
+# The same workflow also deploys the browser app to the server.
 on:
   workflow_dispatch:
   push:
@@ -178,3 +179,45 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.version.outputs.tag }}
         run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
+
+  deploy-web:
+    needs: version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: corepack pnpm install --frozen-lockfile
+      - name: Build browser app
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          STARSEA_WEB_BASE: /StarseaFolio/
+        run: |
+          corepack pnpm --filter @starseafolio/contracts build
+          corepack pnpm --filter @starseafolio/config build
+          corepack pnpm --filter @starseafolio/web build
+      - name: Deploy browser app
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: 111.229.32.85
+          DEPLOY_USER: liuqi
+          DEPLOY_PATH: /data/disk/starseafolio/StarseaFolio
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "DEPLOY_SSH_KEY is not configured"
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          tar -C common/web/dist -czf /tmp/starsea-web.tgz .
+          scp -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes /tmp/starsea-web.tgz "$DEPLOY_USER@$DEPLOY_HOST:/data/disk/starseafolio/starsea-web.tgz"
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes "$DEPLOY_USER@$DEPLOY_HOST" "rm -rf '$DEPLOY_PATH'/assets '$DEPLOY_PATH'/index.html && tar -xzf /data/disk/starseafolio/starsea-web.tgz -C '$DEPLOY_PATH' && rm -f /data/disk/starseafolio/starsea-web.tgz && find '$DEPLOY_PATH' -type d -exec chmod 755 {} + && find '$DEPLOY_PATH' -type f -exec chmod 644 {} +"

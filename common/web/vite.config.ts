@@ -7,7 +7,10 @@ import { defineConfig } from "vite"
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 const rendererSrc = path.resolve(rootDir, "../renderer/src")
 
+const base = process.env.STARSEA_WEB_BASE ?? "/"
+
 export default defineConfig({
+  base,
   plugins: [react()],
   resolve: {
     alias: {

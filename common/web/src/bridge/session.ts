@@ -7,7 +7,7 @@ const STORAGE_KEY = "worldseed.web.session.v1"
 
 /** 内置默认：连已部署的 VPS；可在 localStorage 覆盖。 */
 export const DEFAULT_WEB_SESSION: WebSession = {
-  apiBaseUrl: "http://111.229.32.85",
+  apiBaseUrl: "http://111.229.32.85/worldseed",
   apiToken: "GuW35QrAofLViSmdwHsNTujlFLTv-MXtcvzYG8mHYao",
 }
 

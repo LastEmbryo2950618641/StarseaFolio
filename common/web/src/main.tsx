@@ -1,3 +1,4 @@
+import "./polyfill-random-uuid.js"
 import { StrictMode, useSyncExternalStore } from "react"
 import { createRoot } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"

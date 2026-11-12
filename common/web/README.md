@@ -18,13 +18,13 @@ pnpm --filter @starseafolio/config build
 pnpm --filter @starseafolio/web dev
 ```
 
-浏览器打开 `http://localhost:5173`。默认 API：`http://111.229.32.85`。
+浏览器打开 `http://localhost:5173`。默认 API：`http://111.229.32.85/worldseed`。已部署首页：`http://111.229.32.85/StarseaFolio/`。
 
 覆盖会话（控制台）：
 
 ```js
 localStorage.setItem('worldseed.web.session.v1', JSON.stringify({
-  apiBaseUrl: 'http://111.229.32.85',
+  apiBaseUrl: 'http://111.229.32.85/worldseed',
   apiToken: 'your-token'
 }))
 location.reload()
