@@ -5,7 +5,8 @@ import { basename, join } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 
-import { app, shell } from "electron"
+import { app, net, shell } from "electron"
+import type { ReadableStream as WebReadableStream } from "node:stream/web"
 
 export type UpdateDownloadProgress = Readonly<{
   receivedBytes: number
@@ -48,7 +49,7 @@ export async function startUpdateInstallerDownload(input: Readonly<{
   }
 
   const done = (async (): Promise<string> => {
-    const response = await fetch(input.downloadUrl, {
+    const response = await net.fetch(input.downloadUrl, {
       signal: controller.signal,
       redirect: "follow",
       headers: { "User-Agent": "StarseaFolio-Updater" },
@@ -61,7 +62,7 @@ export async function startUpdateInstallerDownload(input: Readonly<{
     }
     const totalBytes = Number(response.headers.get("content-length") ?? "0")
     let receivedBytes = 0
-    const nodeStream = Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
+    const nodeStream = Readable.fromWeb(response.body as WebReadableStream)
     nodeStream.on("data", (chunk: Buffer | string) => {
       receivedBytes += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.byteLength
       const percent = totalBytes > 0

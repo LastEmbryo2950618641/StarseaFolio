@@ -728,10 +728,14 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   -webkit-user-drag: none;
 }
 .project-rail-update {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   width: auto;
   min-width: 0;
   height: 18px;
-  padding: 0 6px;
+  padding: 0 4px;
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
   border-radius: 3px;
   background: var(--accent-soft);
@@ -744,6 +748,23 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
 }
 .project-rail-update:hover {
   background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent));
+}
+.project-rail-update.is-available {
+  border-color: var(--accent);
+}
+.project-rail-update.has-error {
+  border-color: var(--danger, #c44747);
+  color: var(--danger, #c44747);
+}
+.project-rail-update:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+.project-rail-update .is-spinning {
+  animation: project-rail-update-spin 1s linear infinite;
+}
+@keyframes project-rail-update-spin {
+  to { transform: rotate(360deg); }
 }
 .project-rail-scroll {
   flex: 1 1 auto;

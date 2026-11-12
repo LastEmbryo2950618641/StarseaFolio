@@ -57,9 +57,9 @@ export function useAppUpdate(): UseAppUpdateResult {
       return
     }
     setLocal(result.local)
-    setAvailable(result.updateAvailable)
-    setRemote(result.remote ?? null)
     if (result.updateAvailable && result.remote !== undefined) {
+      setAvailable(true)
+      setRemote(result.remote)
       setStatusMessage(result.reason ?? "发现新版本")
       setError(null)
       const identity = `${result.remote.version}/${result.remote.buildNumber}`
@@ -82,6 +82,8 @@ export function useAppUpdate(): UseAppUpdateResult {
       }
       return
     }
+    setAvailable(false)
+    setRemote(null)
     setError(null)
     setStatusMessage(result.reason ?? "已是最新")
     if (openDialog) {

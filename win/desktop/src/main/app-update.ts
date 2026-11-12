@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { app } from "electron"
+import { app, net } from "electron"
 
 export type UpdateCheckIntervalHours = 1 | 2 | 4 | 8 | 24
 
@@ -145,7 +145,7 @@ export function shouldAutoCheck(
 export async function fetchUpdateManifest(updateUrl: string): Promise<UpdateManifest> {
   const url = updateUrl.trim()
   if (url.length === 0) throw new Error("更新地址不能为空")
-  const response = await fetch(url, {
+  const response = await net.fetch(url, {
     headers: { Accept: "application/json", "User-Agent": "StarseaFolio-Updater", "Cache-Control": "no-cache" },
     redirect: "follow",
     signal: AbortSignal.timeout(20_000),

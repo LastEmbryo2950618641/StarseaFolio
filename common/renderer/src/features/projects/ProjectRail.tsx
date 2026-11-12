@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
-import { Library } from "lucide-react"
+import { Library, RefreshCw } from "lucide-react"
 
 import {
   getBookCover,
@@ -26,6 +26,8 @@ type Props = Readonly<{
   activeProjectId?: string | undefined
   coverByProjectId?: Readonly<Record<string, string>>
   updateAvailable?: boolean
+  updateChecking?: boolean
+  updateError?: string | null
   onOpen(project: OpenProject): void
   /** Leave current book and return to the all-books launcher. */
   onBrowseAllBooks?(): void
@@ -51,7 +53,7 @@ function projectIconSrc(item: ProjectRailItem): string {
 }
 
 export function ProjectRail(props: Props): React.JSX.Element {
-  const { activeProjectId, coverByProjectId = {}, onOpen, onBrowseAllBooks, updateAvailable = false, onUpdateClick } = props
+  const { activeProjectId, coverByProjectId = {}, onOpen, onBrowseAllBooks, updateAvailable = false, updateChecking = false, updateError = null, onUpdateClick } = props
   const workDirectoryState = useWorkDirectory()
   const [projects, setProjects] = useState<readonly ProjectRailItem[]>([])
   const [loadedCoverByProjectId, setLoadedCoverByProjectId] = useState<Readonly<Record<string, string>>>({})
@@ -116,17 +118,18 @@ export function ProjectRail(props: Props): React.JSX.Element {
       <div className="project-rail-header">
         <div className="project-rail-brand" title="星海余页 · StarseaFolio">
           <img className="project-rail-brand-mark" src={appBrandIcon} alt="" draggable={false} />
-          {updateAvailable
-            ? <button
-                type="button"
-                className="project-rail-update"
-                data-testid="project-rail-update"
-                aria-label="有可用更新"
-                onClick={() => { onUpdateClick?.() }}
-              >
-                更新
-              </button>
-            : null}
+          <button
+            type="button"
+            className={`project-rail-update${updateAvailable ? " is-available" : ""}${updateError !== null ? " has-error" : ""}`}
+            data-testid="project-rail-update"
+            aria-label={updateAvailable ? "下载应用更新" : updateError !== null ? "检查更新失败，点击重试" : "检查应用更新"}
+            title={updateError ?? (updateAvailable ? "有可用更新" : "检查更新")}
+            disabled={updateChecking}
+            onClick={() => { onUpdateClick?.() }}
+          >
+            <RefreshCw size={11} className={updateChecking ? "is-spinning" : undefined} aria-hidden="true" />
+            {updateChecking ? "检查中" : updateAvailable ? "更新" : updateError !== null ? "重试" : "检查"}
+          </button>
         </div>
         <div className="project-rail-separator" aria-hidden="true" />
       </div>

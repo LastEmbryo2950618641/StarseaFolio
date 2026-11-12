@@ -3104,8 +3104,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             coverByProjectId={coverByProjectId}
             onOpen={resetWorkbenchForProject}
             updateAvailable={appUpdate.available}
+            updateChecking={appUpdate.checking}
+            updateError={appUpdate.error}
             onUpdateClick={() => {
-              appUpdate.openUpdatePrompt()
+              if (appUpdate.available) appUpdate.openUpdatePrompt()
+              else void appUpdate.checkNow(true)
             }}
           />
         }
@@ -3181,8 +3184,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         onOpen={resetWorkbenchForProject}
         onBrowseAllBooks={() => { resetWorkbenchForProject(undefined) }}
         updateAvailable={appUpdate.available}
+        updateChecking={appUpdate.checking}
+        updateError={appUpdate.error}
         onUpdateClick={() => {
-          appUpdate.openUpdatePrompt()
+          if (appUpdate.available) appUpdate.openUpdatePrompt()
+          else void appUpdate.checkNow(true)
         }}
       />
     }
