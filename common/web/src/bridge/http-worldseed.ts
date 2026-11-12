@@ -15,6 +15,7 @@ import { browserModelCredentials } from "./browser-model-credentials.js"
 import {
   allocateBookWorkspaceRef,
   DEFAULT_BOOKS_ROOT,
+  modelCredentialScope,
   type WebSession,
 } from "./session.js"
 
@@ -46,12 +47,32 @@ type AppSettingsReadResult = Readonly<{
   activeWorkDirectory?: string
 }>
 
-function booksSettings(): AppSettingsReadResult {
+function booksSettings(root: string): AppSettingsReadResult {
   return {
-    defaultWorkDirectory: DEFAULT_BOOKS_ROOT,
-    workDirectories: [DEFAULT_BOOKS_ROOT],
-    activeWorkDirectory: DEFAULT_BOOKS_ROOT,
+    defaultWorkDirectory: root,
+    workDirectories: [root],
+    activeWorkDirectory: root,
   }
+}
+
+function libraryRoot(session: WebSession): string {
+  if (session.accountId !== undefined && session.booksRoot !== undefined && session.booksRoot.length > 0) return session.booksRoot
+  if (session.offlinePreview === true || session.apiToken.trim().length > 0) return DEFAULT_BOOKS_ROOT
+  return `${DEFAULT_BOOKS_ROOT}/accounts/signed-out`
+}
+
+function requireOwnedBooksRoot(session: WebSession): string {
+  if (session.accountId !== undefined) {
+    if (session.booksRoot === undefined || session.booksRoot.length === 0) throw new Error("请先登录")
+    return session.booksRoot
+  }
+  if (session.offlinePreview === true || session.apiToken.trim().length > 0) return DEFAULT_BOOKS_ROOT
+  throw new Error("请先登录")
+}
+
+function coverStorageKey(session: WebSession, workspace: string): string {
+  if (session.accountId !== undefined) return `${session.apiBaseUrl}\u0000${session.accountId}\u0000${workspace}`
+  return `${session.apiBaseUrl}\u0000${workspace}`
 }
 
 async function asDesktopProfiles(raw: Readonly<{
@@ -100,12 +121,18 @@ async function resolveClientModel(session: WebSession, request: ClientRequest): 
 }
 
 async function resolveApiKey(session: WebSession, reference: string, supplied?: string): Promise<string> {
-  const apiKey = supplied?.trim() || (await browserModelCredentials(session.apiBaseUrl).get(reference))?.trim()
+  const apiKey = supplied?.trim() || (await browserModelCredentials(modelCredentialScope(session)).get(reference))?.trim()
   if (!apiKey) throw new Error("当前模型的 API Key 未保存在本机，请打开“模型配置”，填写 API Key 并保存后重试。")
   return apiKey
 }
 
 async function postRpc(session: WebSession, request: ClientRequest): Promise<ClientResponse> {
+  if (session.apiToken.trim().length === 0 && session.offlinePreview !== true) {
+    if (request.method === "project.list") {
+      return { protocolVersion: PROTOCOL_VERSION, requestId: request.requestId, ok: true, data: { projects: [] } }
+    }
+    throw new Error("请先登录")
+  }
   const parsed = clientRequestSchema.parse(await resolveClientModel(session, request))
   const response = await fetch(`${session.apiBaseUrl}/rpc`, {
     method: "POST",
@@ -116,7 +143,7 @@ async function postRpc(session: WebSession, request: ClientRequest): Promise<Cli
     body: JSON.stringify(parsed),
   })
   if (response.status === 401) {
-    throw new Error("Unauthorized: API Token 无效，请检查设置")
+    throw new Error("登录已失效，请重新登录")
   }
   const json: unknown = await response.json()
   return clientResponseSchema.parse(json)
@@ -140,9 +167,10 @@ async function rpcData<T>(session: WebSession, method: ClientRequest["method"], 
  * against a remote HTTP backend.
  */
 export function installHttpWorldseedBridge(session: WebSession): WorldseedBridge {
-  const credentials = browserModelCredentials(session.apiBaseUrl)
+  const credentials = browserModelCredentials(modelCredentialScope(session))
+  const root = libraryRoot(session)
   const bridge: WorldseedBridge = {
-    defaultWorkDirectoryPath: DEFAULT_BOOKS_ROOT,
+    defaultWorkDirectoryPath: root,
     invoke: async (request) => postRpc(session, request),
     continueBackendWait: async () => true,
     abandonBackendRequest: async () => true,
@@ -177,16 +205,16 @@ export function installHttpWorldseedBridge(session: WebSession): WorldseedBridge
         throw error instanceof Error ? error : new Error(String(error))
       }
     },
-    readAppSettings: async () => booksSettings(),
-    saveAppSettings: async () => booksSettings(),
-    addWorkDirectory: async () => booksSettings(),
-    setActiveWorkDirectory: async () => booksSettings(),
-    removeWorkDirectory: async () => booksSettings(),
+    readAppSettings: async () => booksSettings(root),
+    saveAppSettings: async () => booksSettings(root),
+    addWorkDirectory: async () => booksSettings(root),
+    setActiveWorkDirectory: async () => booksSettings(root),
+    removeWorkDirectory: async () => booksSettings(root),
     getAppUpdateInfo: async () => ({
       local: { productName: "StarseaFolio Web", version: "0.1.0", buildNumber: "web" },
       update: { updateUrl: "https://example.invalid/worldseed-web" },
     }),
-    saveAppUpdatePrefs: async () => booksSettings(),
+    saveAppUpdatePrefs: async () => booksSettings(root),
     checkAppUpdate: async () => ({
       checkedAtMs: Date.now(),
       updateAvailable: false,
@@ -202,16 +230,16 @@ export function installHttpWorldseedBridge(session: WebSession): WorldseedBridge
       throw new Error("Web 版不支持应用内更新")
     },
     onAppUpdateDownloadProgress: () => () => undefined,
-    allocateBookPath: async () => allocateBookWorkspaceRef(DEFAULT_BOOKS_ROOT),
-    selectDirectory: async () => DEFAULT_BOOKS_ROOT,
+    allocateBookPath: async () => allocateBookWorkspaceRef(requireOwnedBooksRoot(session)),
+    selectDirectory: async () => requireOwnedBooksRoot(session),
     selectMarkdownFiles: async () => [],
     selectImageFile: chooseBrowserImage,
     readImageFile: async (source) => {
       if (!source.startsWith("data:image/")) throw new Error("无效的图片来源，请重新选择图片")
       return source
     },
-    getBookCover: async (workspace) => readBrowserCover(`${session.apiBaseUrl}\u0000${workspace}`),
-    setBookCover: async ({ workspaceRootRef, dataUrl }) => saveBrowserCover(`${session.apiBaseUrl}\u0000${workspaceRootRef}`, dataUrl),
+    getBookCover: async (workspace) => readBrowserCover(coverStorageKey(session, workspace)),
+    setBookCover: async ({ workspaceRootRef, dataUrl }) => saveBrowserCover(coverStorageKey(session, workspaceRootRef), dataUrl),
     onCommand: () => () => undefined,
     windowControl: async () => undefined,
     onWindowMaximized: () => () => undefined,

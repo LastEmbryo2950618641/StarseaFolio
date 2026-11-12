@@ -84,4 +84,12 @@ describe("HTTP model credentials", () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"))
     await expect(installHttpWorldseedBridge(session).readModelProfiles()).rejects.toThrow("offline")
   })
+
+  it("isolates saved model keys by web account", async () => {
+    const first = { ...session, accountId: "aaaaaaaaaaaaaaaa" }
+    const second = { ...session, accountId: "bbbbbbbbbbbbbbbb" }
+    await installHttpWorldseedBridge(first).saveModelProfiles({ profiles: [{ ...profile, apiKey: " secret-a ", hasApiKey: true }], activeProfileId: profile.id })
+    expect((await installHttpWorldseedBridge(second).readModelProfiles()).profiles[0]?.hasApiKey).toBe(false)
+    expect((await installHttpWorldseedBridge(first).readModelProfiles()).profiles[0]?.hasApiKey).toBe(true)
+  })
 })

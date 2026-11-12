@@ -59,7 +59,7 @@ corepack pnpm package:apk
 
 EXE 输出到 `win/desktop/release/`，APK 输出到 `android/mobile/release/`。Windows 打包需要 Visual Studio 2022 C++ Build Tools；Android 打包需要 JDK 17 和 Android SDK。完整要求见 [Windows 说明](win/README.md)、[Android 说明](android/mobile/README.md) 和 [平台源码目录](docs/platform-source-layout.md)。
 
-推送 `master` 或 `dev-0.0.1` 会触发 **Build EXE and APK**：构建 Windows 与 Android 包，两端都成功后发布 GitHub Release，并同时把浏览器端部署到 `http://111.229.32.85/StarseaFolio/`。构建产物也可在 Actions 的 Artifacts 下载。
+推送 `master` 或 `dev-0.0.1` 会触发 **Build EXE and APK**：构建 Windows 与 Android 包，两端都成功后发布 GitHub Release，并同时把浏览器端和网页账户网关部署到 `http://111.229.32.85/StarseaFolio/`。网页按账户隔离数据，桌面和安卓保持离线。构建产物也可在 Actions 的 Artifacts 下载。
 
 ## 技术文档
 

@@ -1,0 +1,322 @@
+body.web-accounts .project-rail-footer {
+  padding-bottom: 52px;
+}
+
+.web-account-button {
+  position: fixed;
+  z-index: 40;
+  left: 10px;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #f2f3f5;
+  background: #3a3d44;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.web-account-button img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.web-account-button:hover,
+.web-account-button:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent, #7aa2f7);
+}
+
+.web-account-backdrop,
+.web-account-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 11000;
+}
+
+.web-account-backdrop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.web-account-scrim {
+  background: transparent;
+}
+
+.web-account-popover,
+.web-account-panel {
+  z-index: 11001;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: var(--bg-sidebar, #2b2d31);
+  color: var(--text, #f2f3f5);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+.web-account-popover {
+  position: fixed;
+  left: 62px;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  width: min(240px, calc(100vw - 74px));
+  padding: 14px;
+}
+
+.web-account-panel {
+  width: min(440px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 16px 16px 14px;
+}
+
+.web-account-heading,
+.web-account-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.web-account-heading h2,
+.web-account-identity strong {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.web-account-icon-button,
+.web-account-secondary,
+.web-account-submit,
+.web-account-choice,
+.web-account-upload,
+.web-account-captcha {
+  font: inherit;
+}
+
+.web-account-icon-button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.web-account-icon-button:hover,
+.web-account-icon-button:focus-visible,
+.web-account-secondary:hover,
+.web-account-secondary:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.web-account-identity {
+  justify-content: flex-start;
+  margin-bottom: 12px;
+}
+
+.web-account-identity img,
+.web-account-preview,
+.web-account-choice img {
+  display: block;
+  object-fit: cover;
+}
+
+.web-account-identity img,
+.web-account-preview {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #1e1f22;
+}
+
+.web-account-hint {
+  margin: 8px 0 14px;
+  color: var(--text-muted, #b5bac1);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.web-account-actions,
+.web-account-form,
+.web-account-avatars {
+  display: grid;
+  gap: 8px;
+}
+
+.web-account-secondary,
+.web-account-submit,
+.web-account-upload {
+  min-height: 40px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.web-account-secondary {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: inherit;
+  background: transparent;
+}
+
+.web-account-submit {
+  border: 0;
+  color: #fff;
+  background: var(--accent, #5865f2);
+  font-weight: 650;
+}
+
+.web-account-submit:disabled,
+.web-account-secondary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.web-account-preview-row,
+.web-account-captcha-row,
+.web-account-crop-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.web-account-preview-row {
+  margin-bottom: 4px;
+}
+
+.web-account-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.web-account-choice {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #1e1f22;
+  cursor: pointer;
+}
+
+.web-account-choice img {
+  width: 100%;
+  height: 100%;
+}
+
+.web-account-choice[aria-pressed="true"] {
+  border-color: var(--accent, #7aa2f7);
+}
+
+.web-account-upload {
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: inherit;
+  background: transparent;
+}
+
+.web-account-field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted, #b5bac1);
+  font-size: 13px;
+}
+
+.web-account-field input,
+.web-account-crop input[type="range"] {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text, #f2f3f5);
+  background: #1e1f22;
+}
+
+.web-account-captcha-row .web-account-field {
+  flex: 1;
+}
+
+.web-account-captcha {
+  width: 128px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #1e1f22;
+  cursor: pointer;
+}
+
+.web-account-captcha img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.web-account-error {
+  margin: 0;
+  color: #f07178;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.web-account-crop {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.web-account-crop p {
+  margin: 0;
+  color: var(--text-muted, #b5bac1);
+  font-size: 12px;
+}
+
+.web-account-crop-frame {
+  position: relative;
+  width: 240px;
+  height: 240px;
+  max-width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #111214;
+}
+
+.web-account-crop-frame canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+.web-account-crop-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.web-account-crop input[type="range"] {
+  min-height: 28px;
+  padding: 0;
+}
+
+.web-account-crop-actions {
+  width: 100%;
+}
+
+.web-account-crop-actions button {
+  flex: 1;
+}
