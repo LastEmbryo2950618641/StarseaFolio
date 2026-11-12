@@ -5,7 +5,7 @@ import { app } from "electron"
 
 export type UpdateCheckIntervalHours = 1 | 2 | 4 | 8 | 24
 
-/** Development: any version/build change counts. Production: semantic version greater-than. */
+/** Persisted legacy names; both modes now reject older builds. */
 export type UpdateCompareMode = "any_change" | "semver"
 
 export type AppUpdatePrefs = Readonly<{
@@ -45,8 +45,8 @@ export const UPDATE_INTERVAL_OPTIONS: readonly UpdateCheckIntervalHours[] = [1, 
 export function defaultUpdatePrefs(): AppUpdatePrefs {
   return {
     updateUrl: DEFAULT_UPDATE_URL,
-    checkIntervalHours: 24,
-    compareMode: "any_change",
+    checkIntervalHours: 1,
+    compareMode: "semver",
   }
 }
 
@@ -82,12 +82,20 @@ async function readBuildNumber(): Promise<string> {
 export function isUpdateAvailable(
   local: LocalAppIdentity,
   remote: UpdateManifest,
-  mode: UpdateCompareMode = "any_change",
+  mode: UpdateCompareMode = "semver",
 ): boolean {
-  if (mode === "semver") {
-    return compareSemver(remote.version, local.version) > 0
+  // Keep the old preference argument for stored clients; neither mode permits downgrades.
+  void mode
+  const a = parseSemver(remote.version)
+  const b = parseSemver(local.version)
+  if (a === undefined || b === undefined) return false
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return (a[i] ?? 0) > (b[i] ?? 0)
   }
-  return remote.version !== local.version || remote.buildNumber !== local.buildNumber
+  // Old installations used a plain version and a separate buildNumber.
+  const remoteBuild = a[3] ?? parseBuildNumber(remote.buildNumber)
+  const localBuild = b[3] ?? parseBuildNumber(local.buildNumber)
+  return remoteBuild !== undefined && localBuild !== undefined && remoteBuild > localBuild
 }
 
 /** Returns negative if a < b, 0 if equal, positive if a > b. Non-semver falls back to string compare. */
@@ -97,17 +105,28 @@ export function compareSemver(a: string, b: string): number {
   if (pa === undefined || pb === undefined) {
     return a === b ? 0 : a > b ? 1 : -1
   }
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 4; i += 1) {
     const delta = (pa[i] ?? 0) - (pb[i] ?? 0)
     if (delta !== 0) return delta
   }
   return 0
 }
 
-function parseSemver(value: string): [number, number, number] | undefined {
-  const match = value.trim().replace(/^v/iu, "").match(/^(\d+)\.(\d+)\.(\d+)/u)
+// Product convention: 0.0.1-N is an increasing build, including migration from 0.0.1.
+function parseSemver(value: string): [number, number, number, number?] | undefined {
+  const match = value.trim().replace(/^v/iu, "").match(/^(\d+)\.(\d+)\.(\d+)(?:-(\d+))?$/u)
   if (match === null) return undefined
-  return [Number(match[1]), Number(match[2]), Number(match[3])]
+  const parts = match.slice(1, 4).map(Number)
+  if (parts.some(part => !Number.isSafeInteger(part))) return undefined
+  const build = match[4] === undefined ? undefined : parseBuildNumber(match[4])
+  if (match[4] !== undefined && build === undefined) return undefined
+  const core: [number, number, number] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  return build === undefined ? core : [...core, build]
+}
+
+function parseBuildNumber(value: string): number | undefined {
+  const number = Number(value)
+  return /^\d+$/u.test(value) && Number.isSafeInteger(number) ? number : undefined
 }
 
 export function shouldAutoCheck(
@@ -125,8 +144,9 @@ export async function fetchUpdateManifest(updateUrl: string): Promise<UpdateMani
   const url = updateUrl.trim()
   if (url.length === 0) throw new Error("更新地址不能为空")
   const response = await fetch(url, {
-    headers: { Accept: "application/json", "User-Agent": "StarseaFolio-Updater" },
+    headers: { Accept: "application/json", "User-Agent": "StarseaFolio-Updater", "Cache-Control": "no-cache" },
     redirect: "follow",
+    signal: AbortSignal.timeout(20_000),
   })
   if (!response.ok) {
     const hint = response.status === 404
@@ -178,11 +198,7 @@ export async function checkForUpdate(prefs: AppUpdatePrefs): Promise<UpdateCheck
       updateAvailable,
       local,
       remote,
-      reason: updateAvailable
-        ? mode === "semver"
-          ? "远端版本号更高"
-          : "版本号或构建号已变化"
-        : "已是最新",
+      reason: updateAvailable ? "发现更高版本或构建号" : "当前已是最新版本或高于公开版本",
     }
   } catch (error) {
     return {

@@ -1,19 +1,49 @@
 name: Build EXE and APK
 
+# Build includes publishing: both platforms must succeed before Latest changes.
 on:
   workflow_dispatch:
   push:
     branches: [master, dev-0.0.1]
+    tags: ["v*.*.*"]
 
 permissions:
   contents: read
 
+# Share the previous publisher's lane during migration and across branches.
 concurrency:
-  group: build-packages-${{ github.ref }}
-  cancel-in-progress: true
+  group: windows-release-publisher
+  cancel-in-progress: false
 
 jobs:
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      buildNumber: ${{ steps.version.outputs.buildNumber }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Allocate increasing release number
+        id: version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { pathToFileURL } = require('node:url');
+            const { windowsBuildIdentity, nextReleaseBuild } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/packaging/release-version.mjs`).href);
+            const base = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+            const releases = await github.paginate(github.rest.repos.listReleases, {...context.repo, per_page: 100});
+            const identity = windowsBuildIdentity(base, nextReleaseBuild(context.runNumber, releases));
+            for (const [key, value] of Object.entries(identity)) core.setOutput(key, value);
+            core.setOutput('tag', `v${identity.version}`);
+            core.info(`Publishing ${identity.version}`);
+
   windows:
+    needs: version
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
@@ -36,23 +66,42 @@ jobs:
         with:
           arch: x64
           vsversion: "2022"
-      - name: Stamp build number
-        shell: pwsh
-        run: |
-          @{ buildNumber = "$env:GITHUB_RUN_NUMBER" } | ConvertTo-Json | Set-Content win/desktop/build-info.json -Encoding utf8
-      - name: Package EXE
+      - name: Verify update and packaging rules
+        run: corepack pnpm exec vitest run win/desktop/test/app-update.test.ts scripts/packaging/test/release-version.test.mjs
+      - name: Package Windows installers
         run: corepack pnpm package:exe
         env:
+          BUILD_NUMBER: ${{ needs.version.outputs.buildNumber }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           npm_config_msvs_version: "2022"
           GYP_MSVS_VERSION: "2022"
+      - name: Write update manifest
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          BUILD_NUMBER: ${{ needs.version.outputs.buildNumber }}
+        run: |
+          $manifest = [ordered]@{
+            version = $env:RELEASE_VERSION
+            buildNumber = $env:BUILD_NUMBER
+            downloadUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/Starsea-Folio-$env:RELEASE_VERSION-Setup.exe"
+            productName = "星海余页 (StarseaFolio)"
+          }
+          $manifest | ConvertTo-Json | Set-Content "win/desktop/release/latest.json" -Encoding utf8
+          $info = Get-Content win/desktop/release/win-unpacked/resources/build-info.json -Raw | ConvertFrom-Json
+          if ($info.version -ne $env:RELEASE_VERSION -or $info.buildNumber -ne $env:BUILD_NUMBER) { throw "Packaged identity differs from update manifest" }
       - uses: actions/upload-artifact@v4
         with:
-          name: StarseaFolio-Windows-${{ github.run_number }}
-          path: win/desktop/release/*.exe
+          name: StarseaFolio-Windows-${{ needs.version.outputs.version }}
+          path: |
+            win/desktop/release/*.exe
+            win/desktop/release/*.blockmap
+            win/desktop/release/latest.json
           if-no-files-found: error
 
   android:
+    needs: version
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
@@ -89,6 +138,43 @@ jobs:
         run: corepack pnpm package:apk
       - uses: actions/upload-artifact@v4
         with:
-          name: StarseaFolio-Android-preview-${{ github.run_number }}
+          name: StarseaFolio-Android-preview-${{ needs.version.outputs.version }}
           path: android/mobile/release/*.apk
           if-no-files-found: error
+
+  publish:
+    needs: [version, windows, android]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: StarseaFolio-Windows-${{ needs.version.outputs.version }}
+          path: release/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: StarseaFolio-Android-preview-${{ needs.version.outputs.version }}
+          path: release/android
+      # Upload everything to a draft; publish only when all assets exist.
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: 星海余页 StarseaFolio ${{ needs.version.outputs.version }}
+          draft: true
+          prerelease: false
+          body_path: docs/release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            release/windows/*.exe
+            release/windows/*.blockmap
+            release/windows/latest.json
+            release/android/*.apk
+      - name: Publish completed release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest

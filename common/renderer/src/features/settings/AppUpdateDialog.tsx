@@ -37,14 +37,18 @@ function formatBytes(value: number | undefined): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function formatAppIdentity(version: string, buildNumber: string): string {
+  return version.endsWith(`-${buildNumber}`) ? version : `${version}（构建 ${buildNumber}）`
+}
+
 export function AppUpdateDialog(props: Props): React.JSX.Element {
   const { state, busy = false } = props
   const remoteLabel = state.remote === undefined
     ? undefined
-    : `${state.remote.version}（构建 ${state.remote.buildNumber}）`
+    : formatAppIdentity(state.remote.version, state.remote.buildNumber)
   const localLabel = state.local === undefined
     ? undefined
-    : `${state.local.version}（构建 ${state.local.buildNumber}）`
+    : formatAppIdentity(state.local.version, state.local.buildNumber)
 
   let title = "应用更新"
   let subtitle = "星海余页 · StarseaFolio"
@@ -136,7 +140,7 @@ export function AppUpdateDialog(props: Props): React.JSX.Element {
       <p>
         当前安装已是最新。
         {state.remote !== undefined
-          ? ` 远端同样为 ${remoteLabel}。`
+          ? ` 远端版本为 ${remoteLabel ?? "未知"}。`
           : null}
       </p>
     )

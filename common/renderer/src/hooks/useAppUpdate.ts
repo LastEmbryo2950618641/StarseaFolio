@@ -44,6 +44,7 @@ export function useAppUpdate(): UseAppUpdateResult {
   const timerRef = useRef<number | null>(null)
   const checkingRef = useRef(false)
   const downloadingRef = useRef(false)
+  const promptedVersionRef = useRef<string | null>(null)
 
   const applyCheckResult = useCallback((result: UpdateCheckResult, openDialog: boolean) => {
     if (result.skipped) {
@@ -61,7 +62,9 @@ export function useAppUpdate(): UseAppUpdateResult {
     if (result.updateAvailable && result.remote !== undefined) {
       setStatusMessage(result.reason ?? "发现新版本")
       setError(null)
-      if (openDialog) {
+      const identity = `${result.remote.version}/${result.remote.buildNumber}`
+      if (openDialog || (!downloadingRef.current && promptedVersionRef.current !== identity)) {
+        promptedVersionRef.current = identity
         setDialog({
           phase: "available",
           local: result.local,
