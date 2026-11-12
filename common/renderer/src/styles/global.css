@@ -3871,7 +3871,7 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   gap: 6px;
   max-width: 960px;
   width: 100%;
-  margin: 0 auto;
+  margin: 0;
 }
 .launcher-library-header h1 {
   margin: 0;
@@ -3903,7 +3903,7 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   justify-content: start;
   gap: 14px;
   width: min(960px, 100%);
-  margin: 0 auto;
+  margin: 0;
 }
 .launcher-book-card {
   display: grid;
