@@ -3890,7 +3890,6 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
 .launcher-library-header {
   display: grid;
   gap: 6px;
-  max-width: 960px;
   width: 100%;
   margin: 0;
 }
@@ -3923,7 +3922,7 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   grid-template-columns: repeat(auto-fill, minmax(120px, 136px));
   justify-content: start;
   gap: 14px;
-  width: min(960px, 100%);
+  width: 100%;
   margin: 0;
 }
 .launcher-book-card {

@@ -18,17 +18,11 @@ pnpm --filter @starseafolio/config build
 pnpm --filter @starseafolio/web dev
 ```
 
-浏览器打开 `http://localhost:5173`。默认 API：`http://111.229.32.85`。
+浏览器打开 `http://localhost:5173`。默认 API：`http://111.229.32.85/worldseed`。已部署首页：`http://111.229.32.85/StarseaFolio/`。
 
-覆盖会话（控制台）：
+网页左下角可以登录。选择默认头像，或上传后裁剪，再填写账户、密码和验证码。没有账户时会自动创建。书籍、封面和模型配置按账户隔离。桌面端和安卓端不登录。
 
-```js
-localStorage.setItem('worldseed.web.session.v1', JSON.stringify({
-  apiBaseUrl: 'http://111.229.32.85',
-  apiToken: 'your-token'
-}))
-location.reload()
-```
+安卓工作台预览设置了 `VITE_WORLDSEED_API_BASE_URL`，连本机后端，不显示登录。
 
 ## 构建
 
