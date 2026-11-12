@@ -20,6 +20,7 @@ export function WebAccountDock(): React.JSX.Element {
   const [captcha, setCaptcha] = useState<CaptchaChallenge | undefined>()
   const [captchaNonce, setCaptchaNonce] = useState(0)
   const [cropFile, setCropFile] = useState<File | undefined>()
+  const [showAvatarChoices, setShowAvatarChoices] = useState(false)
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -51,6 +52,7 @@ export function WebAccountDock(): React.JSX.Element {
     setCaptchaCode("")
     setError("")
     setCropFile(undefined)
+    setShowAvatarChoices(false)
     setOpen(true)
     if (!signedIn) setCaptchaNonce((value) => value + 1)
   }
@@ -60,6 +62,8 @@ export function WebAccountDock(): React.JSX.Element {
     setPassword("")
     setCaptchaCode("")
     setError("")
+    setCropFile(undefined)
+    setShowAvatarChoices(false)
     setCaptchaNonce((value) => value + 1)
   }
 
@@ -116,46 +120,59 @@ export function WebAccountDock(): React.JSX.Element {
             <h2 id="web-account-title">{signedIn ? "切换账户" : "登录"}</h2>
             <button type="button" className="web-account-icon-button" aria-label="关闭" onClick={() => { setOpen(false) }}><X size={16} /></button>
           </div>
-          <p className="web-account-hint">新账户会在验证通过后自动创建。书籍、封面和模型配置按账户分开。</p>
           {cropFile !== undefined
-            ? <AvatarCrop file={cropFile} onCancel={() => { setCropFile(undefined) }} onUse={(dataUrl) => { setAvatar(dataUrl); setCropFile(undefined) }} />
+            ? <AvatarCrop file={cropFile} onCancel={() => { setCropFile(undefined) }} onUse={(dataUrl) => { setAvatar(dataUrl); setCropFile(undefined); setShowAvatarChoices(false) }} />
             : (
               <form className="web-account-form" onSubmit={(event) => { void onSubmit(event) }}>
-                <div className="web-account-preview-row">
+                <div className="web-account-avatar-block">
                   <img className="web-account-preview" alt="" src={avatar} />
-                  <div className="web-account-avatars">
-                    <div className="web-account-choices">
-                      {defaultAvatars.map((item) => (
-                        <button key={item.id} type="button" className="web-account-choice" aria-label={`默认头像 ${item.id}`} aria-pressed={avatar === item.dataUrl} onClick={() => { setAvatar(item.dataUrl) }}>
-                          <img alt="" src={item.dataUrl} />
-                        </button>
-                      ))}
-                    </div>
-                    <button type="button" className="web-account-upload" onClick={() => { fileRef.current?.click() }}>上传并裁剪</button>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/*"
-                      hidden
-                      data-testid="web-account-file"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0]
-                        event.target.value = ""
-                        if (file === undefined) return
-                        if (!file.type.startsWith("image/")) {
-                          setError("请选择图片文件")
-                          return
-                        }
-                        if (file.size > 8 * 1024 * 1024) {
-                          setError("图片过大，请选择 8MB 以内的图片")
-                          return
-                        }
-                        setError("")
-                        setCropFile(file)
-                      }}
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    className="web-account-upload"
+                    aria-expanded={showAvatarChoices}
+                    data-testid="web-account-choose-avatar"
+                    onClick={() => { setShowAvatarChoices((openChoices) => !openChoices) }}
+                  >
+                    {showAvatarChoices ? "收起头像" : "选择头像"}
+                  </button>
+                  {showAvatarChoices
+                    ? (
+                      <div className="web-account-picker">
+                        <div className="web-account-choices">
+                          {defaultAvatars.map((item) => (
+                            <button key={item.id} type="button" className="web-account-choice" aria-label={`默认头像 ${item.id}`} aria-pressed={avatar === item.dataUrl} onClick={() => { setAvatar(item.dataUrl); setShowAvatarChoices(false) }}>
+                              <img alt="" src={item.dataUrl} />
+                            </button>
+                          ))}
+                        </div>
+                        <button type="button" className="web-account-upload" onClick={() => { fileRef.current?.click() }}>上传并裁剪</button>
+                      </div>
+                    )
+                    : null}
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    data-testid="web-account-file"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ""
+                      if (file === undefined) return
+                      if (!file.type.startsWith("image/")) {
+                        setError("请选择图片文件")
+                        return
+                      }
+                      if (file.size > 8 * 1024 * 1024) {
+                        setError("图片过大，请选择 8MB 以内的图片")
+                        return
+                      }
+                      setError("")
+                      setCropFile(file)
+                    }}
+                  />
                 </div>
+                <p className="web-account-hint">新账户会在验证通过后自动创建。书籍、封面和模型配置按账户分开。</p>
                 <label className="web-account-field">
                   <span>账户</span>
                   <input id="web-account-name" name="username" autoComplete="username" maxLength={32} value={account} onChange={(event) => { setAccount(event.target.value) }} />

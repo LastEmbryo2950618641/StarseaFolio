@@ -130,26 +130,47 @@ body.web-accounts .project-rail-footer {
   object-fit: cover;
 }
 
-.web-account-identity img,
-.web-account-preview {
+.web-account-identity img {
   width: 48px;
   height: 48px;
   border-radius: 50%;
   background: #1e1f22;
 }
 
+.web-account-preview {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: #1e1f22;
+}
+
 .web-account-hint {
-  margin: 8px 0 14px;
+  margin: 2px 0 6px;
   color: var(--text-muted, #b5bac1);
   font-size: 12px;
   line-height: 1.5;
+  text-align: center;
 }
 
 .web-account-actions,
-.web-account-form,
-.web-account-avatars {
+.web-account-form {
   display: grid;
   gap: 8px;
+}
+
+.web-account-avatar-block,
+.web-account-picker {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.web-account-avatar-block {
+  margin-bottom: 6px;
+}
+
+.web-account-picker {
+  width: 100%;
 }
 
 .web-account-secondary,
@@ -179,7 +200,6 @@ body.web-accounts .project-rail-footer {
   cursor: default;
 }
 
-.web-account-preview-row,
 .web-account-captcha-row,
 .web-account-crop-actions {
   display: flex;
@@ -187,13 +207,10 @@ body.web-accounts .project-rail-footer {
   gap: 10px;
 }
 
-.web-account-preview-row {
-  margin-bottom: 4px;
-}
-
 .web-account-choices {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
 }
 
@@ -218,7 +235,8 @@ body.web-accounts .project-rail-footer {
 }
 
 .web-account-upload {
-  padding: 0 12px;
+  min-width: 112px;
+  padding: 0 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: inherit;
   background: transparent;
