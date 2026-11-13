@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { createPortal } from "react-dom"
-import { ArrowUpRight, BookOpen, Globe, ImagePlus, Plus, Search, Trash2 } from "lucide-react"
+import { BookOpen, ImagePlus, Plus, Search, Trash2 } from "lucide-react"
 import { MobileBottomSheet, useMobileViewport } from "../../components/MobileBottomSheet.js"
 
 import {
@@ -253,21 +253,6 @@ export function ProjectLauncher({ onOpen, onCoverChanged }: Props): React.JSX.El
           </span>
           <strong className="launcher-book-title">{busy === "new" ? "正在创建…" : "添加书籍"}</strong>
         </button>
-        <a
-          className="launcher-book-card launcher-book-card--website"
-          data-testid="launcher-website"
-          href="http://111.229.32.85/StarseaFolio/"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="打开星海余页网页版（新窗口）"
-        >
-          <span className="launcher-book-cover launcher-book-cover--website" aria-hidden="true">
-            <Globe size={40} strokeWidth={1.5} />
-            <ArrowUpRight size={16} className="launcher-website-external" />
-          </span>
-          <strong className="launcher-book-title">网页版</strong>
-          <span className="launcher-book-meta launcher-website-url">http://111.229.32.85/StarseaFolio/</span>
-        </a>
         {visibleProjects.map((item) => {
           const coverSrc = coverByProjectId[item.projectId] ?? defaultBookCoverSrc(item.displayName)
           if (mobile) return <button type="button" key={item.projectId} className="launcher-book-card launcher-book-card--mobile"
