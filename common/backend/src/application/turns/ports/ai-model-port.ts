@@ -181,6 +181,7 @@ export type TurnPhaseInput = Readonly<{
     userEditedSinceAgent: boolean
     userEditedOutlineSinceAgent?: boolean
     currentWorkDisplayName?: string
+    currentWorkDescription?: string
     synopsisConfirmed?: boolean
     creativeSetup?: import("../../chapters/creative-setup-state.js").CreativeSetupState
     workStyleGate?: Readonly<{

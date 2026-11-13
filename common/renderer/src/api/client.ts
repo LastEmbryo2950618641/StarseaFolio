@@ -18,6 +18,7 @@ import { defaultProjectSettings } from "@starseafolio/config"
 export type OpenProject = Readonly<{
   projectId: string
   displayName: string
+  description?: string
   workspaceRootRef: string
 }>
 
@@ -649,9 +650,15 @@ async function demoInvoke(method: BackendMethod, payload: unknown): Promise<unkn
       const displayName = typeof payload === "object" && payload !== null && "displayName" in payload
         ? String((payload as { displayName: string }).displayName).trim()
         : browserDemoProject.displayName
-      browserDemoProject = { ...browserDemoProject, displayName: displayName.length === 0 ? browserDemoProject.displayName : displayName }
+      const description = typeof payload === "object" && payload !== null && "description" in payload
+        ? String((payload as { description: string }).description).trim() : browserDemoProject.description
+      if (description !== undefined && description.length > 300) throw new Error("作品简介不能超过 300 字")
+      browserDemoProject = { ...browserDemoProject, displayName: displayName.length === 0 ? browserDemoProject.displayName : displayName,
+        ...(description === undefined ? {} : { description }) }
       return browserDemoProject
     }
+    case "project.metadata.read":
+      return { displayName: browserDemoProject?.displayName ?? "新建作品", description: browserDemoProject?.description ?? "" }
     case "project.list":
       return {
         projects: browserDemoProject === undefined

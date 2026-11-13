@@ -5,6 +5,7 @@ export const backendMethodValues = [
   "project.open",
   "project.list",
   "project.rename",
+  "project.metadata.read",
   "project.delete",
   "project.suggestDisplayName",
   "project.validate",

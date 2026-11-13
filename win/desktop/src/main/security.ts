@@ -2,7 +2,7 @@ import { shell, type BrowserWindow } from "electron"
 
 export function secureWindow(window: BrowserWindow): void {
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) void shell.openExternal(url)
+    if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url)
     return { action: "deny" }
   })
   window.webContents.on("will-navigate", (event, url) => {

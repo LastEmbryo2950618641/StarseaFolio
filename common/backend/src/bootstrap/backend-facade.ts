@@ -251,11 +251,20 @@ export class BackendFacade {
         const payload = projectRenamePayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
         const displayName = await runtime.renameDisplayName(payload.displayName)
+        const description = payload.description === undefined
+          ? await runtime.readWorkDescription()
+          : await runtime.saveWorkDescription(payload.description)
         return {
           projectId: payload.projectId,
           displayName,
+          description,
           workspaceRootRef: payload.workspaceRootRef,
         }
+      }
+      case "project.metadata.read": {
+        const payload = projectSettingsReadPayloadSchema.parse(request.payload)
+        const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        return { displayName: await runtime.readDisplayName(), description: await runtime.readWorkDescription() }
       }
       case "project.delete": {
         const payload = projectDeletePayloadSchema.parse(request.payload)

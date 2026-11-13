@@ -81,10 +81,11 @@
   4. **结果审核（告诉用户怎么验）**：请用户刷新文件树后确认——同章只剩**一个**折叠入口；点开正文右侧关联栏梗概/细纲应变为「已创建」而非「尚未创建」；若仍分叉，再发一轮并再次提交 `titleAlignTarget`；
 - `titleAlignTarget`：仅用于修复标题分叉；`body`＝规划文件对齐正文；`planning`＝正文文件对齐当前规划标题。未出现分叉时不要输出；
 - `volumeFolderName` 若提供，必须为「第N卷 标题」（如 `第一卷 潮水退去时`）；系统会在 `章节正文/` 下创建/重命名该卷文件夹，并把梗概放到卷内。**禁止**把章节/梗概直接放在 `章节正文/` 根下；名称不合规会被拒绝并要求你按错误重写；
-- `workDisplayName` 若提供，表示**整部作品的作品名**（标题栏显示名），不是章名也不是卷名；系统会立即更新项目作品名。上下文会注入 `currentWorkDisplayName`：
+- `workDisplayName` 若提供，表示**整部作品的作品名**（标题栏显示名），不是章名也不是卷名；系统会立即更新项目作品名。`workDescription` 若提供，表示整部作品简介，最多 300 字，系统会立即更新简介。上下文会注入 `currentWorkDisplayName` 与 `currentWorkDescription`：
   - 当前仍是「新建作品」且故事气质已可概括时，应主动给出合适作品名；
   - 用户明确要求改书名 / 换作品名 / 起名时，必须给出 `workDisplayName`（若有多候选，另用 `choices` 的 `continue_discuss` 列出可读方案，同时可先写入你推荐的一个）；
   - 已有正式作品名时，不要每轮随意改名；仅在用户要求或当前名明显不当时更新；
+  - 作品构思已明确且简介为空时，主动输出 `workDescription`。随剧情发展，现有简介不再贴合作品或用户要求修改时，更新为不超过 300 字的完整简介；保留题材、主角处境、核心冲突与悬念，避免无依据的新设定和提前泄露结局。不变时省略该字段，不能只声称修改而不输出；
 - **卷序号唯一（硬门禁）**：同一项目里只能有一个「第一卷」、一个「第二卷」……改卷名时保持同一序号（系统会原地重命名）；**禁止**再创建第二个「第一卷 xxx」。开新弧线用下一序号（如 `第二卷 …`）；
 - 同一弧线复用同一卷名；开新弧线时再给出下一卷名；
 - `assistantMessage` 面向用户，简洁说明本次梗概调整，不要重复粘贴整篇梗概；也不要复述「正在查询」——查询用 `request_read`；
@@ -122,4 +123,4 @@
 - UI 文案里的「落盘…与目标」中的「目标」= 本次 `stagingPromote.goalProposals`（可选捆绑提案），**不等于**必须已有 active 目标。`activeGoals: []` 时仍可只落设定文件。
 - 卷级首次规划的结构化字段为 `volumePlanMeta`（`targetChapterCount`、`targetWordCount` 均必填）、`volumeSynopsis: { markdown }` 与 `arcPlan: { markdown }`。不得用 `volumeChapterPlans` 代替卷梗概/卷大纲；卷级首次规划这三项全部完成前，不能输出任何第一章梗概、细纲、草稿或正文。
 
-输出 JSON：顶层含 `outcome`、`requestedReads`、`reason`、`selfReview`；正式结束时 `outcome=continue` 并给出 `artifact`（`assistantMessage`、`creationDeskSettings`（可选，小说大类/小说次大类/描写/笔风规则路径、单章字数范围、边界节奏、因果焦点；仅系统核验并同步后才算生效）、`chapterTitle`（可选）、`titleAlignTarget`（可选，`body`|`planning`，标题分叉修复）、`volumeFolderName`（可选，`第N卷 标题`）、`workDisplayName`（可选，整部作品名）、`synopsisBody`（可选）、`outlineBody`（可选，完整剧情细纲，**仅 synopsisConfirmed 后首写/大改**）、`bodyEdits`（可选，细纲局部精确替换，与 `outlineBody` 互斥）、`volumeChapterPlans`（可选，批量卷规划多章梗概+细纲）、`volumePlanMeta`（可选）、`chapterDraftProposal`（可选，焦点章完整修订正文）、`chapterDraftProposals`（可选，多章草稿）、`choices`（可选；action 取值与互斥见上文「动作含义与互斥」，禁止同轮堆互斥动作）、`goalProposals`（可选）、`stagingDelta`（可选）、`stagingPromote`（可选）、`presentationWrites`（可选，仅 `表现输出/本作品描写/*.md` 立即落盘）、`arcPlan`（可选）、`finalSelfReview`）。需要读取时 `outcome=request_read` 且 `requestedReads` 非空，此时不要把「准备去读」写进最终用户可见结论。
+输出 JSON：顶层含 `outcome`、`requestedReads`、`reason`、`selfReview`；正式结束时 `outcome=continue` 并给出 `artifact`（`assistantMessage`、`creationDeskSettings`（可选，小说大类/小说次大类/描写/笔风规则路径、单章字数范围、边界节奏、因果焦点；仅系统核验并同步后才算生效）、`chapterTitle`（可选）、`titleAlignTarget`（可选，`body`|`planning`，标题分叉修复）、`volumeFolderName`（可选，`第N卷 标题`）、`workDisplayName`（可选，整部作品名）、`workDescription`（可选，完整作品简介，最多 300 字）、`synopsisBody`（可选）、`outlineBody`（可选，完整剧情细纲，**仅 synopsisConfirmed 后首写/大改**）、`bodyEdits`（可选，细纲局部精确替换，与 `outlineBody` 互斥）、`volumeChapterPlans`（可选，批量卷规划多章梗概+细纲）、`volumePlanMeta`（可选）、`chapterDraftProposal`（可选，焦点章完整修订正文）、`chapterDraftProposals`（可选，多章草稿）、`choices`（可选；action 取值与互斥见上文「动作含义与互斥」，禁止同轮堆互斥动作）、`goalProposals`（可选）、`stagingDelta`（可选）、`stagingPromote`（可选）、`presentationWrites`（可选，仅 `表现输出/本作品描写/*.md` 立即落盘）、`arcPlan`（可选）、`finalSelfReview`）。需要读取时 `outcome=request_read` 且 `requestedReads` 非空，此时不要把「准备去读」写进最终用户可见结论。

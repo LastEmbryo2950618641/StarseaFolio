@@ -24,6 +24,7 @@ export type WorkNameSuggestServiceDependencies = Readonly<{
   conversation: SqliteSynopsisConversationRepository
   prompts: PromptResourcePort
   readDisplayName: () => Promise<string>
+  readDescription: () => Promise<string>
   createId: () => string
   now: () => number
 }>
@@ -38,6 +39,7 @@ export class WorkNameSuggestService {
     historyNames?: readonly string[]
   }>): Promise<ProjectSuggestDisplayNameResult> {
     const currentDisplayName = (await this.dependencies.readDisplayName()).trim() || DEFAULT_WORK_DISPLAY_NAME
+    const currentDescription = await this.dependencies.readDescription()
     const context = await this.collectContext(input.projectId, input.workspaceRootRef)
     const avoidNames = uniqueNonEmpty([
       currentDisplayName,
@@ -77,6 +79,7 @@ export class WorkNameSuggestService {
         userInput: [
           "请为当前作品生成一个新的作品名。",
           `当前作品名：${currentDisplayName}`,
+          `当前作品简介：${currentDescription || "（暂无）"}`,
           `请避开：${avoidNames.join("、")}`,
         ].join("\n"),
         chapterSequence: 1,
@@ -110,7 +113,7 @@ export class WorkNameSuggestService {
     const parsed = phaseResultEnvelopeSchema.parse(execution.result)
     const artifact = workNamingArtifactSchema.safeParse(parsed.artifact)
     if (!artifact.success) {
-      throw new WorkNameSuggestError("模型未返回合法作品名，请重试刷新生成")
+      throw new WorkNameSuggestError("模型未返回合法标题或简介，请重试 AI生成标题")
     }
     const displayName = sanitizeSuggestedWorkName(artifact.data.displayName, avoidNames)
       ?? artifact.data.alternatives
@@ -123,9 +126,10 @@ export class WorkNameSuggestService {
       .map((entry) => sanitizeSuggestedWorkName(entry, avoidNames))
       .filter((entry): entry is string => entry !== undefined)
       .slice(0, 5)
+    const description = sanitizeDescription(artifact.data.description ?? currentDescription)
     return alternatives.length === 0
-      ? { displayName }
-      : { displayName, alternatives }
+      ? { displayName, description }
+      : { displayName, alternatives, description }
   }
 
   private async collectContext(
@@ -178,6 +182,10 @@ export class WorkNameSuggestService {
       recentDiscussion,
     }
   }
+}
+
+function sanitizeDescription(value: string): string {
+  return value.replace(/\s+/gu, " ").trim().slice(0, 300)
 }
 
 export function sanitizeSuggestedWorkName(

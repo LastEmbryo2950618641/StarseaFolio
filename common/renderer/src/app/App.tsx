@@ -1717,6 +1717,10 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           : { ...current, displayName: sent.workDisplayName! })
         rememberWorkName(project.projectId, sent.workDisplayName)
       }
+      if (sent.workDescription !== undefined) {
+        const description = sent.workDescription
+        setProject((current) => current === undefined ? current : { ...current, description })
+      }
       if (sent.budgetAdvisory !== undefined) {
         setSynopsisBudgetWarning(sent.budgetAdvisory)
       }
@@ -3200,8 +3204,12 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           running={task?.status === "running"}
           statusLabel={task?.status === "running" ? "推演中" : "就绪"}
           {...(activeModelProfile === undefined ? {} : { model: activeModelProfile })}
-          onRenamed={(displayName) => {
-            setProject((current) => current === undefined ? current : { ...current, displayName })
+          onRenamed={(displayName, description) => {
+            setProject((current) => {
+              if (current?.projectId !== project.projectId) return current
+              if (current.displayName === displayName && (description === undefined || current.description === description)) return current
+              return { ...current, displayName, ...(description === undefined ? {} : { description }) }
+            })
             rememberWorkName(project.projectId, displayName)
           }}
         />

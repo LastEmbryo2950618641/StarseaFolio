@@ -668,6 +668,8 @@ export const synopsisDiscussArtifactSchema = z.object({
    * Applied via project.rename when present.
    */
   workDisplayName: z.string().trim().min(1).max(200).optional(),
+  /** Current work summary; keep concise and no longer than 300 characters. */
+  workDescription: z.string().trim().max(300).optional(),
   synopsisBody: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.string().min(1).optional(),
@@ -796,6 +798,7 @@ export const synopsisDiscussArtifactSchema = z.object({
 /** One-shot book/work title suggestion for the title bar refresh control. */
 export const workNamingArtifactSchema = z.object({
   displayName: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(300).optional(),
   alternatives: z.array(z.string().trim().min(1).max(200)).max(5).optional(),
   finalSelfReview: z.string().min(1),
 })

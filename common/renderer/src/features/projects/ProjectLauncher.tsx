@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { createPortal } from "react-dom"
-import { BookOpen, ImagePlus, Plus, Search, Trash2 } from "lucide-react"
+import { ArrowUpRight, BookOpen, Globe, ImagePlus, Plus, Search, Trash2 } from "lucide-react"
 import { MobileBottomSheet, useMobileViewport } from "../../components/MobileBottomSheet.js"
 
 import {
@@ -15,7 +15,7 @@ import { folderLabelFromPath, isUnderWorkDirectories } from "./book-path.js"
 import { defaultBookCoverSrc } from "./default-book-cover.js"
 import { DeleteBookDialog } from "./DeleteBookDialog.js"
 import { ImageCropDialog } from "./ImageCropDialog.js"
-import { type ProjectRailItem } from "./ProjectRail.js"
+import type { ProjectRailItem } from "./ProjectRail.js"
 import { useWorkDirectory } from "./use-work-directory.js"
 import { WorkNamePromptDialog } from "./WorkNamePromptDialog.js"
 import { WorkDirectoryPromptDialog } from "./WorkDirectoryPromptDialog.js"
@@ -48,7 +48,7 @@ export function ProjectLauncher({ onOpen, onCoverChanged }: Props): React.JSX.El
   const [coverByProjectId, setCoverByProjectId] = useState<Readonly<Record<string, string>>>({})
   const [loadingProjects, setLoadingProjects] = useState(false)
   const [error, setError] = useState<string>()
-  const [busy, setBusy] = useState<"new" | string>()
+  const [busy, setBusy] = useState<string>()
   const [pendingCreatePath, setPendingCreatePath] = useState<string>()
   const [pendingDelete, setPendingDelete] = useState<ProjectRailItem>()
   const [pendingCover, setPendingCover] = useState<PendingCover>()
@@ -207,7 +207,7 @@ export function ProjectLauncher({ onOpen, onCoverChanged }: Props): React.JSX.El
         defaultDirectory={workDirectoryState.defaultWorkDirectory}
         busy={workDirectoryState.saving}
         onConfirmDefault={() => {
-          void workDirectoryState.confirmWorkDirectory(workDirectoryState.defaultWorkDirectory).catch((cause) => {
+          void workDirectoryState.confirmWorkDirectory(workDirectoryState.defaultWorkDirectory).catch((cause: unknown) => {
             setError(cause instanceof Error ? cause.message : String(cause))
           })
         }}
@@ -239,6 +239,35 @@ export function ProjectLauncher({ onOpen, onCoverChanged }: Props): React.JSX.El
         ? <p className="launcher-loading">正在加载书籍…</p>
         : null}
       <div className="launcher-book-grid" data-testid="launcher-book-grid">
+        <button
+          type="button"
+          className="launcher-book-card launcher-book-card--add"
+          data-testid="launcher-create-project"
+          disabled={interactionLocked}
+          onClick={() => { void createBook() }}
+        >
+          <span className="launcher-book-cover launcher-book-cover--add" aria-hidden>
+            <span className="launcher-book-add-icon">
+              <Plus size={22} strokeWidth={2.25} />
+            </span>
+          </span>
+          <strong className="launcher-book-title">{busy === "new" ? "正在创建…" : "添加书籍"}</strong>
+        </button>
+        <a
+          className="launcher-book-card launcher-book-card--website"
+          data-testid="launcher-website"
+          href="http://111.229.32.85/StarseaFolio/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="打开星海余页网页版（新窗口）"
+        >
+          <span className="launcher-book-cover launcher-book-cover--website" aria-hidden="true">
+            <Globe size={40} strokeWidth={1.5} />
+            <ArrowUpRight size={16} className="launcher-website-external" />
+          </span>
+          <strong className="launcher-book-title">网页版</strong>
+          <span className="launcher-book-meta launcher-website-url">http://111.229.32.85/StarseaFolio/</span>
+        </a>
         {visibleProjects.map((item) => {
           const coverSrc = coverByProjectId[item.projectId] ?? defaultBookCoverSrc(item.displayName)
           if (mobile) return <button type="button" key={item.projectId} className="launcher-book-card launcher-book-card--mobile"
@@ -288,20 +317,6 @@ export function ProjectLauncher({ onOpen, onCoverChanged }: Props): React.JSX.El
             </div>
           )
         })}
-        <button
-          type="button"
-          className="launcher-book-card launcher-book-card--add"
-          data-testid="launcher-create-project"
-          disabled={interactionLocked}
-          onClick={() => { void createBook() }}
-        >
-          <span className="launcher-book-cover launcher-book-cover--add" aria-hidden>
-            <span className="launcher-book-add-icon">
-              <Plus size={22} strokeWidth={2.25} />
-            </span>
-          </span>
-          <strong className="launcher-book-title">{busy === "new" ? "正在创建…" : "添加书籍"}</strong>
-        </button>
       </div>
 
       {!loadingProjects && visibleProjects.length === 0 ? <p className="launcher-search-empty" role="status">{projects.length === 0 ? "还没有书籍，点击添加书籍开始创作。" : "没有找到匹配的书籍，请换个书名搜索。"}</p> : null}

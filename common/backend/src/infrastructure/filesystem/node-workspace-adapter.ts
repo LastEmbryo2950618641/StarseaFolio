@@ -127,6 +127,10 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
       encoding: "utf8",
       flag: "wx",
     })
+    await writeFile(resolveInside(root, "设定集/作品简介.md"), "# 作品简介\n", {
+      encoding: "utf8",
+      flag: "wx",
+    })
     await writeFile(resolveInside(root, "参考文件/readme.md"), defaults.referencesReadme, {
       encoding: "utf8",
       flag: "wx",
@@ -184,6 +188,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     await assertParentChainContainsNoLinks(root, resolveInside(root, `${CHARACTER_DIRECTORY}/placeholder.json`))
     await mkdir(resolveInside(root, CHARACTER_DIRECTORY), { recursive: true })
     await writeFileIfMissing(resolveInside(root, CHARACTER_RULE_PATH), CHARACTER_GUIDE)
+    await writeFileIfMissing(resolveInside(root, "设定集/作品简介.md"), "# 作品简介\n")
     await mkdir(resolveInside(root, "世界推演规则/基础规则"), { recursive: true })
     await writeFileIfMissing(
       resolveInside(root, "世界推演规则/基础规则/content-handling.md"),
@@ -284,6 +289,9 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
   public async saveUserMarkdown(workspaceRootRef: string, relativePath: string, content: string): Promise<void> {
     const root = await this.documentRoot(workspaceRootRef, relativePath)
     const normalized = assertWorkspaceMutationAllowed(relativePath, "file", "user")
+    if (normalized === "设定集/作品简介.md" && content.replace(/^\s*#\s*作品简介\s*/u, "").trim().length > 300) {
+      throw new Error("作品简介不能超过 300 字")
+    }
     const path = resolveInside(root, normalized)
     await assertParentChainContainsNoLinks(root, path)
     await mkdir(resolve(path, ".."), { recursive: true })

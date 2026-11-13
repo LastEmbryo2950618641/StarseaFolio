@@ -184,6 +184,7 @@ export class FakeAiModelAdapter implements AIModelPort {
         }
         return {
           displayName,
+          description: "主角在潮声中踏上旅途，追查失踪者留下的线索，在重重阻力中寻找真相。",
           alternatives: [`${displayName}外传`, `${displayName}前传`].filter((entry) => entry !== displayName).slice(0, 5),
           finalSelfReview: "The deterministic fixture returns a fresh work title distinct from the current name.",
         }

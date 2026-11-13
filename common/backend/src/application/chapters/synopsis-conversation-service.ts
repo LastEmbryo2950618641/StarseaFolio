@@ -258,6 +258,8 @@ export type SynopsisConversationServiceDependencies = SynopsisWorkflowToolCallba
   readProjectSettings?: () => Promise<ProjectSettings>
   readDisplayName?: () => Promise<string>
   renameDisplayName?: (displayName: string) => Promise<string>
+  readWorkDescription?: () => Promise<string>
+  saveWorkDescription?: (description: string) => Promise<string>
   readTurnMonitor?: () => Promise<Readonly<{
     taskId: string
     status: string
@@ -649,6 +651,7 @@ export class SynopsisConversationService {
     const streamStartedAtMs = this.dependencies.now()
     synopsisConversationStreamHub.begin(input.projectId, session.sessionId, streamStartedAtMs)
     try {
+      let setupMetadata: { workDisplayName?: string; workDescription?: string } = {}
       if (workStyleGateReadyAtStart) {
         const gateReply = await new CreativeSetupCoordinator({
           repository: this.dependencies.creativeSetup,
@@ -664,19 +667,23 @@ export class SynopsisConversationService {
           volumeFolderName: extractVolumeFolderNameFromPath(session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME,
           chapterSequence: session.chapterSequence, message: input.message, priorMessages,
           ...(input.setupAnswerTo === undefined || batchAutomation ? {} : { setupAnswerTo: input.setupAnswerTo }),
-          generate: async (creativeSetup) => this.runSynopsisDiscuss({
-            projectId: input.projectId, workspaceRootRef: input.workspaceRootRef, sessionId: session.sessionId,
-            userMessage: input.message, heading: session.title, chapterSequence: session.chapterSequence,
-            synopsisMarkdown: "", outlineMarkdown: "", userEditedSinceAgent: false, userEditedOutlineSinceAgent: false,
-            activeGoals: [], chapterProgress: [], hookScheduleAudit: {
-              requireCompleteHookSchedules: true, incompleteHooks: [], completeCount: 0, incompleteCount: 0,
-            },
-            model: input.model, creativeSetup, allowWorkflowTools: false, allowChapterWorkflowTools: false,
-            ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
-            ...(input.signal === undefined ? {} : { signal: input.signal }),
-            maxModelCalls: Math.min(input.maxModelCalls ?? 3, 3),
-            ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
-          }),
+          generate: async (creativeSetup) => {
+            const result = await this.runSynopsisDiscuss({
+              projectId: input.projectId, workspaceRootRef: input.workspaceRootRef, sessionId: session.sessionId,
+              userMessage: input.message, heading: session.title, chapterSequence: session.chapterSequence,
+              synopsisMarkdown: "", outlineMarkdown: "", userEditedSinceAgent: false, userEditedOutlineSinceAgent: false,
+              activeGoals: [], chapterProgress: [], hookScheduleAudit: {
+                requireCompleteHookSchedules: true, incompleteHooks: [], completeCount: 0, incompleteCount: 0,
+              },
+              model: input.model, creativeSetup, allowWorkflowTools: false, allowChapterWorkflowTools: false,
+              ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+              ...(input.signal === undefined ? {} : { signal: input.signal }),
+              maxModelCalls: Math.min(input.maxModelCalls ?? 3, 3),
+              ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
+            })
+            setupMetadata = await this.applyWorkMetadata(result)
+            return result
+          },
         })
         if (gateReply !== undefined) {
           if (!gateReply.cached) {
@@ -694,6 +701,7 @@ export class SynopsisConversationService {
           synopsisConversationStreamHub.clear(input.projectId)
           return { session, messages: [...await this.dependencies.conversation.listMessagesForProject(input.projectId)],
             awaitingSetupInput: { questionId: gateReply.questionId, scope: gateReply.scope, field: gateReply.field },
+            ...setupMetadata,
             ...(usage === undefined ? {} : { usage }) }
         }
       }
@@ -755,9 +763,6 @@ export class SynopsisConversationService {
         content: input.message,
         createdAtMs: nowMs,
       })
-      const currentWorkDisplayName = this.dependencies.readDisplayName === undefined
-        ? undefined
-        : await this.dependencies.readDisplayName()
       const initialVolume = extractVolumeFolderNameFromPath(session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
       const initialVolumePlanningState = await this.readVolumePlanningState(input.workspaceRootRef, initialVolume)
       const initialVolumePlanningContext = await this.readVolumePlanningContext(input.workspaceRootRef, initialVolume, initialVolumePlanningState)
@@ -786,7 +791,6 @@ export class SynopsisConversationService {
         synopsisConfirmed,
         ...(batchAutomation ? { batchAutomation: true } : {}),
         ...(batchProceed ? { batchProceed: true } : {}),
-        ...(currentWorkDisplayName === undefined ? {} : { currentWorkDisplayName }),
         activeGoals,
         chapterProgress,
         hookScheduleAudit,
@@ -1840,16 +1844,7 @@ export class SynopsisConversationService {
           throw new SynopsisInvalidStateError("当前步骤连续 3 次没有实际内容进展，已停止自动推进。已有内容和待办已保留，请检查阻塞原因。")
         }
       }
-      let workDisplayName: string | undefined
-      if (
-        assist.workDisplayName !== undefined
-        && this.dependencies.renameDisplayName !== undefined
-      ) {
-        const nextName = assist.workDisplayName.trim()
-        if (nextName.length > 0) {
-          workDisplayName = await this.dependencies.renameDisplayName(nextName)
-        }
-      }
+      const { workDisplayName, workDescription } = await this.applyWorkMetadata(assist)
       const streamPeek = synopsisConversationStreamHub.peek(input.projectId, session.sessionId)
       const persistedThinking = normalizeThinkingDisplayText(
         assist.reasoningContent ?? (streamPeek.thinking.length === 0 ? undefined : streamPeek.thinking),
@@ -1975,6 +1970,7 @@ export class SynopsisConversationService {
         ...(budgetAdvisory === undefined ? {} : { budgetAdvisory }),
         ...(usage === undefined ? {} : { usage }),
         ...(workDisplayName === undefined ? {} : { workDisplayName }),
+        ...(workDescription === undefined ? {} : { workDescription }),
         ...(Object.keys(creationDeskSettings).length === 0 ? {} : { creationDeskSettings }),
         ...(rejectedCreationDeskRulePaths.length === 0 ? {} : { rejectedCreationDeskRulePaths }),
         ...(draftApply.appended === undefined ? {} : { appendedDraft: draftApply.appended }),
@@ -2437,7 +2433,6 @@ export class SynopsisConversationService {
     outlineDigest?: string
     userEditedSinceAgent: boolean
     userEditedOutlineSinceAgent: boolean
-    currentWorkDisplayName?: string
     synopsisConfirmed?: boolean
     creativeSetup?: CreativeSetupState
     workStyleGate?: Readonly<{
@@ -2480,6 +2475,7 @@ export class SynopsisConversationService {
     titleAlignTarget?: "body" | "planning"
     volumeFolderName?: string
     workDisplayName?: string
+    workDescription?: string
     synopsisBody?: string
     outlineBody?: string
     bodyEdits?: Readonly<{
@@ -2531,6 +2527,8 @@ export class SynopsisConversationService {
     availableNovelSubcategoryRulePaths?: readonly string[]
     budgetAdvisory?: SynopsisConversationBudgetAdvisory
     }>> {
+    const currentWorkDisplayName = await this.dependencies.readDisplayName?.()
+    const currentWorkDescription = await this.dependencies.readWorkDescription?.()
     const basePhasePrompt = await this.dependencies.prompts.loadPhase("synopsis_discuss")
     const intentAppendix = chapterNarrativeIntentPhaseAppendix(input.chapterIntent, "synopsis_discuss")
     const presentationAppendix = chapterPresentationPhaseAppendix(input.presentation, "synopsis_discuss")
@@ -2787,7 +2785,7 @@ export class SynopsisConversationService {
       heading: input.heading,
       synopsisMarkdown: input.synopsisMarkdown,
       outlineMarkdown: input.outlineMarkdown,
-      ...(input.currentWorkDisplayName === undefined ? {} : { currentWorkDisplayName: input.currentWorkDisplayName }),
+      ...(currentWorkDisplayName === undefined ? {} : { currentWorkDisplayName }),
       ...(input.chapterBodyMarkdown === undefined ? {} : { chapterBodyMarkdown: input.chapterBodyMarkdown }),
       ...(input.latestDraftMarkdown === undefined ? {} : { latestDraftMarkdown: input.latestDraftMarkdown }),
     })
@@ -2990,9 +2988,8 @@ export class SynopsisConversationService {
             ...(input.creativeSetup === undefined ? {} : { creativeSetup: input.creativeSetup }),
             batchAutomation: input.batchAutomation === true,
             batchProceed: input.batchProceed === true,
-            ...(input.currentWorkDisplayName === undefined
-              ? {}
-              : { currentWorkDisplayName: input.currentWorkDisplayName }),
+            ...(currentWorkDisplayName === undefined ? {} : { currentWorkDisplayName }),
+            ...(currentWorkDescription === undefined ? {} : { currentWorkDescription }),
             activeGoals: input.activeGoals.map((goal) => ({
               goalId: goal.goalId,
               content: goal.content,
@@ -3338,6 +3335,8 @@ export class SynopsisConversationService {
         // Project only interview fields: model-written artifacts cannot cross the human gate.
         return {
           content: toolArtifact.data.assistantMessage,
+          ...(toolArtifact.data.workDisplayName === undefined ? {} : { workDisplayName: toolArtifact.data.workDisplayName }),
+          ...(toolArtifact.data.workDescription === undefined ? {} : { workDescription: toolArtifact.data.workDescription }),
           ...(toolArtifact.data.choices === undefined ? {} : { choices: interviewChoices.map(choice => ({
             label: choice.label, action: "continue_discuss" as const,
           })) }),
@@ -3956,6 +3955,9 @@ export class SynopsisConversationService {
           ...(artifact.data.workDisplayName === undefined
             ? {}
             : { workDisplayName: artifact.data.workDisplayName }),
+          ...(artifact.data.workDescription === undefined
+            ? {}
+            : { workDescription: artifact.data.workDescription }),
           ...(artifact.data.synopsisBody === undefined ? {} : { synopsisBody: artifact.data.synopsisBody }),
           ...(artifact.data.outlineBody === undefined ? {} : { outlineBody: artifact.data.outlineBody }),
           ...(artifact.data.bodyEdits === undefined
@@ -4123,6 +4125,9 @@ export class SynopsisConversationService {
             ...(artifact.data.workDisplayName === undefined
               ? {}
               : { workDisplayName: artifact.data.workDisplayName }),
+            ...(artifact.data.workDescription === undefined
+              ? {}
+              : { workDescription: artifact.data.workDescription }),
             ...(artifact.data.synopsisBody === undefined ? {} : { synopsisBody: artifact.data.synopsisBody }),
             ...(artifact.data.outlineBody === undefined ? {} : { outlineBody: artifact.data.outlineBody }),
             ...(artifact.data.bodyEdits === undefined
@@ -4738,6 +4743,7 @@ export class SynopsisConversationService {
       volumePlanning: volumePlanningContext,
       ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
     })
+    await this.applyWorkMetadata(assist)
     const assistantMessageId = this.dependencies.createId()
     if (assist.stagingDelta !== undefined) {
       await this.applyStagingDelta({
@@ -4793,6 +4799,19 @@ export class SynopsisConversationService {
       chapterSequence: input.brief.chapterSequence + 1,
       focusKind: "plot_synopsis",
     })
+  }
+
+  private async applyWorkMetadata(
+    metadata: Readonly<{ workDisplayName?: string; workDescription?: string }>,
+  ): Promise<{ workDisplayName?: string; workDescription?: string }> {
+    const result: { workDisplayName?: string; workDescription?: string } = {}
+    if (metadata.workDisplayName?.trim() && this.dependencies.renameDisplayName !== undefined) {
+      result.workDisplayName = await this.dependencies.renameDisplayName(metadata.workDisplayName.trim())
+    }
+    if (metadata.workDescription !== undefined && this.dependencies.saveWorkDescription !== undefined) {
+      result.workDescription = await this.dependencies.saveWorkDescription(metadata.workDescription)
+    }
+    return result
   }
 
   private async applyVolumeFolderChange(input: Readonly<{
@@ -5778,6 +5797,7 @@ function finalizeDiscussReturn(
     titleAlignTarget?: "body" | "planning"
     volumeFolderName?: string
     workDisplayName?: string
+    workDescription?: string
     synopsisBody?: string
     outlineBody?: string
     bodyEdits?: Readonly<{
@@ -5835,6 +5855,7 @@ function finalizeDiscussReturn(
   titleAlignTarget?: "body" | "planning"
   volumeFolderName?: string
   workDisplayName?: string
+  workDescription?: string
   synopsisBody?: string
   outlineBody?: string
   bodyEdits?: Readonly<{

@@ -67,6 +67,7 @@ export const projectSettingsReadPayloadSchema = projectWorkspacePayloadSchema.ex
 })
 export const projectRenamePayloadSchema = projectSettingsReadPayloadSchema.extend({
   displayName: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(300).optional(),
 })
 export type ProjectRenamePayload = z.infer<typeof projectRenamePayloadSchema>
 
@@ -86,6 +87,7 @@ export const projectSuggestDisplayNamePayloadSchema = projectSettingsReadPayload
 export type ProjectSuggestDisplayNamePayload = z.infer<typeof projectSuggestDisplayNamePayloadSchema>
 export const projectSuggestDisplayNameResultSchema = z.object({
   displayName: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(300).default(""),
   alternatives: z.array(z.string().trim().min(1).max(200)).max(5).optional(),
 })
 export type ProjectSuggestDisplayNameResult = z.infer<typeof projectSuggestDisplayNameResultSchema>
@@ -713,6 +715,7 @@ export const backendPayloadSchemas = {
   "project.open": projectWorkspacePayloadSchema,
   "project.list": projectListPayloadSchema,
   "project.rename": projectRenamePayloadSchema,
+  "project.metadata.read": projectSettingsReadPayloadSchema,
   "project.delete": projectDeletePayloadSchema,
   "project.suggestDisplayName": projectSuggestDisplayNamePayloadSchema,
   "project.validate": projectWorkspacePayloadSchema,

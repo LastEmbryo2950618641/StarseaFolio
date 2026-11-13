@@ -600,6 +600,29 @@ export class ProjectRuntime {
     return manifest?.displayName.trim() || "新建作品"
   }
 
+  public async readWorkDescription(): Promise<string> {
+    try {
+      const markdown = await this.workspace.readMarkdown(this.workspaceRootRef, "设定集/作品简介.md")
+      return markdown
+        .replace(/^\s*#\s*作品简介\s*/u, "")
+        .trim()
+        .slice(0, 300)
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+      return ""
+    }
+  }
+
+  public async saveWorkDescription(description: string): Promise<string> {
+    const normalized = description.replace(/\s+/gu, " ").trim()
+    if (normalized.length > 300) throw new Error("作品简介不能超过 300 字")
+    const markdown = normalized.length === 0
+      ? "# 作品简介\n"
+      : `# 作品简介\n\n${normalized}\n`
+    await this.workspace.saveUserMarkdown(this.workspaceRootRef, "设定集/作品简介.md", markdown)
+    return normalized
+  }
+
   public createWorkNameSuggestService(): WorkNameSuggestService {
     return new WorkNameSuggestService({
       workspace: this.workspace,
@@ -607,6 +630,7 @@ export class ProjectRuntime {
       conversation: new SqliteSynopsisConversationRepository(this.database),
       prompts: this.createPromptResourcePort(),
       readDisplayName: () => this.readDisplayName(),
+      readDescription: () => this.readWorkDescription(),
       createId: randomUUID,
       now: Date.now,
     })
@@ -1232,6 +1256,8 @@ export class ProjectRuntime {
       readProjectSettings: () => this.readSettings(),
       readDisplayName: () => this.readDisplayName(),
       renameDisplayName: (displayName) => this.renameDisplayName(displayName),
+      readWorkDescription: () => this.readWorkDescription(),
+      saveWorkDescription: (description) => this.saveWorkDescription(description),
       readTurnMonitor: async () => {
         const row = await this.database.selectFrom("tasks")
           .select(["id", "status", "last_phase"])

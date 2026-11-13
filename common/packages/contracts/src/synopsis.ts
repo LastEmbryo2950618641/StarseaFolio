@@ -309,6 +309,7 @@ export const synopsisConversationSendResultSchema = z.object({
   usage: synopsisConversationStreamUsageSchema.optional(),
   /** Set when the discuss agent renamed the project/work display name. */
   workDisplayName: z.string().trim().min(1).max(200).optional(),
+  workDescription: z.string().trim().max(300).optional(),
   /** Set when this send auto-appended a chapter draft version. */
   appendedDraft: z.object({
     revisionTaskId: idSchema,
