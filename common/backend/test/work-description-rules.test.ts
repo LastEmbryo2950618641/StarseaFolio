@@ -5,6 +5,7 @@ import {
   assertWorkDescriptionCharLimit,
   assertWorkDescriptionWriteBatch,
   DEAI_DESCRIPTION_RULE_PATH,
+  DEAI_DESCRIPTION_RULE_MARKDOWN,
   formatDescriptionRuleEvidence,
   formatWorkDescriptionRuleEvidence,
   isAutoDescriptionSelection,
@@ -21,6 +22,12 @@ import {
 } from "../src/core/workspace/work-description-rules.js"
 
 describe("work description overlay rules", () => {
+  it("rejects tidy parallel negatives that invent significance without a causal link", () => {
+    expect(DEAI_DESCRIPTION_RULE_MARKDOWN).toContain("没给A，也没给B")
+    expect(DEAI_DESCRIPTION_RULE_MARKDOWN).toContain("无因果关系的两项缺失")
+    expect(DEAI_DESCRIPTION_RULE_MARKDOWN).toContain("不能擅自补动作或动机")
+  })
+
   it("accepts direct-child overlay markdown and rejects user presets", () => {
     expect(isWorkDescriptionRulePath(`${WORK_DESCRIPTION_RULES_DIR}/压抑氛围.md`)).toBe(true)
     expect(isWorkDescriptionRulePath("表现输出/描写规则/近景跟随.md")).toBe(false)
@@ -112,6 +119,8 @@ describe("work description overlay rules", () => {
       .toContain("【描写·感官基线·本轮始终生效】")
     expect(formatDescriptionRuleEvidence(DEAI_DESCRIPTION_RULE_PATH, "# 去AI味\n", false))
       .toContain("【描写·去AI味基线·本轮始终生效】")
+    expect(formatDescriptionRuleEvidence(DEAI_DESCRIPTION_RULE_PATH, "# 旧去AI味规则\n", false))
+      .toContain("不得把无因果关系的两项缺失排成「没给A，也没给B」")
     expect(formatDescriptionRuleEvidence("表现输出/描写规则/近景跟随.md", "# 近景\n", true))
       .toContain("【描写场面卡】")
     expect(formatDescriptionRuleEvidence("表现输出/描写规则/近景跟随.md", "# 近景\n", false))
