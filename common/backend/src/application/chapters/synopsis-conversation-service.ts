@@ -567,11 +567,11 @@ export class SynopsisConversationService {
     focusLocked?: boolean
     lockedChapterSequence?: number
     lockedFocusKind?: DiscussFocusKind
-    /** ChapterPanel 批量推演：自动确认梗概并允许同轮写细纲。 */
+    /** ChapterPanel 批量推演：按章规划并允许同轮写梗概与细纲。 */
     automation?: "batch_chapter"
     /**
-     * Creation-desk「批量推进」：跳过梗概/细纲/正文确认并自动连章。
-     * false/缺省 = 每步停等用户确认（即便 agentMode=auto）。
+     * Creation-desk「批量推进」：跳过阶段停步并自动连章。
+     * false/缺省 = 每步停等用户指令（阶段按钮只是便捷入口）。
      */
     batchProceed?: boolean
     /** Claude Code–style discuss mode. */
@@ -716,7 +716,7 @@ export class SynopsisConversationService {
         )
       const outlineMarkdown = await this.readSynopsisFile(input.workspaceRootRef, outlinePathForRead)
       const outlineDigest = outlineMarkdown.trim().length === 0 ? undefined : digest(outlineMarkdown)
-      const synopsisReady = synopsisMarkdown.trim().length > 0 && !isSynopsisPlaceholderDocument(synopsisMarkdown)
+      const synopsisReady = hasPlanningContent(synopsisMarkdown, true)
       const chapterBodyMarkdown = await this.readFocusedCommittedBody(
         input.projectId,
         input.workspaceRootRef,
@@ -1204,10 +1204,8 @@ export class SynopsisConversationService {
           extractVolumeFolderNameFromPath(synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME,
         )
       const synopsisMarkdownAfterWrites = await this.readSynopsisFile(input.workspaceRootRef, synopsisPath)
-      const synopsisReadyForOutline = synopsisMarkdownAfterWrites.trim().length > 0
-        && !isSynopsisPlaceholderDocument(synopsisMarkdownAfterWrites)
+      const synopsisReadyForOutline = hasPlanningContent(synopsisMarkdownAfterWrites, true)
       const outlineWriteAllowed = synopsisReadyForOutline
-        && (synopsisConfirmed || (confirmingSynopsis && synopsisReady) || batchAutomation || autonomous)
       if (assist.bodyEdits !== undefined) {
         this.emitDiscussEdit(input.projectId, {
           path: outlinePath,
@@ -1217,20 +1215,16 @@ export class SynopsisConversationService {
           opsAttempted: assist.bodyEdits.ops.length,
         })
         if (!outlineWriteAllowed) {
-          writeNotices.push(
-            synopsisReadyForOutline
-              ? "细纲尚未确认可写：本轮 bodyEdits 未落盘。请先点「用这份梗概写细纲」。"
-              : "剧情梗概尚未完成：本轮细纲未落盘，请先完成并确认剧情梗概。",
-          )
+          writeNotices.push("剧情梗概尚未完成：本轮细纲未落盘，请先补齐剧情梗概。")
           this.emitDiscussEdit(input.projectId, {
             path: outlinePath,
             kind: "body_edits",
             status: "failed",
-            summary: "未落盘：细纲尚未确认可写",
+            summary: "未落盘：缺少有效剧情梗概",
             opsAttempted: assist.bodyEdits.ops.length,
             opsApplied: 0,
           })
-          runtimeLog("debug", "synopsis-conversation", "outline-edits-blocked-until-synopsis-confirmed", {
+          runtimeLog("debug", "synopsis-conversation", "outline-edits-blocked-missing-synopsis", {
             projectId: input.projectId,
             sessionId: session.sessionId,
           })
@@ -1346,18 +1340,14 @@ export class SynopsisConversationService {
           })
         }
       } else if (assist.outlineBody !== undefined) {
-        writeNotices.push(
-          synopsisReadyForOutline
-            ? "细纲尚未确认可写：本轮 outlineBody 未落盘。请先点「用这份梗概写细纲」。"
-            : "剧情梗概尚未完成：本轮细纲未落盘，请先完成并确认剧情梗概。",
-        )
+        writeNotices.push("剧情梗概尚未完成：本轮细纲未落盘，请先补齐剧情梗概。")
         this.emitDiscussEdit(input.projectId, {
           path: outlinePath,
           kind: "outline",
           status: "failed",
-          summary: "未落盘：细纲尚未确认可写",
+          summary: "未落盘：缺少有效剧情梗概",
         })
-        runtimeLog("debug", "synopsis-conversation", "outline-blocked-until-synopsis-confirmed", {
+        runtimeLog("debug", "synopsis-conversation", "outline-blocked-missing-synopsis", {
           projectId: input.projectId,
           sessionId: session.sessionId,
         })
@@ -1385,9 +1375,9 @@ export class SynopsisConversationService {
         await this.tryRemoveEmptyVolumeDirectory(input.workspaceRootRef, volumeCleanupFolder)
       }
 
-      const confirmingOutline = isConfirmOutlineUserMessage(input.message)
-      const hasOutlineOnDisk = (outlineDigest !== undefined && outlineMarkdown.trim().length > 0)
-        || wroteOutlineThisTurn
+      const hasOutlineOnDisk = hasPlanningContent(
+        await this.readSynopsisFile(input.workspaceRootRef, outlinePath), false,
+      )
       if (isExplicitChapterOutlineWriteRequest(input.message) && synopsisReadyForOutline && !hasOutlineOnDisk) {
         writeNotices.push(
           `系统状态：第${String(session.chapterSequence)}章细纲没有收到可保存的结构化内容，文件仍未写入；正文草稿不能越过细纲门禁。`,
@@ -1396,13 +1386,10 @@ export class SynopsisConversationService {
       // Every chapter must have a non-empty outline before a draft can be written.
       const bodyWriteAllowed = synopsisReadyForOutline
         && hasOutlineOnDisk
-        && (
-          autonomous
-          || batchAutomation
-          || confirmingOutline
-          || (session.focusKind ?? "plot_synopsis") === "chapter_body"
-        )
-      const mustStopAfterOutline = wroteOutlineThisTurn && !autonomous && !batchAutomation
+      const mustStopAfterOutline = wroteOutlineThisTurn
+        && !autonomous
+        && !batchAutomation
+        && !isExplicitChapterDraftRequest(input.message)
       const blockBodyPipeline = !bodyWriteAllowed || mustStopAfterOutline
       let draftAssist = assist
       if (blockBodyPipeline) {
@@ -1411,11 +1398,7 @@ export class SynopsisConversationService {
           || (assist.chapterDraftProposals?.length ?? 0) > 0
           || assist.appendedDraft !== undefined
         ) {
-          writeNotices.push(
-            hasOutlineOnDisk || wroteOutlineThisTurn
-              ? "正文尚未确认可写：本轮草稿未落盘。请先点「按细纲写正文」。"
-              : "请先完成梗概确认并写细纲，再开始正文草稿。",
-          )
+          writeNotices.push("请先完成剧情梗概并写入细纲，再开始正文草稿。")
         }
         const {
           chapterDraftProposal: _blockedProposal,
@@ -1576,6 +1559,13 @@ export class SynopsisConversationService {
           synopsisReady: synopsisReadyForOutline,
           synopsisConfirmed,
           outlineReady: hasOutlineOnDisk,
+          offerSynopsisConfirmation: !autonomous
+            && !batchAutomation
+            && !volumePlanningNeedsFirstWrite
+            && !volumeStoryNeedsUser
+            && !coldStartStyleNeedsChoice
+            && !hasOutlineOnDisk
+            && !confirmingSynopsis,
           ...(appliedFocusSequence === undefined ? {} : { appliedFocusSequence }),
         },
       )
@@ -2793,13 +2783,13 @@ export class SynopsisConversationService {
       repairHints.push(
         "【批量推演模式】卷规划用 volumeChapterPlans 一次写齐多章 synopsisBody+outlineBody；正文默认用 chapterDraftProposals（或焦点章 chapterDraftProposal）写草稿，禁止优先 chapter_workflow；勿 publish_draft（图治理由前端按章串行）；少给需点击的 choices；禁止输出 set_focus / focusChange（焦点由前端推进）；不要停在等待用户确认梗概。",
       )
-    } else if (input.creativeSetup === undefined && input.synopsisConfirmed !== true) {
+    } else if (input.creativeSetup === undefined && !hasPlanningContent(input.synopsisMarkdown, true)) {
       repairHints.push(
-        "当前梗概尚未经用户确认：禁止输出 outlineBody；戏核收窄后只能给出「用这份梗概写细纲」(confirm_synopsis) 或「再改梗概」，不得跳过细纲进入正文。",
+        "当前剧情梗概缺失或仍是占位内容：本轮只写 synopsisBody，不得输出 outlineBody/bodyEdits 或正文。给出符合用户当前诉求的后续选项；不能要求用户使用固定口令确认梗概。",
       )
-    } else if (isConfirmSynopsisUserMessage(input.userMessage)) {
+    } else if (input.creativeSetup === undefined && !hasPlanningContent(input.outlineMarkdown, false)) {
       repairHints.push(
-        "用户已选择用这份梗概写细纲：本轮应输出合格 outlineBody（引导 §4.1：必填章定位/分场/信息边界/风险待决；不适用节写「本节：无」；须含相对梗概的增量，禁止同构扩写），不要只改梗概；本轮不要再给 start_turn。",
+        "当前剧情梗概已存在，可据此写细纲；梗概确认按钮只是便捷选项，不是门禁。用户明确要求提取、补全或继续写细纲时，本轮应输出合格 outlineBody（引导 §4.1：必填章定位/分场/信息边界/风险待决；不适用节写「本节：无」；须含相对梗概的增量，禁止同构扩写），尊重用户这轮具体要求，不要要求固定确认说法或重复询问。细纲尚未写入前不要输出正文草稿。",
       )
     }
     if (titleAlignmentIssue !== undefined) {
@@ -2982,6 +2972,8 @@ export class SynopsisConversationService {
             ...(input.outlineDigest === undefined ? {} : { outlineDigest: input.outlineDigest }),
             userEditedSinceAgent: input.userEditedSinceAgent,
             userEditedOutlineSinceAgent: input.userEditedOutlineSinceAgent,
+            synopsisReady: hasPlanningContent(input.synopsisMarkdown, true),
+            outlineReady: hasPlanningContent(input.outlineMarkdown, false),
             synopsisConfirmed: input.synopsisConfirmed === true,
             ...(input.workStyleGate === undefined ? {} : { workStyleGate: input.workStyleGate }),
             ...(input.volumePlanning === undefined ? {} : { volumePlanning: input.volumePlanning }),
@@ -6073,7 +6065,7 @@ export function isExplicitWholeVolumePlanningRequest(message: string): boolean {
 }
 
 function isExplicitChapterDraftRequest(message: string): boolean {
-  return /按细纲写正文|(?:生成|写|改|修订|续写).{0,8}正文草稿|(?:开始|继续)写正文|修订正文|改写正文/u.test(message)
+  return /按细纲写正文|(?:生成|写|改|修订|续写|补齐|补全).{0,12}正文(?:草稿)?|(?:开始|继续)写正文|修订正文|改写正文|(?:细纲|大纲).{0,12}(?:和|及|与).{0,12}正文.{0,8}(?:都|一起|同时|补齐|补全|完成|写)|(?:一起|同时|都|连着).{0,12}(?:写|补|完成|生成).{0,12}(?:细纲|正文)/u.test(message)
 }
 
 function isExplicitChapterSynopsisWriteRequest(message: string): boolean {
@@ -6117,16 +6109,15 @@ export function filterDiscussChoices(
     synopsisReady?: boolean
     synopsisConfirmed?: boolean
     outlineReady?: boolean
+    offerSynopsisConfirmation?: boolean
   }>,
 ): SynopsisConversationChoice[] | undefined {
-  if (choices === undefined) return undefined
-  const filtered = choices.filter((choice) => {
+  const filtered = (choices ?? []).filter((choice) => {
     if (
       choice.action === "start_turn"
       && (
         input.focusLocked
         || input.synopsisReady === false
-        || input.synopsisConfirmed === false
         || input.outlineReady === false
       )
     ) {
@@ -6143,6 +6134,16 @@ export function filterDiscussChoices(
     }
     return true
   })
+  const shouldOfferConfirmation = input.offerSynopsisConfirmation === true
+    && input.synopsisReady === true
+    && input.synopsisConfirmed === false
+  if (shouldOfferConfirmation) {
+    const withoutDuplicateConfirmation = filtered.filter((choice) => choice.action !== "confirm_synopsis")
+    return [
+      { label: "用这份梗概写细纲", action: "confirm_synopsis" },
+      ...withoutDuplicateConfirmation,
+    ]
+  }
   return filtered.length === 0 ? undefined : filtered
 }
 
@@ -6182,7 +6183,7 @@ function hasPlanningContent(markdown: string, synopsis: boolean): boolean {
   return body.length > 0
 }
 
-/** User clicked confirm_synopsis or typed an equivalent confirmation. */
+/** Legacy confirmation metadata only; prerequisite content, not this phrase, controls writes. */
 export function isConfirmSynopsisUserMessage(message: string): boolean {
   const text = message.trim()
   if (text.length === 0) return false
@@ -6191,16 +6192,6 @@ export function isConfirmSynopsisUserMessage(message: string): boolean {
     || /开始写细纲/u.test(text)
     || /确认梗概[，,]?\s*开始写细纲/u.test(text)
     || /按(?:照)?(?:这份)?梗概重写(?:整个)?细纲/u.test(text)
-}
-
-/** User confirmed outline → allow chapter body draft (逐步确认第二闸). */
-export function isConfirmOutlineUserMessage(message: string): boolean {
-  const text = message.trim()
-  if (text.length === 0) return false
-  return /按细纲写正文/u.test(text)
-    || /确认(?:本章)?细纲/u.test(text)
-    || /开始写正文/u.test(text)
-    || /按(?:照)?(?:这份)?细纲开推/u.test(text)
 }
 
 /** Skip outline and start body from synopsis. */

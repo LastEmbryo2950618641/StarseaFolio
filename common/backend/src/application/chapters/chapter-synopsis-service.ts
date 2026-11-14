@@ -157,7 +157,6 @@ export class ChapterSynopsisService {
     const draftVersionId = storedState?.draftVersionId ?? session?.draftVersionId
     const blockedReasons: string[] = []
     if (!synopsisReady) blockedReasons.push("本章必须先完成剧情梗概")
-    if (!synopsisConfirmed) blockedReasons.push("剧情梗概必须先确认")
     if (!outlineReady) blockedReasons.push("本章必须先完成剧情细纲和人物准备")
     return {
       chapterSequence: input.chapterSequence,

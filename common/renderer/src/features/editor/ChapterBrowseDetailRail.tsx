@@ -435,7 +435,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
               <h4><Info size={13} aria-hidden="true" /> 章节信息</h4>
               <p className="chapter-browse-muted">
                 {workflowGate.readyForDraft
-                  ? "剧情梗概已确认，剧情细纲和人物准备已完成，可进入草稿。"
+                  ? "剧情梗概与细纲已写入，人物准备已完成，可进入草稿。"
                   : workflowGate.blockedReasons.join("；")}
               </p>
               <ChapterWorkflowStageList workflowGate={workflowGate} />
@@ -645,7 +645,8 @@ export function ChapterWorkflowStageList(props: Readonly<{ workflowGate: Chapter
     <WorkflowStage
       label="剧情梗概"
       state={workflowGate.synopsis.contentState}
-      ready={workflowGate.synopsis.ready && workflowGate.synopsis.confirmed}
+      ready={workflowGate.synopsis.ready}
+      confirmed={workflowGate.synopsis.confirmed}
       writeCount={workflowGate.synopsis.writeCount}
     />
     <WorkflowStage
@@ -668,17 +669,17 @@ function WorkflowStage(props: Readonly<{
   label: string
   state?: ChapterWorkflowGate["synopsis"]["contentState"]
   ready: boolean
+  confirmed?: boolean
   statusLabel?: string
   writeCount?: number
 }>): React.JSX.Element {
   const stateLabel = props.statusLabel ?? (props.state === "ai_written"
     ? "AI 已写入"
     : props.state === "manual_modified" ? "人工已修改" : "未完成")
-  const confirmationLabel = props.label === "剧情梗概" && props.state !== undefined && props.state !== "empty"
-    ? (props.ready ? " · 已确认" : " · 待确认")
+  const confirmationLabel = props.label === "剧情梗概" && props.confirmed === true
+    ? " · 用户已确认"
     : ""
-  const synopsisPendingConfirmation = props.label === "剧情梗概" && props.state !== undefined && !props.ready
-  const writeStatus = props.writeCount === undefined || synopsisPendingConfirmation
+  const writeStatus = props.writeCount === undefined
     ? ""
     : ` · ${formatArtifactWriteStatus(props.writeCount)}`
   return <li data-state={props.state} data-ready={props.ready}>

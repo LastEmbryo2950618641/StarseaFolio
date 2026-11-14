@@ -184,6 +184,7 @@ describe("TurnOrchestrator", () => {
     ))
     expect(deaiEvidence?.semanticText).toContain("【描写·去AI味基线·本轮始终生效】")
     expect(deaiEvidence?.semanticText).toContain("眼中闪过")
+    expect(deaiEvidence?.semanticText).toContain("保留人物表达的目的、对象与因果")
     const ownerIds = interpretInput?.readEvidence.map((evidence) => evidence.ownerId) ?? []
     expect(ownerIds).not.toContain("表现输出/描写规则/默认描写规则.md")
     expect(ownerIds).not.toContain("表现输出/描写规则/自动.md")

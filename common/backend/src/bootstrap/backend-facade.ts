@@ -1192,7 +1192,7 @@ export class BackendFacade {
       })
       if (!workflowGate.readyForDraft) {
         throw new RevisionInvalidStateError(
-          `${workflowGate.blockedReasons.join("；")}。必须先完成剧情梗概、确认梗概并完成人物准备与剧情细纲，再开始正式推演`,
+          `${workflowGate.blockedReasons.join("；")}。必须先完成剧情梗概、剧情细纲和人物准备，再开始正式推演`,
         )
       }
       runtimeLog("debug", "backend-facade", "turn.sequence.assigned", {

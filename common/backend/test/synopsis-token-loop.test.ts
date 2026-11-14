@@ -384,12 +384,12 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       return { chapterDraftProposal: draft, continueTurn: true, choices }
     }, async (_harness, send) => {
       const rejected = vi.spyOn(ChapterRevisionService.prototype, "startForChapterSequence")
-        .mockRejectedValueOnce(new RevisionInvalidStateError("剧情梗概必须先确认"))
+        .mockRejectedValueOnce(new RevisionInvalidStateError("本章必须先完成剧情梗概"))
       try {
         const sent = await send()
         expect(sent.appendedDraft).toBeUndefined()
         expect(sent.autoContinue).toBeUndefined()
-        expect(sent.messages.at(-1)?.content).toContain("剧情梗概必须先确认")
+        expect(sent.messages.at(-1)?.content).toContain("本章必须先完成剧情梗概")
         expect(sent.messages.at(-1)?.content).not.toContain("已自动延后")
         expect(sent.messages.at(-1)?.choices?.length).toBeGreaterThan(0)
       } finally {

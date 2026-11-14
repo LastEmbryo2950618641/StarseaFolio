@@ -836,7 +836,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
       </div>
   const advancedContent = <div className="creation-desk-advanced-panel" role={mobile ? undefined : "menu"} data-testid="creation-desk-advanced-menu">
     {mobile ? modelControls : null}
-    <p className="creation-desk-advanced-hint">建议先与 Agent 讨论并确认梗概</p>
+    <p className="creation-desk-advanced-hint">先补齐剧情梗概与细纲，再开始正文</p>
     {props.chapterWorkflowEnabled !== true
       ? <p className="creation-desk-advanced-hint" data-testid="creation-desk-start-turn-disabled">正文推演工具已在项目设置中关闭；讨论 Agent 可用 chapterDraftProposal 写草稿</p>
       : <button type="button" role={mobile ? undefined : "menuitem"} className="creation-desk-start-turn" data-testid="creation-desk-start-turn"

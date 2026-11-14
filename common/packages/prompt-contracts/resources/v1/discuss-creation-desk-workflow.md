@@ -33,7 +33,7 @@
 
 用户贴出/导入完整章正文并要求总结入库时：
 
-1. 据该正文总结并写入 `synopsisBody`（及确认后的 `outlineBody`）；不要为「再写一遍正文」去调正文推演工具；
+1. 据该正文总结并写入 `synopsisBody`，有效梗概存在后写 `outlineBody`；确认按钮不是门禁，不要求用户复述固定说法；不要为「再写一遍正文」去调正文推演工具；
 2. 同轮用 `chapterDraftProposal`（`heading` + 用户正文 `body`）**直接新建草稿**；
 3. 再 describe+invoke 图治理工具 `publish_draft`，把该草稿转为正式正文；
 4. 仅当用户明确要求「按梗概重写/另推一版」时，才调用正文推演工具。
@@ -46,7 +46,7 @@
 
 1. 按**新梗概**覆盖已有细纲与正文 → `targetStage:"synopsis"`（清确认位、删细纲、正文改名为 `… [已回退].md` 移出表面）；
 2. 细纲仍可用、只要重写正文 → `targetStage:"outline"`（仅归档正文）；
-3. 工具结果返回后再写 `synopsisBody` / 等用户 `confirm_synopsis` / `outlineBody`；新正文：用户已给文用 `chapterDraftProposal`+图治理，否则正文推演→图治理。禁止在未 restage 时声称「已回退到梗概」或假装旧细纲/正文已失效；
+3. 工具结果返回后先写 `synopsisBody`，有效梗概存在后即可按用户要求写 `outlineBody`，无须再等固定确认口令；新正文：用户已给文用 `chapterDraftProposal`+图治理，否则正文推演→图治理。禁止在未 restage 时声称「已回退到梗概」或假装旧细纲/正文已失效；
 4. 若焦点不在目标章：输出 `focusChange` 切到该章（无需用户确认），再 restage；仅当用户必须在互斥章号中择一时才用 `set_focus` 按钮。
 
 ## 6. 工作区与暂存区（勿混用）

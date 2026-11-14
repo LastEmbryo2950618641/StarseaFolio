@@ -182,6 +182,10 @@ export type TurnPhaseInput = Readonly<{
     userEditedOutlineSinceAgent?: boolean
     currentWorkDisplayName?: string
     currentWorkDescription?: string
+    /** Content prerequisites; confirmation metadata does not control write permission. */
+    synopsisReady?: boolean
+    outlineReady?: boolean
+    /** Legacy confirmation metadata, not a writing gate. */
     synopsisConfirmed?: boolean
     creativeSetup?: import("../../chapters/creative-setup-state.js").CreativeSetupState
     workStyleGate?: Readonly<{

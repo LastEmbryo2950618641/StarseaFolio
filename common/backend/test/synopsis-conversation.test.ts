@@ -52,6 +52,261 @@ async function invoke<T>(harness: ChapterHarness, method: string, payload: Recor
 }
 
 describe("synopsis conversation", () => {
+  it("persists synopsis confirmation first and keeps contextual AI alternatives without another model call", async () => {
+    let calls = 0
+    const alternatives = [
+      { label: "先对照人物设定核验信使与主角的关系，再决定是否补设定", action: "continue_discuss" as const },
+      { label: "保留剧情事件，把对白改得更直白，避免仿古腔", action: "continue_discuss" as const },
+    ]
+    const model: AIModelPort = {
+      info: { provider: "test", model: "contextual-choices", available: true, contextWindowTokens: 64_000 },
+      async execute(request) {
+        calls += 1
+        synopsisConversationStreamHub.setTodos(request.projectId,
+          [{ id: "directions", content: "提出剧情备选方向", status: "completed" }], Date.now())
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+            reason: "Provide contextual alternatives.", selfReview: "No workflow gate was bypassed.",
+          artifact: { assistantMessage: "我会先回应你关注的人设和文风，也可以选择下面的处理方式。",
+              choices: alternatives, finalSelfReview: "The alternatives follow the user's current request." },
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+        }
+      },
+    }
+    const harness = await openChapterHarness("Contextual synopsis choices", { model })
+    temporaryRoots.push(harness.root)
+    try {
+      await prepareChapterPlanning(harness)
+      const listed = await invoke<{ session: { synopsisPath: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+      })
+      const outlinePath = listed.session.synopsisPath.replace("[剧情梗概].md", "[剧情细纲].md")
+      await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, outlinePath, "")
+      const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      try {
+        database.prepare(`update synopsis_conversation_sessions
+          set synopsis_confirmed_at_ms = NULL, focus_kind = 'plot_synopsis' where project_id = ?`)
+          .run(harness.projectId)
+      } finally {
+        database.close()
+      }
+      const sent = await invoke<{
+        messages: Array<{ role: string; choices?: Array<{ label: string; action: string }> }>
+        session: { synopsisConfirmedAtMs?: number }
+      }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+        message: "先别改剧情，帮我核对人设并提供更直白的笔风方案。", batchProceed: false,
+      })
+      expect(sent.messages.at(-1)?.choices).toEqual([
+        { label: "用这份梗概写细纲", action: "confirm_synopsis" }, ...alternatives,
+      ])
+      expect(sent.session.synopsisConfirmedAtMs).toBeUndefined()
+      expect(calls).toBe(1)
+    } finally {
+      await harness.container.close()
+    }
+  })
+
+  it("writes the outline from a natural-language request without a fixed confirmation phrase", async () => {
+    let calls = 0
+    const outlineBody = "# 第一章 雨夜旧站台 剧情细纲\n\n## 章定位\n从已给正文提取事件链并补全场景。\n\n## 分场节拍\n- 旧站台：林烬发现信件并决定追查。\n\n## 信息边界\n只揭示信件内容，不揭示寄件人。\n\n## 风险与待决\n无待决。\n"
+    const model: AIModelPort = {
+      info: { provider: "test", model: "freeform-outline", available: true, contextWindowTokens: 64_000 },
+      async execute(request) {
+        calls += 1
+        const planning = (request.input as { synopsisDiscuss?: {
+          synopsisReady?: boolean; outlineReady?: boolean; synopsisConfirmed?: boolean
+        } }).synopsisDiscuss
+        expect(planning).toMatchObject({ synopsisReady: true, outlineReady: false, synopsisConfirmed: false })
+        synopsisConversationStreamHub.setTodos(request.projectId,
+          [{ id: "outline", content: "提取正文并补全第一章细纲", status: "completed" }], Date.now())
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+            reason: "The synopsis exists and the user directly requested the outline.",
+            selfReview: "The outline follows the user's request.",
+            artifact: {
+              assistantMessage: "我按你给的正文整理并补全了第一章细纲。",
+              outlineBody,
+              choices: [
+                { label: "核对细纲是否遗漏正文里的重要事件", action: "continue_discuss" as const },
+                { label: "按当前细纲继续准备正文草稿", action: "continue_discuss" as const },
+              ],
+              finalSelfReview: "The outline is complete and grounded in the supplied text.",
+            },
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+        }
+      },
+    }
+    const harness = await openChapterHarness("Freeform outline request", { model })
+    temporaryRoots.push(harness.root)
+    try {
+      await prepareChapterPlanning(harness)
+      const listed = await invoke<{ session: { synopsisPath: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+      })
+      const outlinePath = listed.session.synopsisPath.replace("[剧情梗概].md", "[剧情细纲].md")
+      await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, outlinePath, "")
+      const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      try {
+        database.prepare(`update synopsis_conversation_sessions
+          set synopsis_confirmed_at_ms = NULL, focus_kind = 'plot_synopsis' where project_id = ?`)
+          .run(harness.projectId)
+      } finally {
+        database.close()
+      }
+
+      const sent = await invoke<{
+        appendedDraft?: unknown
+        session: { synopsisConfirmedAtMs?: number }
+      }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "直接提取第一章补全即可",
+        batchProceed: false,
+      })
+      expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(outlineBody)
+      expect(sent.appendedDraft).toBeUndefined()
+      expect(sent.session.synopsisConfirmedAtMs).toBeUndefined()
+      expect(calls).toBe(1)
+    } finally {
+      await harness.container.close()
+    }
+  })
+
+  it.each([
+    { writeOutline: false, label: "an existing outline" },
+    { writeOutline: true, label: "an outline saved earlier in the same response" },
+  ])("writes a draft from a natural-language request with $label", async ({ writeOutline }) => {
+    const outlineBody = "# 第一章 雨夜旧站台 剧情细纲\n\n## 章定位\n主角在旧站台发现信件。\n\n## 分场节拍\n林烬从长椅下找出信件，辨认故友字迹后决定追查。\n\n## 信息边界\n只揭示信件，不揭示寄件人去向。\n\n## 风险与待决\n无待决。\n"
+    const model: AIModelPort = {
+      info: { provider: "test", model: "freeform-draft", available: true, contextWindowTokens: 64_000 },
+      async execute(request) {
+        synopsisConversationStreamHub.setTodos(request.projectId,
+          [{ id: "draft", content: "按已写细纲生成正文草稿", status: "completed" }], Date.now())
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+            reason: "The outline exists and the user requested a draft.",
+            selfReview: "The draft follows the outline.",
+            artifact: {
+              assistantMessage: "我按现有细纲写好了第一章草稿。",
+              ...(writeOutline ? { outlineBody } : {}),
+              chapterDraftProposal: {
+                base: "body" as const,
+                heading: "第一章 雨夜旧站台",
+                body: "雨落在旧站台的铁皮顶上。林烬在长椅下找到一封被水浸湿的信。",
+              },
+              choices: [
+                { label: "继续按细纲补足场景", action: "continue_discuss" as const },
+                { label: "核对草稿与人物设定", action: "continue_discuss" as const },
+              ],
+              finalSelfReview: "The draft follows the existing outline.",
+            },
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+        }
+      },
+    }
+    const harness = await openChapterHarness("Freeform draft request", { model })
+    temporaryRoots.push(harness.root)
+    try {
+      await prepareChapterPlanning(harness)
+      if (writeOutline) {
+        const listed = await invoke<{ session: { synopsisPath: string } }>(harness, "synopsis.conversation.list", {
+          projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+        })
+        await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef,
+          listed.session.synopsisPath.replace("[剧情梗概].md", "[剧情细纲].md"), "")
+      }
+      const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      try {
+        database.prepare(`update synopsis_conversation_sessions
+          set synopsis_confirmed_at_ms = NULL, focus_kind = 'plot_synopsis' where project_id = ?`)
+          .run(harness.projectId)
+      } finally {
+        database.close()
+      }
+      const sent = await invoke<{
+        appendedDraft?: { draftVersionId: string }
+        session: { synopsisConfirmedAtMs?: number }
+      }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: writeOutline ? "请把第一章的细纲和正文草稿都补齐" : "请照这个细纲写出第一章正文草稿",
+        batchProceed: false,
+      })
+      expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
+      expect(sent.session.synopsisConfirmedAtMs).toBeUndefined()
+    } finally {
+      await harness.container.close()
+    }
+  })
+
+  it.each([
+    { name: "empty synopsis", synopsis: "", outline: "", proposeOutline: true },
+    { name: "heading-only synopsis", synopsis: "# 第一章 雨夜旧站台 剧情梗概\n", outline: "", proposeOutline: true },
+    { name: "heading-only outline", synopsis: undefined, outline: "# 第一章 雨夜旧站台 剧情细纲\n", proposeOutline: false },
+  ])("keeps the content prerequisite gate for $name", async (scenario) => {
+    const model: AIModelPort = {
+      info: { provider: "test", model: "missing-prerequisite", available: true, contextWindowTokens: 64_000 },
+      async execute(request) {
+        synopsisConversationStreamHub.setTodos(request.projectId,
+          [{ id: "check", content: "核对当前章节材料", status: "completed" }], Date.now())
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+            reason: "Exercise the application's prerequisite checks.", selfReview: "Prerequisites need checking.",
+            artifact: {
+              assistantMessage: "已核对当前章节材料。",
+              ...(scenario.proposeOutline ? { outlineBody: "# 剧情细纲\n\n林烬在旧站台发现故友留下的信。\n" } : {}),
+              chapterDraftProposal: { base: "body" as const, heading: "第一章 雨夜旧站台", body: "这份草稿不能越过前置内容门禁。" },
+              choices: [
+                { label: "先补齐缺少的章节材料", action: "continue_discuss" as const },
+                { label: "核对已有设定后再继续", action: "continue_discuss" as const },
+              ],
+              finalSelfReview: "The application must reject writes with missing prerequisites.",
+            },
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+        }
+      },
+    }
+    const harness = await openChapterHarness(`Prerequisite: ${scenario.name}`, { model })
+    temporaryRoots.push(harness.root)
+    try {
+      await prepareChapterPlanning(harness)
+      const listed = await invoke<{ session: { synopsisPath: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+      })
+      const synopsisPath = listed.session.synopsisPath
+      const outlinePath = synopsisPath.replace("[剧情梗概].md", "[剧情细纲].md")
+      if (scenario.synopsis !== undefined) {
+        await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, synopsisPath, scenario.synopsis)
+      }
+      await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, outlinePath, scenario.outline)
+      const sent = await invoke<{ appendedDraft?: unknown }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+        message: "我想继续，请根据当前材料处理。", batchProceed: false,
+      })
+      expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(scenario.outline)
+      expect(sent.appendedDraft).toBeUndefined()
+    } finally {
+      await harness.container.close()
+    }
+  })
+
   it("defers later chapter plans during ordinary batch progression", () => {
     const plans = [1, 3, 4].map((chapterSequence) => ({
       chapterSequence,

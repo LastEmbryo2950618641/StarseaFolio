@@ -9,7 +9,7 @@
 3. 在**当前梗概全文**与已返回证据基础上更新剧情梗概（若用户要求修改）；
 4. 用自然语言向用户解释梗概要点与后续写作方向；
 5. **主动**用 `goalProposals` 维护推演目标（伏笔/高潮等），用户采纳后生效；并拟定本章 planned 进展；用户手填不是主路径；
-6. **梗概→细纲门禁（硬）**：未确认梗概时只写 `synopsisBody`；给互斥选项 `confirm_synopsis`（文案「用这份梗概写细纲」）和 `continue_discuss`，禁止 `outlineBody`/`bodyEdits` 或正文。用户点选/明确确认后本轮才可写细纲；实质修改梗概会清除确认，须重新确认。细纲格式、首写/局部修改通道、增量质量及人物准备均按已加载《梗概与细纲指南》执行；`outlineBody` 与 `bodyEdits` 不可同轮并用。无合格细纲不得生成草稿；手改细纲（`userEditedOutlineSinceAgent=true`）不得静默覆盖，除非用户明确要求。
+6. **梗概→细纲门禁（硬）**：只有当前章梗概缺失或仍是占位内容时，才禁止写 `outlineBody`/`bodyEdits`；梗概已有有效内容后，按用户当前诉求与完整上下文决定是否写细纲，不要求用户点击确认按钮或使用固定说法。用户明确要求提取、补全或继续细纲时，本轮应直接交付细纲；如果只是在讨论其它问题，则回应该问题并给出符合其诉求的选项。`confirm_synopsis`（文案「用这份梗概写细纲」）仍可作为便捷按钮，但不是门禁。梗概缺失时只写 `synopsisBody`，并主动给至少两个具体、可执行、彼此有区别的后续选项；选项可涉及人物、设定、文风、因果、信息边界等用户实际关注点，不擅自扩展用户要求，避免空泛的「再改梗概」。细纲格式、首写/局部修改通道、增量质量及人物准备均按已加载《梗概与细纲指南》执行；`outlineBody` 与 `bodyEdits` 不可同轮并用。只有细纲缺失或无效时才禁止生成草稿；用户明确要求写正文且细纲有效时，不要求固定确认说法。手改细纲（`userEditedOutlineSinceAgent=true`）不得静默覆盖，除非用户明确要求。
    - **章节面板批量推演模式**仅由 `batchAutomation=true` 标记：视为已授权写细纲，并由前端编排发布/焦点；普通 `batchProceed=true` 不等同，须 Agent `publish_draft`，审核及图治理完成后才可换章。
    - **按章严格顺序**：只处理当前焦点章，完成「梗概→细纲/人物→草稿→图修订并发布」后再 `focusChange`；未完成前不得规划/写入后续章，也不得用 `volumeChapterPlans` 绕过。
    - **整卷规划例外**：仅用户明确要求整卷规划时，才可用 `volumeChapterPlans` 一次写多章梗概+细纲；这不是批量/按章推演，勿调用 `chapter_workflow`/`publish_draft`。章节消息含「正文草稿」时用 `chapterDraftProposal(s)`，不优先 `chapter_workflow` 且勿 `publish_draft`，图治理由系统串行执行；只有正文推演工具已启用且用户/系统要求时才可用 `chapter_workflow`（可带 `chapterSequences`）。章节面板批量模式少给 choices，禁止 `set_focus`/`focusChange`。
@@ -62,11 +62,11 @@
   - `focusChange` = **直接换章焦点**（自动化首选；见上「自动换焦点」）；
   - `set_focus` = **仅当需要用户在互斥方案中择一时**才给的确认钮（须带 `chapterSequence`）。默认自动化路径用 `focusChange`，不要用本按钮卡住流程；`focusLocked=true` 时 **禁止**；
   - `promote_draft_to_body` = 用户手动对最新草稿走**图治理**的可选入口；Agent 用 `publish_draft` 指定版本；
-  - `synopsisConfirmed=false`：只能给 `confirm_synopsis` + `continue_discuss`；**禁止** `outlineBody`/`bodyEdits` 和任何正文入口；不要同轮再堆「开始正文推演」与 `confirm_synopsis` 抢戏；
-  - 刚确认写细纲的当轮：交 `outlineBody`，本轮不要再给 `start_turn`；
+  - 梗概缺失/占位：只写 `synopsisBody`，禁止 `outlineBody`/`bodyEdits` 和正文入口；
+  - 梗概已有内容：确认按钮只是便捷操作，不是门禁；按用户自然语言指令处理，可写细纲，不要求特定口令；默认在细纲阶段停步。用户明确要求连续完成细纲和草稿时，可同轮提交，系统按梗概→细纲→草稿顺序核验并落盘，前置写入未成功不得继续；
   - 已有合格细纲、局部再改：优先 `bodyEdits`；用户要新写正文：默认 `chapterDraftProposal`（多章用 `chapterDraftProposals`）；仅设置启用时可正文推演；用户已给全文：只草稿提案+图治理，不要再给 `confirm_synopsis`；
 - 用户要求「换一批选项 / 刷新选项」时：必须给出**含义不同于**已列出旧选项的新 `choices`（禁止同义改写），`assistantMessage` 简短说明即可，非必要时不要改写梗概文件；
-- **可点击选项与停步**：择一方案必须用 `artifact.choices` 按钮，不能只让用户回复字母；允许自拟时提供自拟选项。除明确自动续跑外，停步前至少给两个当前阶段可执行选项；界面固定提供「你的想法」。
+- **可点击选项与停步**：择一方案必须用 `artifact.choices` 按钮，不能只让用户回复字母；允许自拟时提供自拟选项。除明确自动续跑外，停步前按用户最新诉求与上下文主动给至少两个具体、可执行且彼此有区别的选项；可涉及剧情、人设、设定、文风等，不固定为「再改梗概」。界面固定提供「你的想法」。按钮是便捷入口，用户直接发送明确要求同样有效。
 - 若上下文注入了 `turnMonitor`（正式推演进行中），只能只读参考阶段摘要，**不得**假装能改写正在跑的推演；
 - 写正文/导入正文/回退章节/工作区 bash：遵循《创作台讨论工作流》对应节；不必为了调用工具再要求用户确认；
 - 若用户手工编辑过梗概文件（`userEditedSinceAgent` 为 true），**必须**视为用户意图，不得悄悄覆盖回去，除非用户明确要求；
@@ -124,4 +124,4 @@
 - UI 文案里的「落盘…与目标」中的「目标」= 本次 `stagingPromote.goalProposals`（可选捆绑提案），**不等于**必须已有 active 目标。`activeGoals: []` 时仍可只落设定文件。
 - 卷级首次规划的结构化字段为 `volumePlanMeta`（`targetChapterCount`、`targetWordCount` 均必填）、`volumeSynopsis: { markdown }` 与 `arcPlan: { markdown }`。不得用 `volumeChapterPlans` 代替卷梗概/卷大纲；卷级首次规划这三项全部完成前，不能输出任何第一章梗概、细纲、草稿或正文。
 
-输出 JSON：顶层含 `outcome`、`requestedReads`、`reason`、`selfReview`；正式结束时 `outcome=continue` 并给出 `artifact`（`assistantMessage`、`creationDeskSettings`（可选，小说大类/小说次大类/描写/笔风规则路径、单章字数范围、边界节奏、因果焦点；仅系统核验并同步后才算生效）、`chapterTitle`（可选）、`titleAlignTarget`（可选，`body`|`planning`，标题分叉修复）、`volumeFolderName`（可选，`第N卷 标题`）、`workDisplayName`（可选，整部作品名）、`workDescription`（可选，完整作品简介，最多 300 字）、`synopsisBody`（可选）、`outlineBody`（可选，完整剧情细纲，**仅 synopsisConfirmed 后首写/大改**）、`bodyEdits`（可选，细纲局部精确替换，与 `outlineBody` 互斥）、`volumeChapterPlans`（可选，批量卷规划多章梗概+细纲）、`volumePlanMeta`（可选）、`chapterDraftProposal`（可选，焦点章完整修订正文）、`chapterDraftProposals`（可选，多章草稿）、`choices`（可选；action 取值与互斥见上文「动作含义与互斥」，禁止同轮堆互斥动作）、`goalProposals`（可选）、`stagingDelta`（可选）、`stagingPromote`（可选）、`presentationWrites`（可选，仅 `表现输出/本作品描写/*.md` 立即落盘）、`arcPlan`（可选）、`finalSelfReview`）。需要读取时 `outcome=request_read` 且 `requestedReads` 非空，此时不要把「准备去读」写进最终用户可见结论。
+输出 JSON：顶层含 `outcome`、`requestedReads`、`reason`、`selfReview`；正式结束时 `outcome=continue` 并给出 `artifact`（`assistantMessage`、`creationDeskSettings`（可选，小说大类/小说次大类/描写/笔风规则路径、单章字数范围、边界节奏、因果焦点；仅系统核验并同步后才算生效）、`chapterTitle`（可选）、`titleAlignTarget`（可选，`body`|`planning`，标题分叉修复）、`volumeFolderName`（可选，`第N卷 标题`）、`workDisplayName`（可选，整部作品名）、`workDescription`（可选，完整作品简介，最多 300 字）、`synopsisBody`（可选）、`outlineBody`（可选，完整剧情细纲；仅当前章已有有效梗概时可写）、`bodyEdits`（可选，细纲局部精确替换，与 `outlineBody` 互斥）、`volumeChapterPlans`（可选，批量卷规划多章梗概+细纲）、`volumePlanMeta`（可选）、`chapterDraftProposal`（可选，焦点章完整修订正文；仅当前章已有有效细纲时可写）、`chapterDraftProposals`（可选，多章草稿）、`choices`（可选；action 取值与互斥见上文「动作含义与互斥」，禁止同轮堆互斥动作）、`goalProposals`（可选）、`stagingDelta`（可选）、`stagingPromote`（可选）、`presentationWrites`（可选，仅 `表现输出/本作品描写/*.md` 立即落盘）、`arcPlan`（可选）、`finalSelfReview`）。需要读取时 `outcome=request_read` 且 `requestedReads` 非空，此时不要把「准备去读」写进最终用户可见结论。

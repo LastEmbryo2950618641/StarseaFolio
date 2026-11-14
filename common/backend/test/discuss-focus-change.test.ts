@@ -46,6 +46,64 @@ describe("discuss focusChange", () => {
     ])
   })
 
+  it("offers the synopsis confirmation first without requiring it to advance", () => {
+    const directions = [
+      { label: "先核对信使与主角现有人设是否冲突，再决定是否补设定", action: "continue_discuss" as const },
+      { label: "保持事件不变，把对白和叙述改得更直白自然", action: "continue_discuss" as const },
+    ]
+    expect(filterDiscussChoices(directions, {
+      focusLocked: false, synopsisReady: true, synopsisConfirmed: false,
+      offerSynopsisConfirmation: true,
+    })).toEqual([
+      { label: "用这份梗概写细纲", action: "confirm_synopsis" },
+      ...directions,
+    ])
+  })
+
+  it("pins a single confirmation without replacing or limiting AI directions", () => {
+    const directions = Array.from({ length: 4 }, (_, index) => ({
+      label: `贴合当前用户要求的方案${String(index + 1)}`, action: "continue_discuss" as const,
+    }))
+    expect(filterDiscussChoices([
+      directions[0]!,
+      { label: "确认当前梗概", action: "confirm_synopsis" },
+      ...directions.slice(1),
+      { label: "开始写细纲", action: "confirm_synopsis" },
+    ], {
+      focusLocked: false, synopsisReady: true, synopsisConfirmed: false,
+      offerSynopsisConfirmation: true,
+    })).toEqual([
+      { label: "用这份梗概写细纲", action: "confirm_synopsis" },
+      ...directions,
+    ])
+  })
+
+  it("offers confirmation even when the model omitted choices", () => {
+    expect(filterDiscussChoices(undefined, {
+      focusLocked: false, synopsisReady: true, synopsisConfirmed: false,
+      offerSynopsisConfirmation: true,
+    })).toEqual([{ label: "用这份梗概写细纲", action: "confirm_synopsis" }])
+  })
+
+  it.each([
+    { synopsisReady: false, synopsisConfirmed: false, offerSynopsisConfirmation: true },
+    { synopsisReady: true, synopsisConfirmed: true, offerSynopsisConfirmation: true },
+    { synopsisReady: true, synopsisConfirmed: false, offerSynopsisConfirmation: false },
+  ])("does not force confirmation for other workflow states: %o", (state) => {
+    expect(filterDiscussChoices(undefined, { focusLocked: false, ...state })).toBeUndefined()
+  })
+
+  it("allows the next workflow action when its prerequisite documents exist", () => {
+    expect(filterDiscussChoices([
+      { label: "开始推演", action: "start_turn" },
+    ], {
+      focusLocked: false,
+      synopsisReady: true,
+      synopsisConfirmed: false,
+      outlineReady: true,
+    })).toEqual([{ label: "开始推演", action: "start_turn" }])
+  })
+
   it("prompts Auto/Accept to use focusChange instead of confirmation buttons", () => {
     expect(discussAgentModePromptAppendix("auto", { batchProceed: true })).toContain("focusChange")
     expect(discussAgentModePromptAppendix("accept_edits", { batchProceed: true })).toContain("换章用 focusChange")

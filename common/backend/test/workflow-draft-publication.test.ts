@@ -3,6 +3,7 @@ import { existsSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import Database from "better-sqlite3"
 import { PROTOCOL_VERSION, type BackendMethod, type RevisionDraftVersion, type ChapterRevision, type ChapterRevisionReadResult } from "@starseafolio/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
@@ -79,7 +80,7 @@ describe("workflow drafts and publication", () => {
     }
   }, 30000)
 
-  it("enforces synopsis confirmation and outline before drafting, then reviews before publication", async () => {
+  it("requires synopsis and outline content before drafting, then reviews before publication", async () => {
     const harness = await openChapterHarness("Workflow gate")
     const call = async <T>(method: BackendMethod, payload = {}): Promise<T> => {
       const response = await harness.facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method,
@@ -96,7 +97,7 @@ describe("workflow drafts and publication", () => {
         draft: { contentState: string }
       }>("chapter.workflowGate.get", { chapterSequence: 1 })
       expect(blocked.readyForDraft).toBe(false)
-      expect(blocked.blockedReasons).toHaveLength(3)
+      expect(blocked.blockedReasons).toHaveLength(2)
       expect(blocked).toMatchObject({
         synopsis: { contentState: "empty", ready: false },
         outline: { contentState: "empty", ready: false },
@@ -120,6 +121,15 @@ describe("workflow drafts and publication", () => {
       expect(ready.outline.path).toBeDefined()
       expect(ready.synopsis.contentState).toBe("manual_modified")
       expect(ready.outline.contentState).toBe("manual_modified")
+      const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      try {
+        database.prepare("update synopsis_conversation_sessions set synopsis_confirmed_at_ms = NULL where project_id = ?")
+          .run(harness.projectId)
+      } finally {
+        database.close()
+      }
+      expect(await call<{ readyForDraft: boolean }>("chapter.workflowGate.get", { chapterSequence: 1 }))
+        .toMatchObject({ readyForDraft: true })
       await harness.container.workspace.saveSynopsisMarkdown(
         harness.workspaceRootRef,
         ready.outline.path!,

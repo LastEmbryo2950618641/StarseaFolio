@@ -171,7 +171,7 @@ const descriptions = {
     },
     writingGuide: [
       "【正文推演工具】把情节推演成**草稿**（不是正式正文）。默认作用于焦点章。",
-      "userInput 写清事件、人物动机、因果与信息边界、场景起止、预期结局和要改进之处；必须先有当前章已确认的剧情梗概、细纲和人物准备，再参考这些材料及证据。heading 为标题（单章时）。",
+      "userInput 写清事件、人物动机、因果与信息边界、场景起止、预期结局和要改进之处；必须先有当前章有效的剧情梗概、细纲和人物准备，再参考这些材料及证据；梗概确认状态不作为门禁。heading 为标题（单章时）。",
       "批量：可传 chapterSequences（绝对章号数组），一次 invoke 为多章各生成草稿；勿在同轮 publish_draft。",
       "只追加草稿版本，不修订图、不覆盖正式正文；可多次调用比较草稿。",
       "若用户已提供完整正文、只需落库并图治理：不要调用本工具，改用 `chapterDraftProposal` / `chapterDraftProposals`，再图治理。",
@@ -195,7 +195,7 @@ const descriptions = {
     },
     writingGuide: [
       "把当前焦点章的工作区表面回退到更早阶段，以便按新方向重写。",
-      "targetStage=synopsis：清零梗概确认、删除本章细纲、把正式正文改名为「… [已回退].md」移出树表面；之后须重写 synopsisBody，再经用户 confirm_synopsis，再用 outlineBody；需要新正文时：要么正文推演工具生成草稿，要么 chapterDraftProposal 直接落用户正文为草稿，再图治理工具发布。",
+      "targetStage=synopsis：清零梗概确认、删除本章细纲、把正式正文改名为「… [已回退].md」移出树表面；之后须重写 synopsisBody，有效梗概存在后即可写 outlineBody，不要求用户使用固定确认说法；需要新正文时：要么正文推演工具生成草稿，要么 chapterDraftProposal 直接落用户正文为草稿，再图治理工具发布。",
       "targetStage=outline：仅归档正式正文，保留梗概与细纲；适合「细纲仍可用、只要重写正文」。",
       "reason 写清用户意图（如「第一章按新梗概重写，覆盖旧细纲与正文」）。",
       "不可改章节号；图/世界线历史 checkout 不在本工具范围内。调用后根据返回的 cleared/archived 路径再继续写入，不能假装旧细纲/正文仍是权威表面。",

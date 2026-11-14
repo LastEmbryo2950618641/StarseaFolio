@@ -238,8 +238,8 @@ describe("renderer workbench UI contract", () => {
       },
       draft: { contentState: "empty" },
       body: { markdown: "", writeCount: 0 },
-      readyForDraft: false,
-      blockedReasons: ["剧情梗概必须先确认"],
+      readyForDraft: true,
+      blockedReasons: [],
     }
 
     const html = renderToStaticMarkup(React.createElement(ChapterWorkflowStageList, { workflowGate }))
@@ -247,8 +247,7 @@ describe("renderer workbench UI contract", () => {
     expect(html).toContain('data-testid="chapter-workflow-stage-list"')
     expect(html).not.toContain("chapter-artifact-write-counts")
     expect(html.match(/<li/g)).toHaveLength(4)
-    expect(html).toContain("AI 已写入 · 待确认")
-    expect(html).not.toContain("AI 已写入 · 待确认 · 首次写入")
+    expect(html).toContain("AI 已写入 · 首次写入")
     expect(html).toContain("人工已修改 · 已更新 2 次")
     expect(html).toContain("草稿")
     expect(html).toContain("正文")

@@ -25,6 +25,9 @@ describe("skill selective loading", () => {
     const system = await adapter.loadTurnSystemRules()
     expect(system.text).toContain("平台 Skill 索引")
     expect(system.text).not.toContain("# 去 AI 味（deslop）")
+    expect(system.text).toContain("不得把明确意思改写成抽象概念、象征或口号")
+    expect(system.text).toContain("使用现代中文，不擅自转成古白话、文言句法或仿古腔")
+    expect(system.text).toContain("把人变成规矩")
 
     const skill = await adapter.loadSkill("webnovel-deslop", { includeReferences: false })
     expect(skill.skillId).toBe("webnovel-deslop")
@@ -35,6 +38,14 @@ describe("skill selective loading", () => {
     for (const id of defaultSkillIdsForPhase("synopsis_discuss")) {
       expect(pack.text).toContain(`【skill:${id}】`)
     }
+  })
+
+  it("loads synopsis choices instructions that follow the user's actual request", async () => {
+    const adapter = new NodePromptResourceAdapter(packageRoot)
+    const phase = await adapter.loadPhase("synopsis_discuss")
+    expect(phase.text).toContain("不要求用户点击确认按钮或使用固定说法")
+    expect(phase.text).toContain("用户明确要求提取、补全或继续细纲时")
+    expect(phase.text).toContain("但不是门禁")
   })
 
   it("resolves whitelisted skill scripts only", () => {
