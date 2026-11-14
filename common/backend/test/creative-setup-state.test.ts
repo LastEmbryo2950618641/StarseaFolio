@@ -241,17 +241,51 @@ describe("creative setup prompts and serialization", () => {
     const prompt = buildCreativeSetupPrompt(openCreativeSetupQuestion(state, "appearance-question", 4))
     expect(prompt).not.toContain("appearance-question")
     expect(prompt).toContain("appearance")
-    expect(prompt).toContain("外冷内热，守诺")
+    expect(prompt).toContain("input.synopsisDiscuss.creativeSetup.answers")
+    expect(prompt).toContain("性格爱好")
     expect(prompt).toContain("continue_discuss")
     expect(prompt).toContain("2-4")
     expect(prompt).toContain("题材")
     expect(prompt).toContain("你的想法")
     expect(prompt).toContain("UI")
-    expect(prompt).toContain("不可修改")
+    expect(prompt).toContain("不得擅自")
     expect(prompt).toContain("禁止")
     expect(prompt).toContain("工具")
     expect(buildCreativeSetupPrompt(initialCreativeSetupState("volume:第一卷", 1), "瘟疫之城")).toContain("瘟疫之城")
     expect(() => buildCreativeSetupPrompt(completed("volume:第一卷"))).toThrow()
+  })
+
+  it("uses the complete current request as authority instead of truncated copies or historical AI proposals", () => {
+    const state = initialCreativeSetupState("volume:第一卷", 1)
+    state.answers = {
+      opening: "按照我提供的章节来，保持已确认情节。",
+      climaxes: "等待我提供后续章节，再从原文提取高潮。",
+      ending: `${"逐步整合各城邦并完成联盟协商。".repeat(25)}本卷结尾必须统一全境并建立人类帝国。`,
+    }
+    const before = JSON.stringify(state)
+    const prompt = buildCreativeSetupPrompt(state)
+    expect(prompt).toContain("input.synopsisDiscuss.creativeSetup.answers")
+    expect(prompt).toContain("历史 AI 提案")
+    expect(prompt).toContain("未经用户确认")
+    expect(prompt).toContain("ending 必须在当前卷结束前达成")
+    expect(prompt).toContain("不得降格为全书远期目标或挪到后续卷")
+    expect(prompt).toContain("章节数")
+    expect(prompt).toContain("等待用户提供原文")
+    expect(prompt).not.toContain(state.answers.ending.slice(0, 180))
+    expect(prompt).not.toContain("…")
+    expect(JSON.stringify(state)).toBe(before)
+  })
+
+  it("allows newer explicit user revisions to supersede confirmed answers in both interview phases", () => {
+    for (const state of [initialCreativeSetupState("protagonist", 1),
+      initialCreativeSetupState("volume:第一卷", 1), completed()]) {
+      const prompt = buildCreativeSetupPrompt(state)
+      expect(prompt).toContain("用户最新明确修订优先于旧答案、旧设定和 AI 提案")
+      expect(prompt).toContain("仅更新受影响内容")
+      expect(prompt).toContain("含义不清")
+      expect(prompt).not.toContain("七项均不可修改")
+      expect(prompt).not.toContain("用户核心不可修改")
+    }
   })
 
   it("requests only a protagonist supplement after all seven answers without shortening or changing the core", () => {
@@ -266,7 +300,7 @@ describe("creative setup prompts and serialization", () => {
     expect(prompt).toContain("关系")
     expect(prompt).toContain("题材")
     expect(prompt).toContain("仅")
-    expect(prompt).toContain("不可修改")
+    expect(prompt).toContain("不得擅自")
     expect(prompt).toContain("禁止")
     expect(prompt).toContain("工具")
     expect(prompt).toContain("章节")
@@ -305,7 +339,7 @@ describe("creative setup prompts and serialization", () => {
     const markdown = serializeProtagonistCreativeSetupMarkdown(state, { aiAdditions: "他习惯在雨天整理药箱。" })
     expect(markdown).toContain("<!-- creative-setup:protagonist:user-core:start -->")
     expect(markdown).toContain("<!-- creative-setup:protagonist:user-core:end -->")
-    expect(markdown).toContain("用户核心设定（不可修改）")
+    expect(markdown).toContain("用户核心设定（AI 不得擅自修改，用户可修订）")
     expect(markdown).toContain("外冷内热，守诺")
     expect(markdown).toContain("二十七岁")
     expect(markdown).toContain("AI 补充")

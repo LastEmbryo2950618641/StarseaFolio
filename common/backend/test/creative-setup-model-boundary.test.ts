@@ -50,6 +50,8 @@ describe("creative setup real model boundary", () => {
     let planningStep = 0
     const complete = vi.fn<DeepSeekCompletionClient["complete"]>((input) => {
       completions.push(input.messages.map(message => ({ ...message })))
+      expect(input.messages.some(message => message.content.includes("用户最新明确的创作或修订指令"))).toBe(true)
+      expect(input.messages.some(message => message.content.includes("同步更新受影响的设定、卷信息、梗概和大纲"))).toBe(true)
       const discussion = latestDiscussion(input.messages)
       const setup = discussion.creativeSetup
       let artifact: Record<string, unknown>
@@ -60,6 +62,20 @@ describe("creative setup real model boundary", () => {
           "answers", ...(setup.pendingQuestion === undefined ? [] : ["pendingQuestion"]), "scope", "status",
         ].sort())
         if (setup.pendingQuestion !== undefined) expect(Object.keys(setup.pendingQuestion)).toEqual(["field"])
+        if (setup.status === "collecting") {
+          const instructions = input.messages.filter(message => message.content.includes("创作设定访谈："))
+          const current = instructions.at(-1)?.content ?? ""
+          expect(current).toContain("input.synopsisDiscuss.creativeSetup.answers")
+          if (setup.scope.startsWith("volume:")) {
+            expect(current).toContain("ending 必须在当前卷结束前达成")
+            expect(current).toContain("历史 AI 提案")
+            // Long confirmed answers must reach the real provider request intact,
+            // without appending another large or truncated copy in the phase prompt.
+            for (const answer of Object.values(setup.answers)) {
+              expect(current).not.toContain(answer)
+            }
+          }
+        }
         artifact = setup.status === "awaiting_write" ? {
           assistantMessage: "补充与已确认核心一致的姓名、能力和关系。",
           protagonistSupplementMarkdown: "## AI 补充\n林烬善于修补矿具，与矿友沈砚相互照应。",
@@ -187,7 +203,8 @@ describe("creative setup real model boundary", () => {
       const unplanned = await invoke<{ content: string }>(h, "workspace.read", { relativePath: planPath }).catch(() => undefined)
       expect(unplanned).toBeUndefined()
 
-      const volumeAnswers = ["矿场暴雨之夜被迫逃亡", "夺回信物；山门试炼反败为胜", "通过试炼进入宗门，保留父母线索", "无支线"]
+      const volumeAnswers = ["矿场暴雨之夜被迫逃亡", "夺回信物；山门试炼反败为胜",
+        `${"追查父母线索并与各宗门协商。".repeat(20)}本卷结束时建立宗门联盟并统一北境。`, "无支线"]
       for (const [index, field] of volumeCreativeSetupFields.entries()) {
         const id = await assertQuestion(result, volumeScope, field.key)
         const answer = volumeAnswers[index]
