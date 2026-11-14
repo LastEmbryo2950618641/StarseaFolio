@@ -36,6 +36,7 @@ import {
   fixedWorkspaceEntries,
   deriveRetiredChapterBodyPath,
   isChapterBodyMarkdownPath,
+  isBookCoverInventoryEntry,
   isRetiredChapterBodyMarkdownPath,
   isSharedPresentationPath,
   isChapterPlanningMarkdownPath,
@@ -270,7 +271,9 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     return {
       workspaceRootRef: root,
       ...(this.sharedPresentationRoot === undefined ? {} : { sharedPresentationRoot: this.sharedPresentationRoot }),
-      inventory,
+      // Validate every scanned entry first; only known cover assets are omitted
+      // from the document inventory shared by the UI, AI catalog and history.
+      inventory: inventory.filter((entry) => !isBookCoverInventoryEntry(entry.path, entry.kind)),
       issues,
       baseRulesDigest,
     }

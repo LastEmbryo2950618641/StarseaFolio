@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -10,6 +10,7 @@ import {
   NodeInternalStoreAdapter,
   NodeWorkspaceAdapter,
   NodeWorkspaceCatalogAdapter,
+  NodeWorkspaceSnapshotAdapter,
   openProjectDatabase,
   SqliteEvidenceStore,
   SqliteProjectRepository,
@@ -103,6 +104,34 @@ describe("workspace catalog", () => {
     expect(second.digest).not.toBe(first.digest)
     expect(second.entries.find((entry) => entry.relativePath === "设定集/角色/主角.md")?.digest)
       .not.toBe(first.entries.find((entry) => entry.relativePath === "设定集/角色/主角.md")?.digest)
+
+    // Replacing a cover must not put app assets in the writing tree, AI catalog
+    // or history's Markdown reader, nor change the document catalog digest.
+    const history = new NodeWorkspaceSnapshotAdapter(workspace)
+    const beforeCover = await history.capture(workspaceRoot)
+    mkdirSync(join(workspaceRoot, ".worldseed"))
+    const coverPath = join(workspaceRoot, ".worldseed", "cover.jpg")
+    const coverBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 1, 2, 3])
+    writeFileSync(coverPath, coverBytes)
+    const report = await workspace.validate(workspaceRoot)
+    expect(report.issues).toEqual([])
+    expect(report.inventory.some((entry) => entry.path.startsWith(".worldseed"))).toBe(false)
+    const withCover = await catalog.createSnapshot({
+      snapshotId: ids.snapshot1, projectId: ids.project, workspaceRootRef: workspaceRoot, generatedAtMs: 300,
+    })
+    expect(withCover.entries).toEqual(second.entries)
+    expect(withCover.digest).toBe(second.digest)
+    expect(await history.capture(workspaceRoot)).toEqual(beforeCover)
+    await history.restore(workspaceRoot, beforeCover)
+    expect(readFileSync(coverPath)).toEqual(coverBytes)
+
+    writeFileSync(join(workspaceRoot, ".worldseed", "unexpected.md"), "not a workspace document")
+    expect((await workspace.validate(workspaceRoot)).issues).toContainEqual(expect.objectContaining({
+      code: "unexpected_root_entry", path: ".worldseed/unexpected.md",
+    }))
+    await expect(catalog.createSnapshot({
+      snapshotId: ids.snapshot1, projectId: ids.project, workspaceRootRef: workspaceRoot, generatedAtMs: 400,
+    })).rejects.toThrow("invalid workspace")
   })
 })
 

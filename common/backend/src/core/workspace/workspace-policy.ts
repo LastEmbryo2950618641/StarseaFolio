@@ -47,7 +47,8 @@ export class WorkspacePolicyError extends Error {}
 const BASE_RULES_PREFIX = "世界推演规则/基础规则"
 const BOOK_COVER_PATH_PATTERN = /^\.worldseed\/cover\.(?:png|jpg|jpeg|webp|gif|bmp)$/iu
 
-function isBookCoverInventoryEntry(path: string, kind: WorkspaceInventoryEntry["kind"]): boolean {
+/** Valid app-owned assets, not writing documents or AI/history evidence. */
+export function isBookCoverInventoryEntry(path: string, kind: WorkspaceInventoryEntry["kind"]): boolean {
   return path === ".worldseed" ? kind === "directory" : kind === "file" && BOOK_COVER_PATH_PATTERN.test(path)
 }
 
