@@ -8,4 +8,4 @@
 
 `corepack pnpm package:exe` 是同一打包入口，会先构建共享后端和 Electron，再生成 `win/desktop/release/Starsea-Folio-<version>-Setup.exe` 与 `Starsea-Folio-<version>-Portable.exe`。`--dir` 仅生成未安装目录。
 
-本地构建需要 Windows、Node.js 22 和 Visual Studio 2022 Build Tools（C++ 桌面开发与 Windows SDK），用于编译 SQLite 原生依赖；首次打包需联网下载 Electron 和内置抓取运行时。命令不会自动发布安装包。GitHub Actions 的 **Build EXE and APK** 提供已配置编译工具的双平台构建环境，产物在该次运行的 Artifacts 中下载；**Release Windows** 保留正式发布入口。
+本地构建需要 Windows、Node.js 22 和 Visual Studio 2022 Build Tools（C++ 桌面开发与 Windows SDK），用于编译 SQLite 原生依赖；首次打包需联网下载 Electron。小说书库工具使用仓库内固定版本的 nikowenku-archive 源码，直接随安装版与便携版打包，不再下载额外抓取运行时。命令不会自动发布安装包。GitHub Actions 的 **Build EXE and APK** 提供已配置编译工具的双平台构建环境，产物在该次运行的 Artifacts 中下载；**Release Windows** 保留正式发布入口。

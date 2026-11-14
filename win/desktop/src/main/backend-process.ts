@@ -13,7 +13,7 @@ import type { RuntimeDiagnosticsConfig } from "@starseafolio/config"
 export type BackendProcessOptions = Readonly<{
   applicationDataRoot: string
   promptPackageRoot: string
-  lncrawlRuntimeDirectory?: string
+  nikowenkuRuntimeDirectory?: string
   diagnostics: RuntimeDiagnosticsConfig
 }>
 

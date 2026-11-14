@@ -81,7 +81,7 @@ const CHAPTER_SEQ_IN_TODO = /第\s*(\d+)\s*章/u
 
 /** Todo bootstrap and read-only reference retrieval do not authorize story writes. */
 export function isDiscussTodoBootstrapTool(name: string): boolean {
-  return name === "todo_write" || name === "original_work_search" || name === "original_work_crawl"
+  return name === "todo_write" || name === "original_work_search" || name === "original_work_download"
 }
 
 /**

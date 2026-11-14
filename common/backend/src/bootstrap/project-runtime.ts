@@ -82,7 +82,7 @@ import { protagonistCreativeSetupMarkdownHasContent } from "../application/chapt
 import { runtimeLog } from "../infrastructure/diagnostics/index.js"
 import { graphRevisionProgress } from "../application/chapters/graph-revision-progress.js"
 import { createGraphRevisionModel } from "../application/chapters/graph-revision-model.js"
-import { LncrawlReferenceService } from "../infrastructure/web-research/lncrawl-reference-service.js"
+import { NikowenkuReferenceService } from "../infrastructure/web-research/nikowenku-reference-service.js"
 import { deductionTaskProgress } from "../application/turns/deduction-task-progress.js"
 import type { HistoryBranchSummary, HistoryCheckoutResult, HistoryEntrySummary, HistoryOverview, HistoryRetentionPreview } from "@starseafolio/contracts"
 
@@ -94,7 +94,7 @@ export class ProjectRuntime {
     done: Promise<void>
     activity?: GraphRevisionTask["activity"]
   }>()
-  private readonly lncrawl: LncrawlReferenceService
+  private readonly nikowenku: NikowenkuReferenceService
 
   public async assertWorkStyleGateReady(): Promise<void> {
     const conversation = new SqliteSynopsisConversationRepository(this.database)
@@ -381,10 +381,10 @@ export class ProjectRuntime {
     private readonly internalStorePort: InternalStorePort,
     private readonly promptPackageRoot: string,
     applicationDataRoot: string,
-    lncrawlRuntimeDirectory?: string,
+    nikowenkuRuntimeDirectory?: string,
   ) {
-    this.lncrawl = new LncrawlReferenceService(applicationDataRoot, {
-      ...(lncrawlRuntimeDirectory === undefined ? {} : { runtimeDirectory: lncrawlRuntimeDirectory }),
+    this.nikowenku = new NikowenkuReferenceService(applicationDataRoot, {
+      ...(nikowenkuRuntimeDirectory === undefined ? {} : { runtimeDirectory: nikowenkuRuntimeDirectory }),
     })
   }
 
@@ -400,7 +400,7 @@ export class ProjectRuntime {
     promptPackageRoot: string,
     workspace: WorkspacePort = new NodeWorkspaceAdapter(),
     applicationDataRoot = resolve(internalStore.projectDatabaseRef, "..", "..", ".."),
-    lncrawlRuntimeDirectory?: string,
+    nikowenkuRuntimeDirectory?: string,
   ): Promise<ProjectRuntime> {
     const database = await openProjectDatabase(internalStore.projectDatabaseRef)
     const runtime = new ProjectRuntime(
@@ -412,7 +412,7 @@ export class ProjectRuntime {
       internalStorePort,
       promptPackageRoot,
       applicationDataRoot,
-      lncrawlRuntimeDirectory,
+      nikowenkuRuntimeDirectory,
     )
     await runtime.ensureCommittedSourceUnitIndexes()
     return runtime
@@ -1015,13 +1015,14 @@ export class ProjectRuntime {
   public createSynopsisConversationService(): SynopsisConversationService {
     return new SynopsisConversationService({
       creativeSetup: new SqliteCreativeSetupRepository(this.database),
-      searchOriginalWork: async (input) => this.lncrawl.search(input.title, input.workspaceRootRef, input.signal, input.source),
-      crawlOriginalWork: async (input) => this.lncrawl.crawl({
-        url: input.url,
+      searchOriginalWork: async (input) => this.nikowenku.search(input.title, input.workspaceRootRef, input.signal),
+      downloadOriginalWork: async (input) => this.nikowenku.download({
+        bookId: input.bookId,
         title: input.title,
         workspaceRootRef: input.workspaceRootRef,
         workspace: this.workspace,
         ...(input.chapterLimit === undefined ? {} : { chapterLimit: input.chapterLimit }),
+        ...(input.startChapter === undefined ? {} : { startChapter: input.startChapter }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       }),
       executeWorkflowTool: async (input) => {

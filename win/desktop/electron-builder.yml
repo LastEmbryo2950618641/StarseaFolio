@@ -9,13 +9,13 @@ files:
   - package.json
   - build-info.json
 asar: true
-beforePack: ../../scripts/packaging/bundle-lncrawl.cjs
+beforePack: ../../scripts/packaging/bundle-nikowenku.cjs
 asarUnpack:
   - "**/*.node"
   - "**/better-sqlite3/**/*"
 extraResources:
-  - from: resources/lncrawl
-    to: tools/lncrawl
+  - from: ../../common/tools/nikowenku-archive
+    to: tools/nikowenku-archive
   - from: ../../common/packages/prompt-contracts/resources
     to: prompt-contracts/resources
   - from: ../../common/packages/prompt-contracts/package.json

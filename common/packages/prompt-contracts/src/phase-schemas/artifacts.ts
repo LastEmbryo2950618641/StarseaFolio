@@ -642,7 +642,7 @@ export const synopsisDiscussArtifactSchema = z.object({
       "todo_write",
       "memory_write",
       "original_work_search",
-      "original_work_crawl",
+      "original_work_download",
       "character_update",
     ]),
     action: z.enum(["describe", "invoke"]),

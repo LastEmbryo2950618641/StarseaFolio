@@ -65,7 +65,7 @@ function setup() {
       digest: "skill-digest",
     })),
     searchOriginalWork: vi.fn(async (input) => ({ title: input.title, output: "候选作品 https://example.com/book" })),
-    crawlOriginalWork: vi.fn(async (input) => ({ title: input.title, output: "已导入", importedFiles: ["参考文件/原作资料/book/README.md"] })),
+    downloadOriginalWork: vi.fn(async (input) => ({ title: input.title, output: "已导入", importedFiles: ["参考文件/原作资料/book/README.md"] })),
   } satisfies SynopsisWorkflowToolCallbacks
   const visibleMessages: VisibleModelContextMessage[] = []
   const listDrafts = vi.fn(async () => [draft])
@@ -98,7 +98,8 @@ describe("synopsis workflow progressive disclosure", () => {
     expect(catalog).toContain("Agent 记忆")
     expect(catalog).toContain("加载 Skill")
     expect(catalog).toContain("original_work_search")
-    expect(catalog).toContain("original_work_crawl")
+    expect(catalog).toContain("original_work_download")
+    expect(catalog).not.toContain("original_work_crawl")
     expect(catalog).not.toContain("userInput")
     expect(catalog).not.toContain("revisionTaskId")
     expect(catalog).not.toContain("writingGuide")
@@ -127,13 +128,28 @@ describe("synopsis workflow progressive disclosure", () => {
     expect(await execute({
       name: "original_work_search", action: "invoke", arguments: JSON.stringify({ title: "原作标题" }),
     })).toMatchObject({ status: "reference_candidates_found", result: { title: "原作标题" } })
-    await describeTool("original_work_crawl")
+    await describeTool("original_work_download")
     expect(await execute({
-      name: "original_work_crawl", action: "invoke",
-      arguments: JSON.stringify({ title: "原作标题", url: "https://example.com/book", chapterLimit: 1 }),
+      name: "original_work_download", action: "invoke",
+      arguments: JSON.stringify({ title: "原作标题", bookId: "wenku8-1", chapterLimit: 1, startChapter: 2 }),
     })).toMatchObject({ status: "reference_imported", result: { importedFiles: ["参考文件/原作资料/book/README.md"] } })
     expect(callbacks.searchOriginalWork).toHaveBeenCalledOnce()
-    expect(callbacks.crawlOriginalWork).toHaveBeenCalledOnce()
+    expect(callbacks.downloadOriginalWork).toHaveBeenCalledOnce()
+    expect(callbacks.downloadOriginalWork).toHaveBeenCalledWith({ ...context, title: "原作标题", bookId: "wenku8-1", chapterLimit: 1, startChapter: 2 })
+  })
+
+  it.each([
+    { url: "https://example.com/unverified-book" },
+    { startChapter: 0 },
+    { startChapter: 1.5 },
+  ])("rejects obsolete URLs and invalid chapter ranges before executing a download: %o", async (extra) => {
+    const { execute, callbacks, describeTool } = setup()
+    await describeTool("original_work_download")
+    expect(await execute({
+      name: "original_work_download", action: "invoke",
+      arguments: JSON.stringify({ title: "原作标题", bookId: "wenku8-1", chapterLimit: 1, ...extra }),
+    })).toMatchObject({ status: "error", code: "tool_failed" })
+    expect(callbacks.downloadOriginalWork).not.toHaveBeenCalled()
   })
 
   it("defaults original-work lookup to canon unless the user names a derivative work", async () => {
@@ -143,24 +159,24 @@ describe("synopsis workflow progressive disclosure", () => {
     expect(JSON.stringify(result)).toContain("不得为了调用抓取工具而改抓同名网文")
   })
 
-  it("rejects original-work crawls without an explicit chapter limit", async () => {
+  it("rejects original-work downloads without an explicit import limit", async () => {
     const { execute, callbacks, describeTool } = setup()
-    await describeTool("original_work_crawl")
+    await describeTool("original_work_download")
     expect(await execute({
-      name: "original_work_crawl", action: "invoke",
-      arguments: JSON.stringify({ title: "原作标题", url: "https://example.com/book" }),
-    })).toMatchObject({ status: "error", message: expect.stringContaining("禁止省略后默认抓取全本") })
-    expect(callbacks.crawlOriginalWork).not.toHaveBeenCalled()
+      name: "original_work_download", action: "invoke",
+      arguments: JSON.stringify({ title: "原作标题", bookId: "wenku8-1" }),
+    })).toMatchObject({ status: "error", message: expect.stringContaining("必须限定导入范围") })
+    expect(callbacks.downloadOriginalWork).not.toHaveBeenCalled()
   })
 
   it("returns a recoverable rejection for an unverified candidate so the agent searches again", async () => {
     const { execute, callbacks, describeTool, visibleMessages } = setup()
-    vi.mocked(callbacks.crawlOriginalWork!).mockRejectedValueOnce(new Error("该候选没有可核对的作品简介；请先通过网络搜索补查作品介绍"))
-    await describeTool("original_work_crawl")
-    const result = await execute({ name: "original_work_crawl", action: "invoke",
-      arguments: JSON.stringify({ title: "Fate/stay night", url: "https://example.com/book", chapterLimit: 1 }) })
+    vi.mocked(callbacks.downloadOriginalWork!).mockRejectedValueOnce(new Error("该候选没有可核对的作品简介；请先通过网络搜索补查作品介绍"))
+    await describeTool("original_work_download")
+    const result = await execute({ name: "original_work_download", action: "invoke",
+      arguments: JSON.stringify({ title: "Fate/stay night", bookId: "wenku8-1", chapterLimit: 1 }) })
     expect(result).toMatchObject({ status: "reference_candidate_rejected", code: "candidate_not_verified" })
-    expect(visibleMessages).not.toContainEqual(expect.objectContaining({ content: expect.stringContaining("lncrawl_unavailable") }))
+    expect(visibleMessages).not.toContainEqual(expect.objectContaining({ content: expect.stringContaining("archive_unavailable") }))
   })
 
   it("describes and invokes memory_write", async () => {

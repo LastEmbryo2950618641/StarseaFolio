@@ -1,0 +1,61 @@
+{
+  "name": "nikowenku-archive",
+  "version": "0.1.4",
+  "description": "Cross-platform CLI and AI agent skill for searching a Chinese light novel library, looking up book details, and exporting full text",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "light-novel",
+    "light-novels",
+    "chinese-light-novel",
+    "chinese-light-novels",
+    "chinese-novel",
+    "chinese-novels",
+    "webnovel",
+    "webnovels",
+    "web-novel",
+    "web-novels",
+    "light-novel-library",
+    "novel",
+    "novel-search",
+    "novel-downloader",
+    "book-search",
+    "book-downloader",
+    "book-library",
+    "wenku",
+    "archive",
+    "cli",
+    "search",
+    "download",
+    "text-export",
+    "chinese",
+    "codex-skill",
+    "agent-skill",
+    "agent-skills",
+    "ai-agent"
+  ],
+  "homepage": "https://github.com/LastEmbryo2950618641/niko-cli/tree/main/packages/nikowenku-archive",
+  "bugs": {
+    "url": "https://github.com/LastEmbryo2950618641/niko-cli/issues"
+  },
+  "bin": {
+    "nikowenku-archive": "scripts/cli.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "scripts/cli.mjs",
+    "server/library.mjs",
+    "server/text.mjs",
+    "shared/language.mjs",
+    "skill/SKILL.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LastEmbryo2950618641/niko-cli.git",
+    "directory": "packages/nikowenku-archive"
+  }
+}

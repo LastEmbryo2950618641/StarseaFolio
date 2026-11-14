@@ -1,0 +1,43 @@
+{
+  "name": "nikowenku-archive",
+  "version": "0.1.4",
+  "repository": "https://github.com/LastEmbryo2950618641/niko-cli",
+  "directory": "packages/nikowenku-archive",
+  "revision": "9e380664383a9ff74687cedefc319ed88cd7f259",
+  "siteUrl": "https://111.229.32.85/nikowenku-archive/",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "scripts/cli.mjs",
+      "sha256": "c61e04841dc3e6cddd483fbddf5f780ec7d5028db212c08c6da117948c70142a"
+    },
+    {
+      "path": "server/library.mjs",
+      "sha256": "50fad63442e3e89276a8e5e9330127647cd2f1249d1eb1a2aa8d4177b68d8dcf"
+    },
+    {
+      "path": "server/text.mjs",
+      "sha256": "2b780c9d255bd6c4be2395d0685f370cb4a62a783e433f0f5162dcff7b244751"
+    },
+    {
+      "path": "shared/language.mjs",
+      "sha256": "1c16866c61a3bdd735a4f730abc4aba7dc6610408fdd2f3a85c2844aab675fbd"
+    },
+    {
+      "path": "package.json",
+      "sha256": "5f2e889c426f6ab76d3bbf05de48a9193aef5b902f68a19929482e8f2b9cdd51"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "82764d9153f0cbd27f198b2fcbae12013048478ed03198fbdfba2978e7691ea6"
+    },
+    {
+      "path": "README.md",
+      "sha256": "698e52e9daed08231c8c9081029cca82649f850ab226fe0faaa46a6a83a650aa"
+    },
+    {
+      "path": "skill/SKILL.md",
+      "sha256": "a792684e64b8a26864c1720ec5f39dd5e670685ecfb4a2c6e03fb0c61ed59513"
+    }
+  ]
+}

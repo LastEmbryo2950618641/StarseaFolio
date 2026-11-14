@@ -99,10 +99,10 @@ void app.whenReady().then(async () => {
     diagnostics,
     packaged: app.isPackaged,
   })
-  const lncrawlRuntimeDirectory = app.isPackaged
-    ? join(process.resourcesPath, "tools", "lncrawl")
-    : join(app.getAppPath(), "resources", "lncrawl")
-  backend.start({ applicationDataRoot, promptPackageRoot, lncrawlRuntimeDirectory, diagnostics })
+  const nikowenkuRuntimeDirectory = app.isPackaged
+    ? join(process.resourcesPath, "tools", "nikowenku-archive")
+    : join(app.getAppPath(), "..", "..", "common", "tools", "nikowenku-archive")
+  backend.start({ applicationDataRoot, promptPackageRoot, nikowenkuRuntimeDirectory, diagnostics })
   await createWindow(credentials, applicationDataRoot)
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow(credentials, applicationDataRoot)

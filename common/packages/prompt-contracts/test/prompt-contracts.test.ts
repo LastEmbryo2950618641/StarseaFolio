@@ -116,7 +116,7 @@ describe("prompt contracts", () => {
     expect(stylePack).not.toContain("题材默认")
   })
 
-  it("infers fanfiction source titles and checks local chapter references before LNCrawl", () => {
+  it("infers fanfiction source titles and checks local chapter references before nikowenku-archive", () => {
     const packageRoot = resolve(process.cwd(), "common/packages/prompt-contracts")
     const readResource = (resource: string): string => readFileSync(resolve(packageRoot, resource), "utf8")
     const referenceGuide = readResource(SETTINGS_QUERY_GUIDE_RESOURCE)
@@ -129,8 +129,8 @@ describe("prompt contracts", () => {
       expect(text).toContain("request_read")
       expect(text).toContain("AU")
     }
-    expect(referenceGuide).toContain("original_work_crawl")
-    expect(discussWorkflow).toContain("应用负责抓取、校验和导入")
+    expect(referenceGuide).toContain("original_work_download")
+    expect(discussWorkflow).toContain("应用负责下载、校验和导入")
   })
 
   it("ships chinese-webnovel-skills vendor write rules verbatim-ish (MIT attribution header)", () => {

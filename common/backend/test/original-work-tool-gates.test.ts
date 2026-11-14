@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises"
 import { expect, it, vi } from "vitest"
 import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
-import { LncrawlReferenceService } from "../src/infrastructure/web-research/lncrawl-reference-service.js"
+import { NikowenkuReferenceService } from "../src/infrastructure/web-research/nikowenku-reference-service.js"
 import { openChapterHarness } from "./helpers/chapter-coordination-harness.js"
 import { CompositeWebResearchAdapter } from "../src/infrastructure/web-research/composite-web-research-adapter.js"
 import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
@@ -51,7 +51,7 @@ it("shows page rejection details and a failed read status in the actual conversa
 }, 20000)
 
 it("can describe and execute original-work research before style confirmation without opening chapter writes", async () => {
-  const search = vi.spyOn(LncrawlReferenceService.prototype, "search").mockResolvedValue({ title: "Example", output: "No matching novel", candidateUrls: [], candidates: [] })
+  const search = vi.spyOn(NikowenkuReferenceService.prototype, "search").mockResolvedValue({ title: "Example", output: "No matching novel", candidateUrls: [], candidates: [] })
   let calls = 0
   const model: AIModelPort = { execute(request) {
     calls++
@@ -79,13 +79,13 @@ it("can describe and execute original-work research before style confirmation wi
 it("reads newly imported original-work chapters in the same conversation send", async () => {
   const chapterPath = "参考文件/原作资料/Example/章节/001.md"
   const chapterBody = "# Chapter 1\n\nMira returned to the northern harbor on her twenty-second birthday.\n"
-  const search = vi.spyOn(LncrawlReferenceService.prototype, "search").mockResolvedValue({
-    title: "Example", output: "Example", candidates: [{ title: "Example", url: "https://example.com/novel", synopsis: "The confirmed source synopsis." }],
+  const search = vi.spyOn(NikowenkuReferenceService.prototype, "search").mockResolvedValue({
+    title: "Example", output: "Example", candidates: [{ bookId: "example-1", title: "Example", url: "https://example.com/novel", synopsis: "The confirmed source synopsis." }],
     candidateUrls: ["https://example.com/novel"],
   })
-  const crawl = vi.spyOn(LncrawlReferenceService.prototype, "crawl").mockImplementation(async (input) => {
+  const crawl = vi.spyOn(NikowenkuReferenceService.prototype, "download").mockImplementation(async (input) => {
     await input.workspace.saveUserMarkdown(input.workspaceRootRef, chapterPath, chapterBody)
-    return { title: "Example", importedFiles: [chapterPath], output: "Imported one chapter" }
+    return { title: "Example", bookId: "example-1", localTextPath: "cache/original.txt", cached: false, importedFiles: [chapterPath], output: "Imported one chapter" }
   })
   let calls = 0
   let readBack = ""
@@ -98,13 +98,13 @@ it("reads newly imported original-work chapters in the same conversation send", 
       catalogContainsChapter = input.workspaceCatalog?.entries.some((entry) => entry.relativePath === chapterPath) === true
       throw new Error("STOP_AFTER_IMPORTED_CHAPTER_READ")
     }
-    const toolName = calls <= 2 ? "original_work_search" : "original_work_crawl"
+    const toolName = calls <= 2 ? "original_work_search" : "original_work_download"
     return Promise.resolve({
       result: { schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId,
         phase: request.phase, outcome: calls === 5 ? "request_read" : "continue", artifact: {
           assistantMessage: "核对原作首章。", finalSelfReview: "读取导入正文后才确认原作事实。",
           ...(calls === 5 ? {} : { toolRequest: { name: toolName, action: calls % 2 === 1 ? "describe" : "invoke",
-            arguments: JSON.stringify({ title: "Example", ...(calls === 4 ? { url: "https://example.com/novel", chapterLimit: 1 } : {}) }) } }),
+            arguments: JSON.stringify({ title: "Example", ...(calls === 4 ? { bookId: "example-1", chapterLimit: 1 } : {}) }) } }),
         }, requestedReads: calls === 5 ? [{ requestId: randomUUID(), reason: "Read the imported chapter", expectedEvidence: "Chapter text",
           query: { exactKeys: [chapterPath], semanticTexts: [], anchorIds: [], directions: [], maxCandidates: 4, maxDepth: 1,
             sourceKinds: ["reference"], readMode: "read_full" } }] : [],

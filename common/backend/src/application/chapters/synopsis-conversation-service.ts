@@ -2862,8 +2862,8 @@ export class SynopsisConversationService {
           // External reference research cannot confirm style or write story artifacts.
           ...(input.creativeSetup !== undefined || this.dependencies.searchOriginalWork === undefined
             ? {} : { searchOriginalWork: this.dependencies.searchOriginalWork }),
-          ...(input.creativeSetup !== undefined || this.dependencies.crawlOriginalWork === undefined
-            ? {} : { crawlOriginalWork: this.dependencies.crawlOriginalWork }),
+          ...(input.creativeSetup !== undefined || this.dependencies.downloadOriginalWork === undefined
+            ? {} : { downloadOriginalWork: this.dependencies.downloadOriginalWork }),
         }
       : {
           ...(this.dependencies.updateCharacter === undefined ? {} : { updateCharacter: this.dependencies.updateCharacter }),
@@ -2882,9 +2882,9 @@ export class SynopsisConversationService {
           ...(this.dependencies.searchOriginalWork === undefined
             ? {}
             : { searchOriginalWork: this.dependencies.searchOriginalWork }),
-          ...(this.dependencies.crawlOriginalWork === undefined
+          ...(this.dependencies.downloadOriginalWork === undefined
             ? {}
-            : { crawlOriginalWork: this.dependencies.crawlOriginalWork }),
+            : { downloadOriginalWork: this.dependencies.downloadOriginalWork }),
           ...(this.dependencies.writeTodos === undefined
             ? {}
             : { writeTodos: this.dependencies.writeTodos }),
@@ -2912,8 +2912,8 @@ export class SynopsisConversationService {
         projectId: input.projectId,
         sessionId: input.sessionId,
         webResearch: this.dependencies.webResearch !== undefined,
-        lncrawlSearch: toolCallbacks.searchOriginalWork !== undefined,
-        lncrawlCrawl: toolCallbacks.crawlOriginalWork !== undefined,
+        archiveSearch: toolCallbacks.searchOriginalWork !== undefined,
+        archiveDownload: toolCallbacks.downloadOriginalWork !== undefined,
       })
     }
 
@@ -3350,15 +3350,15 @@ export class SynopsisConversationService {
       const originalWorkHasEvidence = hasOriginalWorkEvidence(readEvidence)
       const originalToolRequest = toolArtifact.success ? toolArtifact.data.toolRequest : undefined
       const originalToolRequested = originalToolRequest?.name === "original_work_search"
-        || originalToolRequest?.name === "original_work_crawl"
+        || originalToolRequest?.name === "original_work_download"
       const originalWorkToolsAvailable = toolCallbacks.searchOriginalWork !== undefined
-        || toolCallbacks.crawlOriginalWork !== undefined
+        || toolCallbacks.downloadOriginalWork !== undefined
       const originalWorkWebResearchAvailable = this.dependencies.webResearch !== undefined
       let originalWorkFallbackNotice: string | undefined
       if (originalWorkContext && !originalWorkHasEvidence && parsedResult.outcome !== "request_read") {
         const canBootstrapTodo = originalToolRequest?.name === "todo_write"
         const canUseOriginalTool = originalToolRequested
-        const mustReadImportedReference = originalWorkStage === "lncrawl_imported"
+        const mustReadImportedReference = originalWorkStage === "archive_imported"
           && originalWorkGateRepairs < 3
         const shouldRequireEvidenceStep = !canBootstrapTodo && !canUseOriginalTool
           && (mustReadImportedReference
@@ -3367,7 +3367,7 @@ export class SynopsisConversationService {
               && originalWorkGateRepairs === 0)
             || (originalWorkStage === "none" && originalWorkToolsAvailable && originalWorkGateRepairs === 1)
             || (originalWorkStage === "web_attempted" && originalWorkToolsAvailable)
-            || (originalWorkStage === "lncrawl_searched" && originalWorkToolsAvailable))
+            || (originalWorkStage === "archive_searched" && originalWorkToolsAvailable))
         if (shouldRequireEvidenceStep && remainingCalls > 0) {
           originalWorkGateRepairs += 1
           runtimeLog("info", "synopsis-conversation", "original_work_reference.gate_step", {
@@ -3381,12 +3381,12 @@ export class SynopsisConversationService {
             ? "web_attempted"
             : originalWorkStage
           repairHints.push(
-            originalWorkStage === "lncrawl_imported"
-              ? "【同人原作核验·读取结果】LNCrawl 已导入资料，但本轮尚未把本地索引/章节读入 readEvidence。请 outcome=request_read，exactKeys 指向 参考文件/原作资料/ 下与当前问题相关的 Markdown，只读所需片段后再作答。"
+            originalWorkStage === "archive_imported"
+              ? "【同人原作核验·读取结果】nikowenku-archive 已导入资料，但本轮尚未把本地索引/章节读入 readEvidence。请 outcome=request_read，exactKeys 指向 参考文件/原作资料/ 下与当前问题相关的 Markdown，只读所需片段后再作答。"
               : originalWorkEvidenceRepairHint({
                   stage: repairStage,
                   hasWebResearch: this.dependencies.webResearch !== undefined,
-                  hasLncrawl: originalWorkToolsAvailable,
+                  hasArchive: originalWorkToolsAvailable,
                 }),
           )
           attempt += 1

@@ -7,7 +7,7 @@ win/
   desktop/                 Electron 窗口、IPC、系统菜单、文件选择和 Windows 打包
     src/main/
     src/preload/
-    resources/             Windows 图标与 LNCrawl 运行时
+    resources/             Windows 图标等平台资源
 android/
   mobile/                  Expo 移动端入口、移动界面与 Android 配置
   scripts/                 手机共享工作台开发预览与 APK 打包入口

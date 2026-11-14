@@ -20,7 +20,7 @@ describe("synopsis todo gate", () => {
   it("allows todo bootstrap and isolated reference retrieval without opening chapter writes", () => {
     expect(isDiscussTodoBootstrapTool("todo_write")).toBe(true)
     expect(isDiscussTodoBootstrapTool("original_work_search")).toBe(true)
-    expect(isDiscussTodoBootstrapTool("original_work_crawl")).toBe(true)
+    expect(isDiscussTodoBootstrapTool("original_work_download")).toBe(true)
     expect(isDiscussTodoBootstrapTool("publish_draft")).toBe(false)
     expect(isDiscussTodoBootstrapTool("bash")).toBe(false)
     expect(discussTurnHasTodos([])).toBe(false)

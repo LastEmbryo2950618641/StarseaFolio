@@ -34,7 +34,7 @@ import { SharedPresentationLibrary } from "../infrastructure/filesystem/shared-p
 export type BackendContainerOptions = Readonly<{
   applicationDataRoot: string
   promptPackageRoot: string
-  lncrawlRuntimeDirectory?: string
+  nikowenkuRuntimeDirectory?: string
   model?: AIModelPort
   modelCatalog?: ModelCatalogPort
   modelProfiles?: ModelProfileStorePort
@@ -57,7 +57,7 @@ export class BackendContainer {
   private readonly projectRepositoryFactory: ProjectRepositoryFactory
   private readonly promptPackageRoot: string
   private readonly applicationDataRoot: string
-  private readonly lncrawlRuntimeDirectory: string | undefined
+  private readonly nikowenkuRuntimeDirectory: string | undefined
   private readonly workspaceDefaults: WorkspaceDefaultDocuments | undefined
   private currentRuntime: ProjectRuntime | undefined
 
@@ -73,7 +73,7 @@ export class BackendContainer {
     this.workspace = new NodeWorkspaceAdapter(this.sharedPresentation.root)
     this.internalStore = new NodeInternalStoreAdapter(options.applicationDataRoot)
     this.applicationDataRoot = resolve(options.applicationDataRoot)
-    this.lncrawlRuntimeDirectory = options.lncrawlRuntimeDirectory
+    this.nikowenkuRuntimeDirectory = options.nikowenkuRuntimeDirectory
     this.model = options.model ?? createModelFromEnvironment(
       options.promptPackageRoot,
     )
@@ -204,7 +204,7 @@ export class BackendContainer {
       this.promptPackageRoot,
       this.workspace,
       this.applicationDataRoot,
-      this.lncrawlRuntimeDirectory,
+      this.nikowenkuRuntimeDirectory,
     )
     await this.currentRuntime.ensureSettingsLineageSeeded()
     await this.currentRuntime.rematerializeMissingPublishedBodies()

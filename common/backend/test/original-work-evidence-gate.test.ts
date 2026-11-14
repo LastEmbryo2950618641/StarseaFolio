@@ -44,19 +44,26 @@ describe("original work evidence gate", () => {
     expect(readOriginalWorkEvidenceStage([
       { role: "system", kind: "phase_instruction", content: JSON.stringify({ protocol: "synopsis-tools-v1", status: "reference_candidates_found" }) },
       { role: "system", kind: "phase_instruction", content: JSON.stringify({ protocol: "synopsis-tools-v1", status: "reference_imported" }) },
-    ])).toBe("lncrawl_imported")
-    expect(originalWorkEvidenceRepairHint({ stage: "none", hasWebResearch: true, hasLncrawl: true })).toContain("公开网络")
-    expect(originalWorkEvidenceRepairHint({ stage: "lncrawl_searched", hasWebResearch: true, hasLncrawl: true })).toContain("original_work_crawl")
-    expect(readOriginalWorkEvidenceStage([{ role: "system", kind: "phase_instruction", content: JSON.stringify({ protocol: "synopsis-tools-v1", status: "reference_candidate_rejected" }) }])).toBe("lncrawl_candidate_rejected")
-    expect(originalWorkEvidenceRepairHint({ stage: "lncrawl_candidate_rejected", hasWebResearch: true, hasLncrawl: true })).toContain("重新 invoke original_work_search")
-    expect(originalWorkEvidenceRepairHint({ stage: "lncrawl_imported", hasWebResearch: false, hasLncrawl: false })).toContain("未核验")
+    ])).toBe("archive_imported")
+    expect(originalWorkEvidenceRepairHint({ stage: "none", hasWebResearch: true, hasArchive: true })).toContain("公开网络")
+    expect(originalWorkEvidenceRepairHint({ stage: "archive_searched", hasWebResearch: true, hasArchive: true })).toContain("original_work_download")
+    expect(readOriginalWorkEvidenceStage([{ role: "system", kind: "phase_instruction", content: JSON.stringify({ protocol: "synopsis-tools-v1", status: "reference_candidate_rejected" }) }])).toBe("archive_candidate_rejected")
+    expect(originalWorkEvidenceRepairHint({ stage: "archive_candidate_rejected", hasWebResearch: true, hasArchive: true })).toContain("重新 invoke original_work_search")
+    expect(originalWorkEvidenceRepairHint({ stage: "archive_imported", hasWebResearch: false, hasArchive: false })).toContain("未核验")
   })
 
   it("ends an unsuccessful reference attempt so no-match and network failures do not cause an evidence loop", () => {
     const message = (value: object) => ({ role: "system", kind: "phase_instruction", content: JSON.stringify({ protocol: "synopsis-tools-v1", ...value }) })
-    expect(readOriginalWorkEvidenceStage([message({ status: "reference_candidates_found", result: { candidateUrls: [] } })])).toBe("lncrawl_unavailable")
-    expect(readOriginalWorkEvidenceStage([message({ name: "original_work_crawl", action: "invoke", status: "error", code: "tool_failed" })])).toBe("lncrawl_unavailable")
-    expect(readOriginalWorkEvidenceStage([message({ name: "original_work_crawl", action: "invoke", status: "error", code: "describe_required" })])).toBe("none")
-    expect(originalWorkEvidenceRepairHint({ stage: "lncrawl_unavailable", hasWebResearch: true, hasLncrawl: true })).toContain("未核验")
+    expect(readOriginalWorkEvidenceStage([message({ status: "reference_candidates_found", result: { candidateUrls: [] } })])).toBe("archive_unavailable")
+    expect(readOriginalWorkEvidenceStage([message({ name: "original_work_download", action: "invoke", status: "error", code: "tool_failed" })])).toBe("archive_unavailable")
+    expect(readOriginalWorkEvidenceStage([message({ name: "original_work_download", action: "invoke", status: "error", code: "describe_required" })])).toBe("none")
+    expect(originalWorkEvidenceRepairHint({ stage: "archive_unavailable", hasWebResearch: true, hasArchive: true })).toContain("未核验")
+  })
+
+  it("keeps old imported evidence but repeats searches with the new provider after old-provider failures", () => {
+    const message = (stage: string) => ({ role: "system", kind: "phase_instruction", content: JSON.stringify({ protocol: "original-work-evidence-gate-v1", stage }) })
+    expect(readOriginalWorkEvidenceStage([message("lncrawl_imported")])).toBe("archive_imported")
+    expect(readOriginalWorkEvidenceStage([message("lncrawl_searched")])).toBe("web_attempted")
+    expect(readOriginalWorkEvidenceStage([message("lncrawl_unavailable")])).toBe("web_attempted")
   })
 })
