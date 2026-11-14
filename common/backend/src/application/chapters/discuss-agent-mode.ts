@@ -22,7 +22,7 @@ export function discussAgentModePromptAppendix(
       batchProceed ? AUTO_CONTINUE_RULE : STEP_CONFIRM_RULE,
       batchProceed
         ? "只有真正需要用户取舍（内容方向冲突）时才停并给 choices。"
-        : "批量推进已关闭：即便 Accept edits，梗概/细纲/正文三步仍须停下等用户确认后再进下一步。",
+        : "批量推进已关闭：默认按阶段停等用户指令；用户明确要求连续步骤或换章时按其请求执行，不要求固定说法。",
     ].join("")
   }
   return [
@@ -51,13 +51,14 @@ const AUTO_WITH_STEP_GATES_RULE = [
   "【批量推进=关】工具与写入仍可自主，但流水线必须分步停等用户：",
   "① 梗概落盘后，若用户本轮没有明确要求细纲则停止并给出「用这份梗概写细纲」便捷选项；用户已用自然语言要求提取/补全细纲时直接完成，不要求固定确认说法；",
   "② 通常在细纲落盘后停止并给出「按细纲写正文」便捷选项；用户已明确要求连做细纲与正文时，细纲成功写入后可继续草稿，不要求固定确认说法；",
-  "③ 正文草稿/发布完成后停止，禁止 focusChange/continueTurn 自动进下一章。",
+  "③ 正文草稿/发布完成后默认停止，不自行换章；但用户本轮明确要求切换焦点时，输出 focusChange 并在 userRequestQuote 原样摘录本轮换章指令，不要求固定说法或用户手动操作。若还要求在目标章继续工作，同回设置 continueTurn=true；本轮只切焦点，不提交旧焦点的章节写入，系统会重新读目标章后继续原请求。仅换章则不要 continueTurn。",
   "标题分叉等非流水线岔路仍可用 choices 征询。",
 ].join("")
 
 const STEP_CONFIRM_RULE = [
   "【逐步推进】禁止设 continueTurn 来跳过用户选择；禁止一章写完自动开下一章。",
   "默认分阶段停下并给出下一步按钮；按钮是便捷操作，用户自然语言明确要求下一步或连续多步时，按前置文档实际写入顺序执行，不要求复述按钮文案。",
+  "用户明确要求换章也可执行：focusChange.userRequestQuote 必须原样引用本轮换章指令；先只切焦点，目标章任务用 continueTurn=true 交给重新读取该章材料后的下一回合。仅换章时不要续跑。前章未发布、焦点锁定及章节面板批量编排限制仍生效。",
 ].join("")
 
 const AUTO_CONTINUE_RULE = [

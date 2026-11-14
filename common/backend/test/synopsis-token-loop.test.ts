@@ -12,7 +12,8 @@ import { peekSynopsisModelBudgetAdvisory } from "../src/application/chapters/syn
 import { serializeVolumePlanningState } from "../src/application/chapters/volume-planning-gate.js"
 import { ChapterRevisionService, RevisionInvalidStateError } from "../src/application/chapters/chapter-revision-service.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
-import { confirmedVolumeStorylineFixture, openChapterHarness, prepareChapterPlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { DEFAULT_VOLUME_FOLDER_NAME, deriveSynopsisMarkdownPath, deriveOutlineMarkdownPath, siblingPlanningMarkdownPath } from "../src/core/index.js"
+import { confirmedVolumeStorylineFixture, openChapterHarness, prepareChapterPlanning, seedCommittedChapter, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 const todos = [{ id: "draft", content: "生成正文草稿", status: "in_progress" as const }]
 const draft = { base: "body", heading: "第一章 雨夜旧站台", body: "林烬走进雨夜的旧站台，灯下多了一封没有落款的信。他展开信纸，认出了失踪者的字迹。" }
@@ -69,6 +70,110 @@ async function withScript(
 }
 
 describe("discussion token loop regressions", { timeout: 30_000 }, () => {
+  it.each([
+    { name: "switch only", message: "接下来请看第二章。", continueTurn: false, emptyPlanning: false, emptyOutline: false },
+    { name: "switch and write", message: "把焦点切到第二章，写第二章细纲与正文。", continueTurn: true, emptyPlanning: false, emptyOutline: false },
+    { name: "switch with missing current planning", message: "我们转到第二章吧。", continueTurn: false, emptyPlanning: true, emptyOutline: false },
+    { name: "switch without old outline", message: "把焦点切到第二章，写第二章细纲与正文。", continueTurn: true, emptyPlanning: false, emptyOutline: true },
+  ])("honors a user-directed focus change with batch off ($name)", async ({ message, continueTurn, emptyPlanning, emptyOutline }) => {
+    let calls = 0
+    await withScript((call, request) => {
+      calls = call
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return {
+        focusChange: { chapterSequence: 2, focusKind: "plot_synopsis", userRequestQuote: message },
+        continueTurn,
+        choices,
+        // A combined response must never write target-chapter content into the old focus.
+        ...(continueTurn ? {
+          synopsisBody: "# 第二章\n\n主角沿信件线索前往山村。",
+          outlineBody: "# 第二章细纲\n\n主角在山村找到送信人。",
+          chapterDraftProposal: { ...draft, heading: "第二章 山村送信人", body: "第二章的文字不能覆盖第一章。" },
+        } : {}),
+      }
+    }, async (harness, send) => {
+      await seedCommittedChapter(harness)
+      const listed = await harness.facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(),
+        method: "synopsis.conversation.list", payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef } })
+      if (!listed.ok) throw new Error(listed.error.message)
+      const oldPath = (listed.data as { session: { synopsisPath: string } }).session.synopsisPath
+      if (emptyPlanning) await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, oldPath, "")
+      if (emptyOutline) await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, siblingPlanningMarkdownPath(oldPath, "outline")!, "")
+      const oldSynopsis = await harness.container.workspace.readMarkdown(harness.workspaceRootRef, oldPath)
+      const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      const countDrafts = () => (db.prepare("select count(*) as count from revision_draft_versions").get() as { count: number }).count
+      const before = countDrafts()
+      try {
+        const sent = await send({ message, batchProceed: false })
+        expect(sent.session.chapterSequence).toBe(2)
+        expect(sent.session.synopsisPath).not.toBe(oldPath)
+        expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, oldPath)).toBe(oldSynopsis)
+        expect(sent.appendedDraft).toBeUndefined()
+        expect(countDrafts()).toBe(before)
+        expect(calls).toBe(1)
+        if (continueTurn) {
+          expect(sent.autoContinue?.message).toContain(message)
+          expect(sent.autoContinue?.message).toContain("第2章")
+          expect(sent.messages.at(-1)?.content).not.toContain("第1章草稿未落入")
+          expect(sent.messages.at(-1)?.content).not.toContain("第1章细纲没有收到")
+        } else expect(sent.autoContinue).toBeUndefined()
+      } finally { db.close() }
+    })
+  })
+
+  it("reloads target-chapter context before continuing only the requested work", async () => {
+    const message = "把焦点切到第二章，写第二章细纲与正文。"
+    const title = "山村送信人"
+    const synopsis = "# 第二章 山村送信人 剧情梗概\n\n林烬沿信件线索前往山村，找到送信人。\n"
+    const outline = "# 第二章 山村送信人 剧情细纲\n\n- 章定位：找到送信人。\n- 分场：沿小路进村，向村民打听消息。\n- 人物准备：林烬和村民。\n"
+    let calls = 0
+    await withScript((call, request) => {
+      calls = call
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      if (call === 1) return {
+        focusChange: { chapterSequence: 2, userRequestQuote: message }, continueTurn: true,
+      }
+      expect((request.input as TurnPhaseInput).synopsisDiscuss).toMatchObject({ chapterSequence: 2, synopsisMarkdown: synopsis })
+      return { outlineBody: outline, chapterDraftProposal: { base: "body", heading: `第二章 ${title}`, body: "林烬走进山村，向井边的村民打听送信人的住处。" }, choices }
+    }, async (harness, send) => {
+      await seedCommittedChapter(harness)
+      const synopsisPath = deriveSynopsisMarkdownPath(2, title, DEFAULT_VOLUME_FOLDER_NAME)
+      const outlinePath = deriveOutlineMarkdownPath(2, title, DEFAULT_VOLUME_FOLDER_NAME)
+      await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, synopsisPath, synopsis)
+      const first = await send({ message, batchProceed: false })
+      expect(first.session.chapterSequence).toBe(2)
+      expect(first.autoContinue?.message).toContain(message)
+      const next = await send({ message: first.autoContinue!.message, batchProceed: false })
+      expect(next.session.chapterSequence).toBe(2)
+      expect(next.appendedDraft?.draftVersionId).toBeTruthy()
+      expect(next.autoContinue).toBeUndefined()
+      expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(outline)
+      expect(calls).toBe(2)
+      const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      try {
+        const target = db.prepare("select chapter_sequence from chapter_revision_tasks where id = ?").get(next.appendedDraft!.revisionTaskId)
+        expect(target).toMatchObject({ chapter_sequence: 2 })
+      } finally { db.close() }
+    })
+  })
+
+  it.each([
+    { name: "unsolicited change", quote: undefined, focusLocked: false, published: true },
+    { name: "quote absent from this user message", quote: "把焦点切到第二章", focusLocked: false, published: true },
+    { name: "locked focus", quote: "检查当前章节材料。", focusLocked: true, published: true },
+    { name: "unpublished predecessor", quote: "检查当前章节材料。", focusLocked: false, published: false },
+  ])("keeps focus gates for $name", async ({ quote, focusLocked, published }) => {
+    await withScript((_call, request) => {
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return { focusChange: { chapterSequence: 2, ...(quote === undefined ? {} : { userRequestQuote: quote }) }, choices }
+    }, async (harness, send) => {
+      if (published) await seedCommittedChapter(harness)
+      const sent = await send({ message: "检查当前章节材料。", batchProceed: false, focusLocked })
+      expect(sent.session.chapterSequence).toBe(1)
+      expect(sent.autoContinue).toBeUndefined()
+    })
+  })
+
   it("retains a volume plan while repairing only its writing settings", async () => {
     let calls = 0
     const synopsis = "# 第一卷梗概\n主角追查雨夜站台的信件，查明失踪者下落。"

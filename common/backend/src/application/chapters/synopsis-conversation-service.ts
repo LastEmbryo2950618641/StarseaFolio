@@ -29,6 +29,7 @@ import {
 import {
   consumeDiscussToolExclusiveStrip,
   synopsisDiscussArtifactSchema,
+  type SynopsisDiscussArtifact,
 } from "@starseafolio/prompt-contracts"
 import { defaultProjectSettings } from "@starseafolio/config"
 
@@ -1378,7 +1379,12 @@ export class SynopsisConversationService {
       const hasOutlineOnDisk = hasPlanningContent(
         await this.readSynopsisFile(input.workspaceRootRef, outlinePath), false,
       )
-      if (isExplicitChapterOutlineWriteRequest(input.message) && synopsisReadyForOutline && !hasOutlineOnDisk) {
+      if (
+        isExplicitChapterOutlineWriteRequest(input.message)
+        && !isCurrentUserFocusChange(assist.focusChange, input.message)
+        && synopsisReadyForOutline
+        && !hasOutlineOnDisk
+      ) {
         writeNotices.push(
           `系统状态：第${String(session.chapterSequence)}章细纲没有收到可保存的结构化内容，文件仍未写入；正文草稿不能越过细纲门禁。`,
         )
@@ -1405,7 +1411,6 @@ export class SynopsisConversationService {
           chapterDraftProposals: _blockedProposals,
           appendedDraft: _blockedAppended,
           continueTurn: _blockedContinue,
-          focusChange: _blockedFocus,
           ...assistWithoutBodyWrites
         } = assist
         draftAssist = {
@@ -1415,8 +1420,8 @@ export class SynopsisConversationService {
             : assist.choices,
         }
       } else if (!autonomous && !batchAutomation) {
-        // 逐步确认：禁止自动跳章
-        const { continueTurn: _stepContinue, focusChange: _stepFocus, ...assistWithoutJump } = assist
+        // Keep a requested focus action; the focus gate below distinguishes it from automatic progression.
+        const { continueTurn: _stepContinue, ...assistWithoutJump } = assist
         draftAssist = assistWithoutJump
       }
 
@@ -1493,6 +1498,7 @@ export class SynopsisConversationService {
       }
       if (
         isExplicitChapterDraftRequest(input.message)
+        && !isCurrentUserFocusChange(assist.focusChange, input.message)
         && draftApply.appended === undefined
         && !assist.content.includes("没有写入草稿版本")
       ) {
@@ -1516,12 +1522,14 @@ export class SynopsisConversationService {
         })
       }
       if (!draftSaveBlocked && draftAssist.focusChange !== undefined) {
-        if (focusLocked) {
+        if (agentMode === "plan") {
+          writeNotices.push("当前是 Plan 模式，本轮不修改章节焦点。")
+        } else if (focusLocked) {
           writeNotices.push("当前入口已锁定焦点，本轮 focusChange 未生效。")
         } else if (batchAutomation) {
           writeNotices.push("批量推演中焦点由系统推进，本轮 focusChange 未生效。")
-        } else if (!autonomous) {
-          writeNotices.push("批量推进已关闭：本轮 focusChange 未生效，请确认后再手动换章。")
+        } else if (!autonomous && !isCurrentUserFocusChange(draftAssist.focusChange, input.message)) {
+          writeNotices.push("批量推进已关闭且本轮未提供用户换章指令依据，焦点保持不变。用户明确要求换章时可直接执行，无需开启批量推进。")
         } else {
           const targetSequence = draftAssist.focusChange.chapterSequence
           const nextSequence = await this.waitForChapterSequenceGate(input.projectId, targetSequence)
@@ -1761,6 +1769,10 @@ export class SynopsisConversationService {
         && (await this.dependencies.revisions.readRevision(savedDraft.revisionTaskId)).status === "completed"
       const synopsisProgressCompleted = autonomous && wroteSynopsisBody && synopsisReadyForOutline
       const outlineProgressCompleted = autonomous && wroteOutlineThisTurn && hasOutlineOnDisk
+      const userRequestedFocusTransition = isCurrentUserFocusChange(assist.focusChange, input.message)
+        && assist.focusChange?.chapterSequence !== session.chapterSequence
+      const continueRequestedFocusTask = userRequestedFocusTransition
+        && appliedFocusSequence !== undefined && assist.continueTurn === true
       // Batch proceed continues only after the state machine confirms each gate transition.
       let autoContinue = discussResult.autoContinueBlocked !== true
         && !draftSaveBlocked
@@ -1768,7 +1780,8 @@ export class SynopsisConversationService {
         && (
           styleSelectionCompleted
           || volumeStoryNeedsUser
-          || gateDeferred
+          || continueRequestedFocusTask
+          || (gateDeferred && !userRequestedFocusTransition)
           || (autonomous && (
             styleSelectionCompleted
             || volumePlanningCompletedThisTurn
@@ -1780,7 +1793,9 @@ export class SynopsisConversationService {
           ))
         )
         ? {
-            message: styleSelectionCompleted
+            message: continueRequestedFocusTask
+              ? `焦点已切换到第${String(appliedFocusSequence)}章。继续完成用户本次原始请求：\n${input.message}\n先读取当前焦点章的已保存材料，按梗概→细纲→草稿的前置内容顺序执行；只完成本次请求，不重复提交上一章，也不自动进入其它章。批量推进仍保持原设置。`
+              : styleSelectionCompleted
                 ? "继续：作品风格已由用户选定并通过审核，现在进入主角罗盘，逐项询问并等待用户确认核心设定，再询问本卷主线与支线。"
                 : volumeStoryNeedsUser
                   ? "继续：当前卷必须先由用户确认主线与支线。请依次询问开场场景、一个或多个高潮、卷末结局及支线事件与时机，给出贴合主题的选项并等待用户发送。"
@@ -2479,10 +2494,7 @@ export class SynopsisConversationService {
     volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
     creationDeskSettings?: CreationDeskSettingsUpdate
     appendedDraft?: NonNullable<SynopsisConversationSendResult["appendedDraft"]>
-    focusChange?: Readonly<{
-      chapterSequence: number
-      focusKind?: DiscussFocusKind
-    }>
+    focusChange?: Readonly<NonNullable<SynopsisDiscussArtifact["focusChange"]>>
     continueTurn?: boolean
     autoContinueBlocked?: boolean
     choices?: SynopsisConversationSendResult["messages"][number]["choices"]
@@ -3615,6 +3627,9 @@ export class SynopsisConversationService {
           )
         }
         artifact.data = synopsisDiscussArtifactSchema.parse(restoreDiscussWrites(pendingWrites, artifact.data, input.chapterSequence))
+        artifact.data = prepareUserFocusTransition(artifact.data, input.chapterSequence, input.userMessage)
+        const switchingAtUserRequest = isCurrentUserFocusChange(artifact.data.focusChange, input.userMessage)
+          && artifact.data.focusChange?.chapterSequence !== input.chapterSequence
         pendingWrites = undefined
         if (input.volumePlanning?.ready === false) {
           const volumePlanMeta = artifact.data.volumePlanMeta
@@ -3770,6 +3785,7 @@ export class SynopsisConversationService {
           plan.chapterSequence === input.chapterSequence && hasPlanningContent(plan.outlineBody, false)
         ))
         const missingRequiredSynopsisArtifact = isExplicitChapterSynopsisWriteRequest(input.userMessage)
+          && !switchingAtUserRequest
           && !hasPlanningContent(input.synopsisMarkdown, true)
           && !hasPlanningContent(artifact.data.synopsisBody ?? "", true)
           && currentVolumeSynopsisPlan === undefined
@@ -3790,6 +3806,7 @@ export class SynopsisConversationService {
           ? `系统状态：第${String(input.chapterSequence)}章剧情梗概没有收到可保存的结构化内容，文件仍未写入；细纲和正文草稿不能越过梗概门禁。`
           : undefined
         const missingRequiredOutlineArtifact = isExplicitChapterOutlineWriteRequest(input.userMessage)
+          && !switchingAtUserRequest
           && hasPlanningContent(input.synopsisMarkdown, true)
           && !hasPlanningContent(input.outlineMarkdown, false)
           && !hasPlanningContent(artifact.data.outlineBody ?? "", false)
@@ -3816,7 +3833,7 @@ export class SynopsisConversationService {
           nextDraftSequence,
           indexedSequences,
         )
-        const draftProposalRequired = isExplicitChapterDraftRequest(input.userMessage)
+        const draftProposalRequired = !switchingAtUserRequest && isExplicitChapterDraftRequest(input.userMessage)
         const hasCurrentChapterDraftProposal = artifact.data.chapterDraftProposal !== undefined
           && artifact.data.chapterDraftProposal.body.trim().length > 0
           || (rawDraftProposals?.some((proposal) => (
@@ -3900,6 +3917,7 @@ export class SynopsisConversationService {
         }
         if (
           (artifact.data.choices?.length ?? 0) === 0
+          && !(switchingAtUserRequest && artifact.data.continueTurn === true)
           && !(input.batchProceed === true && artifact.data.continueTurn === true && (input.agentMode ?? "auto") !== "plan")
           && !(input.batchProceed === true && input.workStyleGate?.status === "style_selected")
           && !(input.batchProceed === true && (
@@ -4017,6 +4035,9 @@ export class SynopsisConversationService {
         })
         const artifact = synopsisDiscussArtifactSchema.safeParse(parsedResult.artifact)
         if (artifact.success) {
+          artifact.data = prepareUserFocusTransition(artifact.data, input.chapterSequence, input.userMessage)
+          const switchingAtUserRequest = isCurrentUserFocusChange(artifact.data.focusChange, input.userMessage)
+            && artifact.data.focusChange?.chapterSequence !== input.chapterSequence
           const nextDraftSequence = await this.dependencies.chapters.nextChapterSequence(input.projectId)
           const indexedSequences = new Set(
             (await this.dependencies.chapterIndex.list(input.projectId)).map((chapter) => chapter.sequence),
@@ -4032,11 +4053,12 @@ export class SynopsisConversationService {
             nextDraftSequence,
             indexedSequences,
           )
-          const draftProposalRequired = isExplicitChapterDraftRequest(input.userMessage)
+          const draftProposalRequired = !switchingAtUserRequest && isExplicitChapterDraftRequest(input.userMessage)
           const currentVolumeSynopsisPlan = artifact.data.volumeChapterPlans?.find((plan) => (
             plan.chapterSequence === input.chapterSequence && hasPlanningContent(plan.synopsisBody, true)
           ))
           const missingSynopsisNotice = isExplicitChapterSynopsisWriteRequest(input.userMessage)
+            && !switchingAtUserRequest
             && !hasPlanningContent(input.synopsisMarkdown, true)
             && !hasPlanningContent(artifact.data.synopsisBody ?? "", true)
             && currentVolumeSynopsisPlan === undefined
@@ -4046,6 +4068,7 @@ export class SynopsisConversationService {
             plan.chapterSequence === input.chapterSequence && hasPlanningContent(plan.outlineBody, false)
           ))
           const missingOutlineNotice = isExplicitChapterOutlineWriteRequest(input.userMessage)
+            && !switchingAtUserRequest
             && hasPlanningContent(input.synopsisMarkdown, true)
             && !hasPlanningContent(input.outlineMarkdown, false)
             && !hasPlanningContent(artifact.data.outlineBody ?? "", false)
@@ -4076,6 +4099,7 @@ export class SynopsisConversationService {
             : undefined
         if (
           (artifact.data.choices?.length ?? 0) === 0
+          && !(switchingAtUserRequest && artifact.data.continueTurn === true)
           && !(input.batchProceed === true && input.workStyleGate?.status === "style_selected")
           && missingChoicesRetries < 1
           && remainingCalls > 0
@@ -5803,10 +5827,7 @@ function finalizeDiscussReturn(
     volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
     creationDeskSettings?: CreationDeskSettingsUpdate
     volumeSynopsisMarkdown?: string
-    focusChange?: Readonly<{
-      chapterSequence: number
-      focusKind?: DiscussFocusKind
-    }>
+    focusChange?: Readonly<NonNullable<SynopsisDiscussArtifact["focusChange"]>>
     continueTurn?: boolean
     choices?: SynopsisConversationSendResult["messages"][number]["choices"]
     goalProposals?: readonly Readonly<{ payload: GoalProposalPayload; reason?: string }>[]
@@ -5860,10 +5881,7 @@ function finalizeDiscussReturn(
   volumeChapterPlans?: readonly VolumeChapterPlan[]
   volumePlanMeta?: Readonly<{ targetChapterCount?: number | undefined; targetWordCount?: number | undefined; notes?: string | undefined }>
   creationDeskSettings?: CreationDeskSettingsUpdate
-  focusChange?: Readonly<{
-    chapterSequence: number
-    focusKind?: DiscussFocusKind
-  }>
+  focusChange?: Readonly<NonNullable<SynopsisDiscussArtifact["focusChange"]>>
   continueTurn?: boolean
   choices?: SynopsisConversationSendResult["messages"][number]["choices"]
   goalProposals?: readonly Readonly<{ payload: GoalProposalPayload; reason?: string }>[]
@@ -6077,17 +6095,38 @@ function isExplicitChapterOutlineWriteRequest(message: string): boolean {
 }
 
 function mapArtifactFocusChange(
-  change: Readonly<{
-    chapterSequence: number
-    focusKind?: DiscussFocusKind | undefined
-  }> | undefined,
-): { focusChange?: Readonly<{ chapterSequence: number; focusKind?: DiscussFocusKind }> } {
+  change: SynopsisDiscussArtifact["focusChange"],
+): { focusChange?: NonNullable<SynopsisDiscussArtifact["focusChange"]> } {
   if (change === undefined) return {}
   return {
     focusChange: {
       chapterSequence: change.chapterSequence,
       ...(change.focusKind === undefined ? {} : { focusKind: change.focusKind }),
+      ...(change.userRequestQuote === undefined ? {} : { userRequestQuote: change.userRequestQuote }),
     },
+  }
+}
+
+/** The model interprets intent; code binds that interpretation to this message, not a phrase whitelist or old history. */
+function isCurrentUserFocusChange(change: SynopsisDiscussArtifact["focusChange"], message: string): boolean {
+  const quote = change?.userRequestQuote?.trim()
+  return quote !== undefined && quote.length > 0 && message.includes(quote)
+}
+
+/** A user-requested switch happens before target-chapter work; never apply those writes to the captured old focus. */
+function prepareUserFocusTransition(
+  artifact: SynopsisDiscussArtifact,
+  currentSequence: number,
+  message: string,
+): SynopsisDiscussArtifact {
+  if (!isCurrentUserFocusChange(artifact.focusChange, message)
+    || artifact.focusChange?.chapterSequence === currentSequence) return artifact
+  return {
+    assistantMessage: "本轮先处理你要求的章节焦点切换，写入前将重新读取目标章的材料。",
+    finalSelfReview: artifact.finalSelfReview,
+    focusChange: artifact.focusChange,
+    ...(artifact.continueTurn === undefined ? {} : { continueTurn: artifact.continueTurn }),
+    ...(artifact.choices === undefined ? {} : { choices: artifact.choices }),
   }
 }
 

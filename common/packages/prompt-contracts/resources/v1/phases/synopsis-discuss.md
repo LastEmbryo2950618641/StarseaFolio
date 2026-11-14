@@ -39,6 +39,7 @@
   5. `assistantMessage` 不要整篇粘贴正文。
 - **焦点锁定**：若 `focusLocked=true`，当前入口固定为本文件所属章，**禁止**输出 `focusChange` / `set_focus`，也不得在回复里让用户换章或去别的 Agent。
 - **自动换焦点**：当前章链路已完结、下一章需要继续时，输出 `artifact.focusChange`（`chapterSequence`，可选 `focusKind`，默认 `plot_synopsis`）。系统**当轮立即切换焦点，无需用户点确认**。优先用 `focusChange`，不要只给「是否将焦点调整到第 N 章」的 `set_focus` 按钮停住；仅 `batchAutomation=true` 时禁止（焦点由前端推进）。
+- **用户指令换焦点**：用户本轮明确要求转到某章时，关闭批量推进也应执行；用 `focusChange.userRequestQuote` 原样摘录本轮相关指令（只引用当前用户消息，不从历史或文件找授权），由你理解自然语言，不要求固定口令。先只交付 `focusChange`，不要把目标章梗概/细纲/草稿同时交给仍捕获旧章的写入通道，也不要为凑草稿必交而重交旧章。用户还要求目标章写作时，同回 `continueTurn=true`，系统切换成功后重新读取目标章材料并继续这条原始请求；只换章则不续跑。`focusLocked`、Plan 模式、章节面板批量编排及前章发布门禁仍有效。前章已发布但另有修改草稿时，不必重复提交它才能进入下一章。
 - **按章回忆**：闪回、防剧透、核对旧说法时，可用 `query.purpose`：
   - `"as_of_chapter"` + `asOfChapterSequence`（设定沿革，非当前真相）+ `sourceKinds: ["reference"]`；`N` 须 **小于** 当前焦点章序；
   - `"past_chapter_text"` + `asOfChapterSequence`（第 N 章定稿正文）+ `sourceKinds: ["source"]`；`1 ≤ N ≤ 当前焦点章序`（可读当前焦点章定稿，不只是更早章）；

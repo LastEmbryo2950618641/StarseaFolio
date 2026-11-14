@@ -732,6 +732,8 @@ export const synopsisDiscussArtifactSchema = z.object({
   focusChange: z.object({
     chapterSequence: z.number().int().positive().max(10_000),
     focusKind: discussFocusKindSchema.optional(),
+    /** Exact quote from this user message requesting the switch; not a magic phrase. */
+    userRequestQuote: z.string().trim().min(1).max(4000).optional(),
   }).optional(),
   choices: z.array(z.object({
     label: z.string().min(1),
