@@ -70,6 +70,91 @@ async function withScript(
 }
 
 describe("discussion token loop regressions", { timeout: 30_000 }, () => {
+  it("repairs a focus-only response instead of requiring the old chapter draft", async () => {
+    const message = "把焦点切到第二章，写第二章细纲与正文。"
+    let calls = 0
+    await withScript((call, request, options) => {
+      calls = call
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      if (call === 1) return { focusChange: { chapterSequence: 2 }, choices }
+      const hint = options?.contextMessages?.at(-1)?.content ?? ""
+      expect(hint).toContain("userRequestQuote")
+      expect(hint).not.toContain("完整正文必交")
+      return { focusChange: { chapterSequence: 2, userRequestQuote: message }, continueTurn: true }
+    }, async (harness, send) => {
+      await seedCommittedChapter(harness)
+      const sent = await send({ message, batchProceed: false })
+      expect(sent.session.chapterSequence).toBe(2)
+      expect(sent.appendedDraft).toBeUndefined()
+      expect(sent.autoContinue?.message).toContain(message)
+      expect(calls).toBe(2)
+    })
+  })
+
+  it.each([
+    { name: "missing quote", quote: undefined, continueTurn: true },
+    { name: "quote copied from old history", quote: "上一轮请切到第二章", continueTurn: true },
+    { name: "switch only", quote: undefined, continueTurn: false },
+  ])("repairs focus metadata before demanding old-chapter writes ($name)", async ({ quote, continueTurn }) => {
+    const message = continueTurn ? "接下来处理第二章，把细纲和正文一起写好。" : "我们转到第二章。"
+    let calls = 0
+    await withScript((call, request) => {
+      calls = call
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return call === 1 ? {
+        focusChange: { chapterSequence: 2, ...(quote === undefined ? {} : { userRequestQuote: quote }) },
+        chapterTitle: "第二章 山村",
+        chapterDraftProposal: { ...draft, heading: "第二章 山村", body: "这份目标章文字不能被写入旧焦点。" },
+        choices,
+      } : {
+        focusChange: { chapterSequence: 2, userRequestQuote: message }, continueTurn, choices,
+      }
+    }, async (harness, send) => {
+      await seedCommittedChapter(harness)
+      const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      const countDrafts = () => (db.prepare("select count(*) as count from revision_draft_versions").get() as { count: number }).count
+      const before = countDrafts()
+      try {
+        const sent = await send({ message, batchProceed: false })
+        expect(sent.session.chapterSequence).toBe(2)
+        expect(sent.appendedDraft).toBeUndefined()
+        expect(countDrafts()).toBe(before)
+        expect(calls).toBe(2)
+        expect(sent.messages.at(-1)?.content).not.toContain("第一章正文已提交")
+        if (continueTurn) expect(sent.autoContinue?.message).toContain(message)
+        else expect(sent.autoContinue).toBeUndefined()
+      } finally { db.close() }
+    })
+  })
+
+  it.each([false, true])("bounds invalid focus repair and discards old-focus writes (withdrawn=%s)", async (withdrawn) => {
+    let calls = 0
+    await withScript((call, request) => {
+      calls = call
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return {
+        assistantMessage: "第二章焦点已切换，正文已提交。",
+        ...(call === 1 || !withdrawn ? { focusChange: { chapterSequence: 2 } } : {}),
+        chapterTitle: "第二章 山村", chapterDraftProposal: draft, continueTurn: true, choices,
+      }
+    }, async (harness, send) => {
+      await seedCommittedChapter(harness)
+      const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      const countDrafts = () => (db.prepare("select count(*) as count from revision_draft_versions").get() as { count: number }).count
+      const before = countDrafts()
+      try {
+        const sent = await send({ message: "把焦点转到第二章，继续写细纲与正文。", batchProceed: false })
+        expect(sent.session.chapterSequence).toBe(1)
+        expect(sent.appendedDraft).toBeUndefined()
+        expect(sent.autoContinue).toBeUndefined()
+        expect(countDrafts()).toBe(before)
+        expect(calls).toBe(2)
+        expect(sent.messages.at(-1)?.content).toContain("换章")
+        expect(sent.messages.at(-1)?.content).not.toContain("焦点已切换")
+      } finally { db.close() }
+    })
+  })
+
   it.each([
     { name: "switch only", message: "接下来请看第二章。", continueTurn: false, emptyPlanning: false, emptyOutline: false },
     { name: "switch and write", message: "把焦点切到第二章，写第二章细纲与正文。", continueTurn: true, emptyPlanning: false, emptyOutline: false },
@@ -121,16 +206,20 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
-  it("reloads target-chapter context before continuing only the requested work", async () => {
+  it.each([false, true])("reloads target-chapter context before continuing only the requested work (repair=%s)", async (repair) => {
     const message = "把焦点切到第二章，写第二章细纲与正文。"
     const title = "山村送信人"
     const synopsis = "# 第二章 山村送信人 剧情梗概\n\n林烬沿信件线索前往山村，找到送信人。\n"
     const outline = "# 第二章 山村送信人 剧情细纲\n\n- 章定位：找到送信人。\n- 分场：沿小路进村，向村民打听消息。\n- 人物准备：林烬和村民。\n"
     let calls = 0
+    const switchCall = repair ? 2 : 1
     await withScript((call, request) => {
       calls = call
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
-      if (call === 1) return {
+      if (repair && call === 1) return {
+        focusChange: { chapterSequence: 2 }, chapterDraftProposal: draft, choices,
+      }
+      if (call === switchCall) return {
         focusChange: { chapterSequence: 2, userRequestQuote: message }, continueTurn: true,
       }
       expect((request.input as TurnPhaseInput).synopsisDiscuss).toMatchObject({ chapterSequence: 2, synopsisMarkdown: synopsis })
@@ -148,7 +237,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       expect(next.appendedDraft?.draftVersionId).toBeTruthy()
       expect(next.autoContinue).toBeUndefined()
       expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(outline)
-      expect(calls).toBe(2)
+      expect(calls).toBe(switchCall + 1)
       const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
       try {
         const target = db.prepare("select chapter_sequence from chapter_revision_tasks where id = ?").get(next.appendedDraft!.revisionTaskId)

@@ -2778,6 +2778,7 @@ export class SynopsisConversationService {
     let missingVolumePlanRetries = 0
     let missingCreationDeskSettingsRetries = 0
     let missingChoicesRetries = 0
+    let pendingUserFocusSequence: number | undefined
     let originalWorkGateRepairs = 0
     let goalScheduleRepairs = 0
     let pendingWrites: PendingDiscussWrites | undefined
@@ -3321,6 +3322,51 @@ export class SynopsisConversationService {
       }
       const requestedReads = parsedResult.requestedReads
       const toolArtifact = synopsisDiscussArtifactSchema.safeParse(parsedResult.artifact)
+      const manualFocusChange = input.batchProceed !== true && input.batchAutomation !== true
+        && input.focusLocked !== true && (input.agentMode ?? "auto") !== "plan"
+        && input.creativeSetup === undefined
+      const proposedFocusSequence = toolArtifact.success ? toolArtifact.data.focusChange?.chapterSequence : undefined
+      if (manualFocusChange && (pendingUserFocusSequence !== undefined
+        || (proposedFocusSequence !== undefined && proposedFocusSequence !== input.chapterSequence))) {
+        // Resolve navigation before draft/todo/reference repairs can replay work for the captured old chapter.
+        pendingWrites = undefined
+        if (toolArtifact.success && proposedFocusSequence !== undefined && proposedFocusSequence !== input.chapterSequence
+          && isCurrentUserFocusChange(toolArtifact.data.focusChange, input.userMessage)) {
+          const transition = prepareUserFocusTransition(toolArtifact.data, input.chapterSequence, input.userMessage)
+          const result = finalizeDiscussReturn(input.projectId, latestBudgetAdvisory, {
+            content: transition.assistantMessage,
+            ...mapArtifactFocusChange(transition.focusChange),
+            ...(transition.continueTurn === true ? { continueTurn: true } : {}),
+            ...(transition.choices === undefined && transition.continueTurn === true ? {} : {
+              choices: transition.choices?.length ? transition.choices : [
+                { label: "查看目标章已有材料", action: "continue_discuss" as const },
+                { label: "按当前构思继续讨论目标章", action: "continue_discuss" as const },
+              ],
+            }),
+            ...(accumulatedReasoning.length === 0 ? {} : { reasoningContent: accumulatedReasoning }),
+            availableProseStylePaths, availableDescriptionRulePaths,
+            availableNovelMajorCategoryRulePaths, availableNovelSubcategoryRulePaths,
+          })
+          synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
+            content: result.content,
+            ...(result.reasoningContent === undefined ? {} : { thinking: result.reasoningContent }),
+          })
+          return result
+        }
+        if (pendingUserFocusSequence === undefined && remainingCalls > 0) {
+          pendingUserFocusSequence = proposedFocusSequence
+          repairHints.push(
+            `【换章指令补正，仅一次】上一轮提出切到第${String(proposedFocusSequence)}章，但 focusChange.userRequestQuote 缺失或不在本轮 userMessage 中。先核对本轮用户是否要求换章；若是，原样摘录该指令到 userRequestQuote，只返回 focusChange、assistantMessage、finalSelfReview 和可选 choices，用户还要求目标章写作时加 continueTurn=true；只换章不续跑。不要提交任何章节内容，不要补交旧章草稿，也不要调用工具。若本轮用户未要求换章，撤回该动作并说明。系统仅补正一次，仍不合格就停止且不应用该回复的章节改动。`,
+          )
+          runtimeLog("warn", "synopsis-conversation", "focus_change.quote_repair", {
+            projectId: input.projectId, sessionId: input.sessionId,
+            currentSequence: input.chapterSequence, targetSequence: proposedFocusSequence,
+          })
+          attempt += 1
+          continue
+        }
+        return stopDiscussLoop("换章请求未通过核验：模型补正后仍未提供有效的本轮指令引用，或撤回了换章动作。章节焦点保持原位，没有写入草稿版本，也未应用该回复的章节改动。请检查本轮请求后重试。")
+      }
       const interviewChoices = toolArtifact.success ? [...new Map((toolArtifact.data.choices ?? [])
         .filter(choice => !/^(?:你的想法|我有自己的想法)$/u.test(choice.label.trim()))
         .map(choice => [choice.label.trim(), choice])).values()] : []
