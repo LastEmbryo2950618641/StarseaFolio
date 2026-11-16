@@ -164,6 +164,7 @@ import { applySearchReplace } from "./markdown-search-replace.js"
 import {
   executeSynopsisTool,
   synopsisToolCatalog,
+  type SynopsisToolContext,
   type SynopsisWorkflowToolCallbacks,
   type SynopsisWorkflowToolResult,
 } from "./synopsis-workflow-tools.js"
@@ -652,6 +653,19 @@ export class SynopsisConversationService {
     const streamStartedAtMs = this.dependencies.now()
     synopsisConversationStreamHub.begin(input.projectId, session.sessionId, streamStartedAtMs)
     try {
+      const confirmedDraft = await this.publishConfirmedDraftIfRequested({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        session,
+        message: input.message,
+        model: input.model,
+        batchProceed: batchProceed && !batchAutomation,
+        ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
+        ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+        ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      })
+      if (confirmedDraft !== undefined) return confirmedDraft
       let setupMetadata: { workDisplayName?: string; workDescription?: string } = {}
       if (workStyleGateReadyAtStart) {
         const gateReply = await new CreativeSetupCoordinator({
@@ -1582,7 +1596,7 @@ export class SynopsisConversationService {
             "confirm_synopsis", "confirm_arc_plan", "set_focus", "start_turn", "promote_draft_to_body",
           ].includes(choice.action))
         : workflowChoices
-      const persistedChoices = draftSaveBlocked
+      let persistedChoices = draftSaveBlocked
         ? [
             { label: "检查当前章节规划与阻塞原因", action: "continue_discuss" as const },
             { label: "修复阻塞后重试保存草稿", action: "continue_discuss" as const },
@@ -1800,20 +1814,30 @@ export class SynopsisConversationService {
                 : volumeStoryNeedsUser
                   ? "继续：当前卷必须先由用户确认主线与支线。请依次询问开场场景、一个或多个高潮、卷末结局及支线事件与时机，给出贴合主题的选项并等待用户发送。"
                 : volumePlanningCompletedThisTurn
-                  ? "继续：当前卷首次规划已通过写入门禁，从第一章剧情梗概开始，严格按梗概、细纲、草稿、审核、图治理、正文顺序推进。"
+                  ? "继续：当前卷首次规划已通过写入门禁，从第一章剧情梗概开始，严格按梗概、细纲、草稿顺序推进。草稿确认后由宿主完成设定抽取、图治理和正文落盘。"
                   : savedDraftPublished
                     ? appliedFocusSequence !== undefined && appliedFocusSequence !== session.chapterSequence
                       ? `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成，焦点已切换到第${String(appliedFocusSequence)}章。根据该焦点章的已保存状态，按当前卷规划推进未完成步骤；不要再次跳章或重复发布上一章。`
                       : `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成。若当前卷仍有未完成章节，本轮只切换焦点到第${String(session.chapterSequence + 1)}章并设置 continueTurn=true，下一回合再写该章梗概；不要同轮向旧焦点写入新章材料，不要重复发布上一章。若当前卷已完成则结束任务。`
                   : savedDraft !== undefined
-                    ? `继续：当前章草稿已保存，revisionTaskId=${savedDraft.revisionTaskId}，draftVersionId=${savedDraft.draftVersionId}。先获取 publish_draft 接口说明，再对这个确切版本完成审核、图治理并发布；审核驳回时按反馈修复。不要执行可选润色或重复生成已保存的草稿；正文发布后才能进入下一章。`
+                    ? `继续：当前章草稿已保存（${savedDraft.draftLabel}）。请用户确认「草稿可以，发布正文」；确认前不要调用 publish_draft，也不要进入下一章。`
                     : synopsisProgressCompleted
                       ? `继续：第${String(session.chapterSequence)}章剧情梗概已写入并通过状态门禁。现在写入本章细纲与人物准备，之后再生成草稿；严格遵守梗概→细纲→草稿顺序。`
                       : outlineProgressCompleted
-                        ? `继续：第${String(session.chapterSequence)}章细纲已写入并通过状态门禁。现在按本章梗概与细纲生成正文草稿，再完成审核、图治理与发布。`
-                        : "继续：根据已落盘状态推进当前章尚未完成的下一步，顺序为梗概→细纲→草稿→审核→图治理→正文。已有草稿优先审核发布；正文发布后才能换章。上一轮 choices 是备选分支，只选择符合当前阶段的一条，不得将互斥选项全部执行，也不要自行反复润色已完成内容。",
+                        ? `继续：第${String(session.chapterSequence)}章细纲已写入并通过状态门禁。现在按本章梗概与细纲生成正文草稿。草稿保存后请用户确认「草稿可以，发布正文」，不要自行发布。`
+                        : "继续：根据已落盘状态推进当前章尚未完成的下一步，顺序为梗概→细纲→草稿。已有草稿时请用户确认「草稿可以，发布正文」，不要自行发布。上一轮 choices 是备选分支，只选择符合当前阶段的一条，不得将互斥选项全部执行，也不要自行反复润色已完成内容。",
           }
         : undefined
+      const publishableDraft = batchAutomation
+        ? undefined
+        : await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
+      if (publishableDraft !== undefined) {
+        persistedChoices = withDraftConfirmationChoice(persistedChoices, publishableDraft.draftLabel)
+        if (!assistantContent.includes(DRAFT_PUBLISH_CONFIRMATION)) {
+          assistantContent += "\n\n草稿已经写好。请确认「草稿可以，发布正文」；确认后会自动完成设定抽取、图治理并落入正文，中间不再询问。"
+        }
+        autoContinue = undefined
+      }
       if (autonomous) {
         const fingerprint = await this.readDiscussProgressFingerprint({
           projectId: input.projectId, workspaceRootRef: input.workspaceRootRef,
@@ -3515,6 +3539,7 @@ export class SynopsisConversationService {
               ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
             },
             callbacks: toolCallbacks,
+            allowPublish: isDraftPublishConfirmation(input.userMessage),
             visibleMessages,
             listDrafts: async () => {
               const revisions = this.dependencies.revisions
@@ -5052,6 +5077,105 @@ export class SynopsisConversationService {
     )
   }
 
+  private async publishConfirmedDraftIfRequested(input: Readonly<{
+    projectId: ProjectId
+    workspaceRootRef: string
+    session: Awaited<ReturnType<SynopsisConversationService["ensureActiveSession"]>>
+    message: string
+    model: AIModelPort
+    batchProceed: boolean
+    chapterIntent?: ChapterNarrativeIntent
+    presentation?: SynopsisToolContext["presentation"]
+    deadlineMs?: number
+    signal?: AbortSignal
+  }>): Promise<SynopsisConversationSendResult | undefined> {
+    if (!isDraftPublishConfirmation(input.message) || this.dependencies.publishDraft === undefined) return undefined
+    const draft = await this.findPublishableFocusDraft(input.projectId, input.session.chapterSequence)
+    if (draft === undefined) return undefined
+    const nowMs = this.dependencies.now()
+    await this.dependencies.conversation.appendMessage({
+      messageId: this.dependencies.createId(),
+      projectId: input.projectId,
+      sessionId: input.session.sessionId,
+      role: "user",
+      content: input.message,
+      createdAtMs: nowMs,
+    })
+    let content: string
+    let autoContinue: { message: string } | undefined
+    let choices: SynopsisConversationChoice[] | undefined
+    try {
+      const published = await this.dependencies.publishDraft({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        sessionId: input.session.sessionId,
+        chapterSequence: input.session.chapterSequence,
+        model: input.model,
+        revisionTaskId: draft.revisionTaskId,
+        draftVersionId: draft.draftVersionId,
+        ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
+        ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+        ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      })
+      const done = published.status === "completed" && published.error === undefined
+      content = done
+        ? `已确认草稿（${draft.draftLabel}）。设定抽取、图治理已完成，正文已落盘。`
+        : published.summary ?? published.error ?? "草稿已确认，但正文尚未落盘。"
+      if (done && input.batchProceed) {
+        autoContinue = { message: publishedChapterAutoContinueMessage(input.session.chapterSequence) }
+      } else if (!done) {
+        choices = withDraftConfirmationChoice(undefined, draft.draftLabel)
+      }
+    } catch (error) {
+      content = error instanceof Error ? error.message : String(error)
+    }
+    await this.dependencies.conversation.appendMessage({
+      messageId: this.dependencies.createId(),
+      projectId: input.projectId,
+      sessionId: input.session.sessionId,
+      role: "assistant",
+      content,
+      ...(choices === undefined ? {} : { choices }),
+      createdAtMs: nowMs + 1,
+    })
+    const usage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
+    synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), { content })
+    synopsisConversationStreamHub.clear(input.projectId)
+    const session = await this.dependencies.conversation.findSession(input.session.sessionId)
+    if (session === undefined) throw new SynopsisInvalidStateError("讨论会话不存在")
+    return {
+      session,
+      messages: [...await this.dependencies.conversation.listMessagesForProject(input.projectId)],
+      ...(usage === undefined ? {} : { usage }),
+      ...(autoContinue === undefined ? {} : { autoContinue }),
+    }
+  }
+
+  private async findPublishableFocusDraft(
+    projectId: ProjectId,
+    chapterSequence: number,
+  ): Promise<Readonly<{
+    revisionTaskId: string
+    draftVersionId: string
+    draftLabel: string
+    chapterId: string
+  }> | undefined> {
+    const revisions = this.dependencies.revisions
+    if (revisions === undefined) return undefined
+    const workspace = await revisions.getDraftWorkspace({ projectId, chapterSequence })
+    if (workspace === undefined || !PUBLISHABLE_DRAFT_STATUSES.has(workspace.status)) return undefined
+    const listed = await revisions.listDraftVersions(workspace.revisionTaskId)
+    const latest = listed.versions.find((version) => version.isLatest) ?? listed.versions.at(-1)
+    if (latest === undefined) return undefined
+    return {
+      revisionTaskId: workspace.revisionTaskId,
+      draftVersionId: latest.versionId,
+      draftLabel: latest.label,
+      chapterId: workspace.chapterId,
+    }
+  }
+
   private async readFocusedCommittedBody(
     projectId: ProjectId,
     workspaceRootRef: string,
@@ -6176,14 +6300,37 @@ function prepareUserFocusTransition(
   }
 }
 
+const DRAFT_PUBLISH_CONFIRMATION = "草稿可以，发布正文"
+const PUBLISHABLE_DRAFT_STATUSES = new Set([
+  "editing",
+  "reviewing",
+  "ready_to_submit",
+  "awaiting_user_decision",
+  "failed",
+])
+
+function isDraftPublishConfirmation(message: string): boolean {
+  return message.includes(DRAFT_PUBLISH_CONFIRMATION)
+}
+
+function publishedChapterAutoContinueMessage(chapterSequence: number): string {
+  return `继续：第${String(chapterSequence)}章正文已发布且图治理已完成。若当前卷仍有未完成章节，本轮只切换焦点到第${String(chapterSequence + 1)}章并设置 continueTurn=true，下一回合再写该章梗概；不要同轮向旧焦点写入新章材料，不要重复发布上一章。若当前卷已完成则结束任务。`
+}
+
+function withDraftConfirmationChoice(
+  choices: readonly SynopsisConversationChoice[] | undefined,
+  draftLabel: string,
+): SynopsisConversationChoice[] {
+  const rest = (choices ?? []).filter((choice) => choice.action !== "promote_draft_to_body")
+  return [{ label: `${DRAFT_PUBLISH_CONFIRMATION}（${draftLabel}）`, action: "promote_draft_to_body" }, ...rest]
+}
+
 function withPromoteDraftChoice(
   choices: SynopsisConversationChoice[] | undefined,
   draftLabel: string | undefined,
 ): SynopsisConversationChoice[] | undefined {
   if (draftLabel === undefined) return choices
-  const label = `是否确认用草稿(${draftLabel})经图治理覆盖正式正文`
-  const rest = (choices ?? []).filter((choice) => choice.action !== "promote_draft_to_body")
-  return [...rest, { label, action: "promote_draft_to_body" }]
+  return withDraftConfirmationChoice(choices, draftLabel)
 }
 
 export function filterDiscussChoices(

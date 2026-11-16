@@ -17,7 +17,7 @@ describe("graph revision progress", () => {
       { phase: "dependency_audit", status: "failed", attempt: 1 },
       { phase: "dependency_audit", status: "running", attempt: 2 },
     ], false)
-    expect(progress).toMatchObject({ completed: 1, total: 6, phase: "dependency_audit" })
+    expect(progress).toMatchObject({ completed: 1, total: 7, phase: "dependency_audit" })
     expect(progress.phases).toHaveLength(2)
     expect(graphRevisionProgress([{ phase: "graph_governance", status: "completed", attempt: 1 }], true)).toMatchObject({ completed: 1, total: 1 })
   })
@@ -25,10 +25,10 @@ describe("graph revision progress", () => {
     expect(graphRevisionProgress([
       { phase: "graph_governance", status: "completed", attempt: 1 },
       { phase: "interpret", status: "running", attempt: 1 },
-    ], false)).toMatchObject({ completed: 0, total: 6, phase: "graph_governance" })
+    ], false)).toMatchObject({ completed: 0, total: 7, phase: "graph_governance" })
   })
 
-  it("folds technical graph phases into six user-facing stages", () => {
+  it("folds technical graph phases into seven user-facing stages", () => {
     expect(graphRevisionProgress([
       { phase: "graph_governance", status: "completed", attempt: 1 },
       { phase: "dependency_audit", status: "completed", attempt: 1 },
@@ -37,7 +37,7 @@ describe("graph revision progress", () => {
       { phase: "graph_spacetime_settlement", status: "running", attempt: 1 },
     ], false)).toMatchObject({
       completed: 2,
-      total: 6,
+      total: 7,
       phase: "graph_structure_plan",
       phases: [
         { phase: "graph_governance", status: "completed" },

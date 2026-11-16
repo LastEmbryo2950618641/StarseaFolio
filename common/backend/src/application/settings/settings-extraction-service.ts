@@ -33,6 +33,41 @@ export class SettingsExtractionService {
     return this.dependencies.proposals.listPendingByTask(taskId)
   }
 
+  public async commitArtifact(input: Readonly<{
+    projectId: ProjectId
+    workspaceRootRef: string
+    taskId: string
+    phaseRunId: string
+    proposals: readonly SettingsExtractionProposalInput[]
+    worldDivergenceMode?: WorldDivergenceMode
+  }>): Promise<readonly SettingsExtractionProposal[]> {
+    const existing = await this.dependencies.proposals.listByTask(input.taskId)
+    const pending = existing.filter((proposal) => proposal.status === "pending")
+    if (pending.length > 0) {
+      await this.approveProposals({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        proposalIds: pending.map((proposal) => proposal.proposalId),
+      })
+    }
+    if (existing.length > 0) return this.dependencies.proposals.listByTask(input.taskId)
+    if (input.proposals.length === 0) return []
+    const created = await this.createProposalsFromArtifact({
+      projectId: input.projectId,
+      taskId: input.taskId,
+      phaseRunId: input.phaseRunId,
+      proposals: input.proposals,
+      ...(input.worldDivergenceMode === undefined ? {} : { worldDivergenceMode: input.worldDivergenceMode }),
+    })
+    if (created.length === 0) return []
+    await this.approveProposals({
+      projectId: input.projectId,
+      workspaceRootRef: input.workspaceRootRef,
+      proposalIds: created.map((proposal) => proposal.proposalId),
+    })
+    return this.dependencies.proposals.listByTask(input.taskId)
+  }
+
   public async createProposalsFromArtifact(input: Readonly<{
     projectId: ProjectId
     taskId: string

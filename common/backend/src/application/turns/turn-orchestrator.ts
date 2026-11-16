@@ -212,6 +212,7 @@ const evolutionExecutionPhases: readonly AIPhase[] = [
 ]
 
 export const revisionExecutionPhases: readonly AIPhase[] = [
+  "settings_extraction",
   "interpret",
   "rule_assembly",
   "source_retrieval",
@@ -229,6 +230,7 @@ export const revisionExecutionPhases: readonly AIPhase[] = [
 ]
 
 export const adaptiveRevisionExecutionPhases: readonly AIPhase[] = [
+  "settings_extraction",
   "graph_governance",
   "dependency_audit",
   "graph_structure_plan",
@@ -252,8 +254,8 @@ const phaseInternalArtifactDependencies = {
   dependency_audit: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "graph_governance"],
   settings_extraction: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit"],
   response_review: ["source_retrieval", "draft", "dependency_audit"],
-  graph_governance: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit"],
-  graph_structure_plan: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit", "graph_governance"],
+  graph_governance: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit", "settings_extraction"],
+  graph_structure_plan: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit", "settings_extraction", "graph_governance"],
   graph_capacity_rewrite: ["graph_structure_plan"],
   graph_spacetime_settlement: ["dependency_audit", "graph_structure_plan", "graph_governance"],
   graph_retrieval_design: ["graph_structure_plan", "graph_spacetime_settlement"],
@@ -275,7 +277,7 @@ const phaseModelArtifactDependencies = {
   commit_review: [],
 } as const satisfies Record<AIPhase, readonly AIPhase[]>
 
-const workspaceCatalogPhases = new Set<AIPhase>(["interpret", "rule_assembly", "source_retrieval"])
+const workspaceCatalogPhases = new Set<AIPhase>(["interpret", "rule_assembly", "source_retrieval", "settings_extraction"])
 
 export type WorldWorkflow = "turn" | "query" | "evolution" | "revision"
 
@@ -710,11 +712,107 @@ export class TurnOrchestrator {
     return this.continueExecution(input, initialState)
   }
 
+  private async runSettingsExtraction(
+    input: TurnOrchestratorInput,
+    state: TurnExecutionState,
+  ): Promise<void> {
+    if (state.artifacts.settings_extraction !== undefined) {
+      await this.commitSettingsExtractionArtifact(
+        input,
+        state.taskId,
+        state.phaseRuns.get("settings_extraction") ?? this.dependencies.createId(),
+        state.artifacts.settings_extraction,
+      )
+      return
+    }
+    const phase: AIPhase = "settings_extraction"
+    const phaseRunId = this.dependencies.createId()
+    const attempt = (state.phaseAttempts.get(phase) ?? 0) + 1
+    state.phaseAttempts.set(phase, attempt)
+    state.phaseRunIds.push(phaseRunId)
+    state.phaseRuns.set(phase, phaseRunId)
+    const result = await this.executePhase({
+      input,
+      inputScopeId: state.scopeId,
+      sourceId: state.sourceId,
+      sourceUnitIds: state.sourceUnitIds,
+      phase,
+      phaseRunId,
+      attempt,
+      phaseRunIds: state.phaseRunIds,
+      context: state.context,
+      artifacts: state.artifacts,
+      readEvidence: state.readEvidence,
+      visibleEvidence: state.visibleEvidence,
+      retrievalGaps: state.retrievalGaps,
+      verificationProbeCheckpoints: state.verificationProbeCheckpoints,
+      catalogSnapshot: state.catalogSnapshot,
+      modelContextChainId: state.modelContextChainId,
+      budget: state.budget,
+      usage: state.budgetWindowUsage,
+      ...(state.signal === undefined ? {} : { signal: state.signal }),
+    })
+    state.context = result.context
+    state.readEvidence = [...result.readEvidence]
+    state.visibleEvidence = [...result.visibleEvidence]
+    state.retrievalGaps = [...result.retrievalGaps]
+    state.artifacts.settings_extraction = result.artifact
+    state.budgetWindowUsage = addPhaseUsage(state.budgetWindowUsage, result.usage)
+    state.totalUsage = addPhaseUsage(state.totalUsage, result.usage)
+    await this.dependencies.persistence.saveTaskCheckpoint({
+      projectId: input.projectId,
+      taskId: state.taskId,
+      phaseRunId: result.phaseRunId,
+      phase,
+      context: state.context,
+      modelContextChainId: state.modelContextChainId,
+      savedAtMs: this.dependencies.now(),
+    })
+    await this.commitSettingsExtractionArtifact(input, state.taskId, result.phaseRunId, result.artifact)
+    this.log("info", "revision.settings_extraction.committed", {
+      taskId: state.taskId,
+      phaseRunId: result.phaseRunId,
+      proposalCount: settingsExtractionArtifactSchema.parse(result.artifact).proposals.length,
+    })
+  }
+
+  private async commitSettingsExtractionArtifact(
+    input: TurnOrchestratorInput,
+    taskId: string,
+    phaseRunId: string,
+    artifact: unknown,
+  ): Promise<void> {
+    if (this.dependencies.settingsExtraction === undefined) return
+    const extraction = settingsExtractionArtifactSchema.parse(artifact)
+    await this.dependencies.settingsExtraction.commitArtifact({
+      projectId: input.projectId,
+      workspaceRootRef: input.workspaceRootRef,
+      taskId,
+      phaseRunId,
+      proposals: extraction.proposals,
+      worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
+    })
+  }
+
   private async executeAdaptiveRevisionGraphGovernance(
     input: TurnOrchestratorInput,
     state: TurnExecutionState,
   ): Promise<WorldEvolutionExecutionResult> {
-    const phase: AIPhase = "graph_governance"
+    let phase: AIPhase = "settings_extraction"
+    try {
+      await this.runSettingsExtraction(input, state)
+    } catch (error) {
+      await this.dependencies.commit.resetPending(state.scopeId).catch(() => undefined)
+      await this.dependencies.persistence.updateTask(
+        state.taskId,
+        "awaiting_user_decision",
+        phase,
+        this.dependencies.now(),
+        createInterruptionRecord(error, phase, state.phaseRuns.get(phase), this.dependencies.now()),
+      )
+      throw error
+    }
+    phase = "graph_governance"
     const phaseRunId = this.dependencies.createId()
     const attempt = (state.phaseAttempts.get(phase) ?? 0) + 1
     state.phaseAttempts.set(phase, attempt)
@@ -793,7 +891,7 @@ export class TurnOrchestrator {
         })
         return await (this.continueExecution({ ...input, adaptiveGraphGovernance: "compact" }, {
           ...state,
-          startPhaseIndex: 1,
+          startPhaseIndex: 2,
           adaptiveGraphGovernance: "compact",
         }) as Promise<WorldEvolutionExecutionResult>)
       }
@@ -1558,6 +1656,16 @@ export class TurnOrchestrator {
       while (phaseIndex < executionPhases.length) {
         const phase = executionPhases[phaseIndex]
         if (phase === undefined) break
+        if (phase === "settings_extraction" && artifacts.settings_extraction !== undefined) {
+          await this.commitSettingsExtractionArtifact(
+            input,
+            state.taskId,
+            phaseRuns.get(phase) ?? this.dependencies.createId(),
+            artifacts.settings_extraction,
+          )
+          phaseIndex += 1
+          continue
+        }
         throwIfExecutionCancelled(state.signal)
         const compactRevision = workflow === "revision" && state.adaptiveGraphGovernance === "compact"
         if (compactRevision && phase === "graph_structure_plan") {
@@ -1901,38 +2009,8 @@ export class TurnOrchestrator {
           modelContextChainId: state.modelContextChainId,
           savedAtMs: this.dependencies.now(),
         })
-        if (phase === "settings_extraction" && workflow === "turn" && this.dependencies.settingsExtraction !== undefined) {
-          const extraction = settingsExtractionArtifactSchema.parse(result.artifact)
-          if (extraction.proposals.length > 0) {
-            const created = await this.dependencies.settingsExtraction.createProposalsFromArtifact({
-              projectId: input.projectId,
-              taskId: state.taskId,
-              phaseRunId: result.phaseRunId,
-              proposals: extraction.proposals,
-              worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
-            })
-            if (created.length > 0) {
-              const interruptedAtMs = this.dependencies.now()
-              const interruption = {
-                kind: "settings_extraction_review",
-                message: `正文已生成，抽取了 ${String(created.length)} 条设定修订提案，请确认后再继续图治理`,
-                recoverable: true,
-                blockedMetrics: [] as const,
-                phase,
-                phaseRunId: result.phaseRunId,
-                interruptedAtMs,
-                proposalCount: created.length,
-              }
-              await this.dependencies.persistence.updateTask(
-                state.taskId,
-                "waiting_for_review",
-                phase,
-                interruptedAtMs,
-                interruption,
-              )
-              throw new SettingsExtractionReviewPendingError(created.length)
-            }
-          }
+        if (phase === "settings_extraction") {
+          await this.commitSettingsExtractionArtifact(input, state.taskId, result.phaseRunId, result.artifact)
         }
         if (workflow === "query" && phase === "response_review") {
           const reviewDecision = queryReviewDecision(result, artifacts.source_retrieval)

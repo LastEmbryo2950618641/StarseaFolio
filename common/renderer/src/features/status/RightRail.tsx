@@ -45,7 +45,7 @@ const labels: Record<string, string> = {
   draft: "生成新草稿",
   chapter_naming: "生成章节标题",
   dependency_audit: "检查依赖闭合",
-  settings_extraction: "抽取设定提案",
+  settings_extraction: "抽取并写入设定",
   response_review: "审查正文响应",
   graph_governance: "治理世界图",
   graph_structure_plan: "候选结构规划",
@@ -613,6 +613,10 @@ function shouldShowOptionalPhase(phase: string, task: TaskSnapshot | undefined):
 }
 
 function shouldShowTopLevelPhase(phase: string, task: TaskSnapshot | undefined): boolean {
+  if (phase === "settings_extraction") {
+    const latest = task?.phaseRuns?.filter((run) => run.phase === phase).at(-1)
+    if (latest !== undefined && isActiveTaskStatus(task?.status)) return true
+  }
   if (!turnCutIdlePhases.has(phase)) return true
   return shouldShowOptionalPhase(phase, task)
 }

@@ -17,6 +17,7 @@ function elapsedText(startedAtMs: number): string {
   return seconds < 60 ? `${String(seconds)} 秒` : `${String(Math.floor(seconds / 60))} 分 ${String(seconds % 60)} 秒`
 }
 const phaseLabels: Record<string, string> = {
+  settings_extraction: "抽取并写入设定",
   interpret: "理解章节修订", rule_assembly: "装配规则", source_retrieval: "检索资料",
   emergence_planning: "规划内容", emergence_review: "审查内容", dependency_audit: "分析依赖与影响",
   graph_governance: "准备修订与证据", graph_structure_plan: "生成图变更",

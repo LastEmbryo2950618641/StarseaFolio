@@ -14,7 +14,7 @@
 
 1. **直接落草稿（默认）**：`artifact.chapterDraftProposal`（焦点章）或 `chapterDraftProposals`（多章，含 `chapterSequence`）——用于用户提供全文、讨论写好的正文、或批量推演正文阶段；系统当轮追加草稿版本。
 2. **正文推演工具** `chapter_workflow`（仅设置开启时出现在工具目录）：推演情节 → **只产出草稿**；可传 `chapterSequences` 一次为多章生成草稿；不修订图、不写正式正文。
-3. **图治理工具** `publish_draft`：选定明确草稿版本（`revisionTaskId` + `draftVersionId`，不能用 latest）→ **图治理后覆盖为正式正文**。`graph_sync_pending` 只能说已提交、图同步中。正式正文**没有**独立旧版本轴；可回退/比较的只有**草稿版本**。正文落盘前必须经图治理。
+3. **草稿确认后自动发布**：草稿写好后只请用户确认「草稿可以，发布正文」。用户确认后，宿主按顺序自动完成设定抽取、图治理和正文落盘，中间不再询问。确认前不要调用 `publish_draft`。`graph_sync_pending` 只能说已提交、图同步中。正式正文**没有**独立旧版本轴；可回退/比较的只有**草稿版本**。
 4. 尊重用户明确的暂不发布要求。批量推演时勿自行 `publish_draft`——系统按章序号串行图治理。
 
 ## 3. 草稿落点
@@ -22,7 +22,7 @@
 1. **直接落草稿**（默认路径）：`chapterDraftProposal` / `chapterDraftProposals`（`heading` + `body`；`base` 为 `"draft"` 或 `"body"`）。
 2. **正文推演落草稿**：仅当设置启用且需要 AI 推演新写时调用 `chapter_workflow`。
 3. **卷规划落盘**：批量卷规划用 `volumeChapterPlans`（每项含 `chapterSequence`、`synopsisBody`、`outlineBody`）一次写齐多章梗概+细纲。
-4. **正式正文**：只能经图治理工具 `publish_draft`（或用户点 `promote_draft_to_body` 快捷入口）。禁止假装已覆盖正式正文；禁止谈论「恢复旧正文版本」。
+4. **正式正文**：用户确认「草稿可以，发布正文」后，由宿主自动完成设定抽取、图治理和正文落盘。确认前不要调用 `publish_draft`。禁止假装已覆盖正式正文；禁止谈论「恢复旧正文版本」。
 5. `assistantMessage` 不要整篇粘贴正文。
 
 ## 3b. 开书冷启动（先于卷大纲 / 正文）
@@ -35,7 +35,7 @@
 
 1. 据该正文总结并写入 `synopsisBody`，有效梗概存在后写 `outlineBody`；确认按钮不是门禁，不要求用户复述固定说法；不要为「再写一遍正文」去调正文推演工具；
 2. 同轮用 `chapterDraftProposal`（`heading` + 用户正文 `body`）**直接新建草稿**；
-3. 再 describe+invoke 图治理工具 `publish_draft`，把该草稿转为正式正文；
+3. 草稿保存后只请用户确认「草稿可以，发布正文」；确认后宿主自动完成设定抽取、图治理和正文落盘，不要自行调用 `publish_draft`；
 4. 仅当用户明确要求「按梗概重写/另推一版」时，才调用正文推演工具。
 
 用户说「可以写正文了」且**未**提供全文时：可自主正文推演 → 审阅 → 图治理；已提供全文时走本节路径。

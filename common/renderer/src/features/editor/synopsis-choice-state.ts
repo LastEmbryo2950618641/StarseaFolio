@@ -68,6 +68,7 @@ export function choiceContribution(choice: SynopsisConversationChoice): string {
   if (choice.workStyleSelection !== undefined) return formatChoiceStyle(choice.workStyleSelection)
   if (choice.action === "confirm_synopsis") return "用这份梗概写细纲"
   if (choice.action === "start_turn") return "按细纲写正文"
+  if (choice.action === "promote_draft_to_body") return "草稿可以，发布正文"
   return choice.label
 }
 

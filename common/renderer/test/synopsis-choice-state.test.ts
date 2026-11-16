@@ -163,7 +163,8 @@ describe("choice contribution and explicit questionnaire send", () => {
   it("retains confirmation strings and the complete style rule selection", () => {
     expect(choiceContribution({ label: "确认梗概", action: "confirm_synopsis" })).toBe("用这份梗概写细纲")
     expect(choiceContribution({ label: "开始推演", action: "start_turn" })).toBe("按细纲写正文")
-    for (const action of ["promote_staging", "promote_draft_to_body", "set_focus", "confirm_arc_plan"] as const) {
+    expect(choiceContribution({ label: "确认草稿", action: "promote_draft_to_body" })).toBe("草稿可以，发布正文")
+    for (const action of ["promote_staging", "set_focus", "confirm_arc_plan"] as const) {
       expect(choiceContribution({ label: `确认 ${action}`, action })).toBe(`确认 ${action}`)
     }
     const selection = { novelMajorCategoryRulePath: "大类.md", novelSubcategoryRulePath: "次类.md", proseStyleRulePath: "笔风.md" }

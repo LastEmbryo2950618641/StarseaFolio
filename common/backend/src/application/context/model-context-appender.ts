@@ -30,6 +30,7 @@ export class ModelContextAppender {
       previousInputs,
     )
     const stageProjection = selectChangedStageProjection(input.stageProjection, previousInputs)
+    const revision = selectChangedStructuralValue(input.revision, previousInputs, "revision")
     const artifacts = selectChangedArtifacts(input.artifacts, previousDeltas)
     const workspaceCatalogAlreadyVisible = previousInputs.some((previous) => previous.workspaceCatalog !== undefined)
     const coreInput = firstRequestInTurn ? selectCoreTurnInput(input, previousInputs) : {}
@@ -40,6 +41,7 @@ export class ModelContextAppender {
       ...(factualEvidence.length === 0 ? {} : { readEvidence: factualEvidence }),
       ...(resurfacedReadIds.length === 0 ? {} : { resurfacedReadIds }),
       ...coreInput,
+      ...(revision === undefined ? {} : { revision }),
       ...(presentationEvidence.length === 0 ? {} : { presentationEvidence }),
       ...(retrievalGaps.length === 0 ? {} : { retrievalGaps }),
       ...(graphCapacity === undefined ? {} : { graphCapacity }),

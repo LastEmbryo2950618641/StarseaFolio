@@ -1162,16 +1162,25 @@ export class ProjectRuntime {
         })
         const latest = await new SqliteChapterRevisionRepository(this.database).find(submitted.revisionTaskId)
         const status = latest?.status ?? submitted.status
+        const graphTask = status === "completed" || !settled ? undefined
+          : (await this.listGraphRevisionTasks()).find((task) => task.revisionTaskId === submitted.revisionTaskId)
+        const error = graphTask !== undefined && ["failed", "interrupted", "cancelled"].includes(graphTask.status)
+          ? graphTask.error ?? `图治理执行未完成（${graphTask.status}）。`
+          : undefined
         return {
           revisionTaskId: submitted.revisionTaskId,
           chapterId: submitted.chapterId,
           draftVersionId: input.draftVersionId,
           status,
+          ...(latest === undefined ? {} : { graphSyncStatus: latest.graphSyncStatus }),
+          ...(error === undefined ? {} : { error }),
           summary: status === "completed"
             ? "图修订完成，已发布为正式正文；可继续下一章。"
-            : settled
-              ? `图修订结束但未发布（${status}），请检查图修订任务。`
-              : "图同步仍在进行，本轮先等待；下一轮继续时会自动等它完成。",
+            : error !== undefined
+              ? `图治理执行失败：${error} 本次未发布，草稿已保留，无需重复确认正文；请排查错误后重试图修订。`
+              : settled
+                ? `图修订结束但未发布（${status}），请检查图修订任务。`
+                : "图同步仍在进行，本轮先等待；下一轮继续时会自动等它完成。",
         }
       },
       waitForPendingPublications: async (input) => this.waitForActiveRevisionJobs(input),

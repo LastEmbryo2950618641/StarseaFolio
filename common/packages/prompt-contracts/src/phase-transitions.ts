@@ -17,7 +17,7 @@ export const phaseTransitions: Record<AIPhase, PhaseTransition> = {
   draft: { next: ["chapter_naming", "dependency_audit"], returnsTo: ["source_retrieval", "emergence_planning"] },
   chapter_naming: { next: ["dependency_audit"], returnsTo: ["draft"] },
   dependency_audit: { next: ["settings_extraction", "graph_governance", "response_review"], returnsTo: ["source_retrieval", "emergence_planning", "draft"] },
-  settings_extraction: { next: ["graph_structure_plan"], returnsTo: ["dependency_audit", "draft"] },
+  settings_extraction: { next: ["graph_governance", "graph_structure_plan"], returnsTo: ["dependency_audit", "draft"] },
   response_review: { next: [], returnsTo: ["source_retrieval", "draft"] },
   graph_governance: { next: ["semantic_review"], returnsTo: ["source_retrieval"] },
   graph_structure_plan: { next: ["graph_capacity_rewrite", "graph_spacetime_settlement"], returnsTo: ["source_retrieval"] },

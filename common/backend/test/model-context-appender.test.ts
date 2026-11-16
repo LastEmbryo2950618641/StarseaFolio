@@ -4,6 +4,22 @@ import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@starseaf
 import { ModelContextAppender } from "../src/index.js"
 
 describe("ModelContextAppender", () => {
+  it("preserves revision prose, deduplicates it, and appends edited prose within the same turn", () => {
+    const appender = new ModelContextAppender()
+    const request = { ...createRequest(), phase: "revision_review" as const }
+    const revision = { baseContent: "旧站台亮着灯。", proposedContent: "旧站台的灯熄灭了。" }
+    const modelRequest = { ...createModelRequest([], {}), input: { workflow: "revision", revision } }
+    const first = appender.createDelta(request, modelRequest, []) as { input: Record<string, unknown> }
+    expect(first.input.revision).toEqual(revision)
+    const message = visibleMessage({ messageId: "revision", sequence: 1, role: "user", kind: "phase_request",
+      phase: "revision_review", content: appender.formatDelta(first) })
+    const unchanged = appender.createDelta(request, modelRequest, [message]) as { input: Record<string, unknown> }
+    expect(unchanged.input.revision).toBeUndefined()
+    const edited = { ...revision, proposedContent: "旧站台的灯熄灭了，他取出手电。" }
+    const changed = appender.createDelta(request, { ...modelRequest, input: { ...modelRequest.input, revision: edited } }, [message]) as { input: Record<string, unknown> }
+    expect(changed.input.revision).toEqual(edited)
+  })
+
   it("does not discard a newly read web body when an older request reused its local read alias", () => {
     const appender = new ModelContextAppender()
     const previous = { ...evidence("read-1"), ownerKind: "web:search", ownerId: "https://example.com/old", digest: "search-summary" }

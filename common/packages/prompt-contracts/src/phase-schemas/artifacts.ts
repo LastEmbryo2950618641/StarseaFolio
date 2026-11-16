@@ -5,6 +5,7 @@ import {
   characterProfileSchema,
   creationDeskSettingsUpdateSchema,
   discussFocusKindSchema,
+  settingsExtractionProposalInputSchema,
   type AIPhase,
 } from "@starseafolio/contracts"
 
@@ -807,29 +808,7 @@ export const workNamingArtifactSchema = z.object({
 
 export const settingsExtractionArtifactSchema = z.object({
   summary: z.string().min(1),
-  proposals: z.array(z.object({
-    payload: z.discriminatedUnion("kind", [
-      z.object({
-        kind: z.literal("create"),
-        relativePath: z.string().min(1),
-        markdown: z.string().min(1),
-        readmeEntry: z.string().max(500).optional(),
-      }),
-      z.object({
-        kind: z.literal("update"),
-        relativePath: z.string().min(1),
-        markdown: z.string().min(1),
-      }),
-      z.object({
-        kind: z.literal("merge"),
-        targetPath: z.string().min(1),
-        markdown: z.string().min(1),
-        mergedFromPaths: z.array(z.string().min(1)).min(1),
-      }),
-    ]),
-    reason: z.string().max(1_000).optional(),
-    conflictNotes: z.string().max(2_000).optional(),
-  })),
+  proposals: z.array(settingsExtractionProposalInputSchema),
   finalSelfReview: z.string().min(1),
 })
 

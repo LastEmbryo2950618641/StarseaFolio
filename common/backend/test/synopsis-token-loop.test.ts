@@ -342,7 +342,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
-  it("does not request stop choices during autonomous continuation", async () => {
+  it("pauses autonomous continuation until the draft is confirmed", async () => {
     let calls = 0
     await withScript((call, request) => {
       calls = call
@@ -352,7 +352,9 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     }, async (_harness, send) => {
       const sent = await send()
       expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
-      expect(sent.autoContinue).toBeDefined()
+      expect(sent.autoContinue).toBeUndefined()
+      expect(sent.messages.at(-1)?.content).toContain("草稿可以，发布正文")
+      expect(sent.messages.at(-1)?.choices?.[0]?.action).toBe("promote_draft_to_body")
       expect(calls).toBe(1)
     })
   })
@@ -375,7 +377,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
-  it("continues with the saved draft instead of executing every alternative", async () => {
+  it("waits for draft confirmation instead of executing every alternative", async () => {
     await withScript((_call, request) => {
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
       return { chapterDraftProposal: draft, choices: [
@@ -384,11 +386,10 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       ] }
     }, async (_harness, send) => {
       const sent = await send()
-      expect(sent.autoContinue?.message).toContain(sent.appendedDraft!.draftVersionId)
-      expect(sent.autoContinue?.message).toContain(sent.appendedDraft!.revisionTaskId)
-      expect(sent.autoContinue?.message).toContain("publish_draft")
-      expect(sent.autoContinue?.message).not.toContain("可依次全部完成")
-      expect(sent.autoContinue?.message).not.toContain("把第一章结尾再改冷一点")
+      expect(sent.autoContinue).toBeUndefined()
+      expect(sent.messages.at(-1)?.choices?.[0]?.action).toBe("promote_draft_to_body")
+      expect(sent.messages.at(-1)?.choices?.some((choice) => choice.label === "把第一章结尾再改冷一点")).toBe(true)
+      expect(sent.messages.at(-1)?.content).toContain("中间不再询问")
     })
   })
 
@@ -807,55 +808,71 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
-  it.each([
-    { batchProceed: false, changeFocus: false },
-    { batchProceed: true, changeFocus: false },
-    { batchProceed: true, changeFocus: true },
-  ])("still runs review and graph governance before publishing ($batchProceed, $changeFocus)", async ({ batchProceed, changeFocus }) => {
-    let calls = 0
-    await withScript((call, _request, options) => {
-      calls = call
+  it("reports a graph execution failure after draft confirmation without another approval", async () => {
+    const timeoutMessage = "模型连续 120 秒未返回数据，已停止本次图同步，可重试。"
+    await withScript((call) => {
+      if (call === 1) return tool("todo_write")
+      if (call === 2) return tool("todo_write", "invoke", { todos, merge: false })
+      if (call === 3) return tool("chapter_workflow")
+      if (call === 4) return tool("chapter_workflow", "invoke", { userInput: "在雨夜站台找到一封信。" })
+      if (call === 5) return tool("todo_write", "invoke", { todos: todos.map((todo) => ({ ...todo, status: "completed" })), merge: true })
+      return { choices }
+    }, async (harness, send) => {
+      const original = FakeAiModelAdapter.prototype.execute
+      const execution = vi.spyOn(FakeAiModelAdapter.prototype, "execute").mockImplementation(function (request, options) {
+        if (request.phase === "graph_governance") return Promise.reject(new Error(timeoutMessage))
+        return original.call(this, request, options)
+      })
+      try {
+        const runtime = harness.container.getCurrentRuntime()!
+        const settings = await runtime.readSettings()
+        await runtime.saveSettings({ ...settings, creationDesk: { ...settings.creationDesk, chapterWorkflowEnabled: true } })
+        const drafted = await send({ maxModelCalls: 40, batchProceed: false })
+        expect(drafted.autoContinue).toBeUndefined()
+        expect(drafted.messages.at(-1)?.choices?.[0]?.action).toBe("promote_draft_to_body")
+        const published = await send({ message: "草稿可以，发布正文", maxModelCalls: 40, batchProceed: false })
+        expect(published.messages.at(-1)?.content).toContain("无需重复确认正文")
+        expect(published.messages.at(-1)?.content).toContain(timeoutMessage)
+        expect(published.autoContinue).toBeUndefined()
+        expect((await runtime.listGraphRevisionTasks())[0]).toMatchObject({ status: "failed", error: timeoutMessage, blocksTurn: true })
+        const chapters = await harness.facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method: "chapter.list",
+          payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef } })
+        expect(chapters.ok && chapters.data).toEqual([])
+      } finally { execution.mockRestore() }
+    })
+  })
+
+  it.each([false, true])("confirms the draft once, then runs review and graph governance before publishing (batchProceed=%s)", async (batchProceed) => {
+    await withScript((call) => {
       if (call === 1) return tool("todo_write")
       if (call === 2) return tool("todo_write", "invoke", { todos, merge: false })
       if (call === 3) return tool("chapter_workflow")
       if (call === 4) return tool("chapter_workflow", "invoke", { userInput: "林烬在雨夜站台找到失踪者留下的信。" })
-      if (call === 5) return tool("publish_draft")
-      if (call === 6) {
-        const created = options?.contextMessages?.flatMap((message) => {
-          try {
-            const value = JSON.parse(message.content) as { status?: string; result?: unknown }
-            return value.status === "draft_created" ? [value.result] : []
-          } catch { return [] }
-        }).at(-1) as { revisionTaskId: string; draftVersionId: string } | undefined
-        if (created === undefined) throw new Error("Workflow tool did not return a draft")
-        return tool("publish_draft", "invoke", { revisionTaskId: created.revisionTaskId, draftVersionId: created.draftVersionId })
-      }
-      if (call === 7) return tool("todo_write", "invoke", { todos: todos.map((todo) => ({ ...todo, status: "completed" })), merge: true })
-      return { choices, ...(changeFocus ? { focusChange: { chapterSequence: 2 } } : {}) }
+      if (call === 5) return tool("todo_write", "invoke", { todos: todos.map((todo) => ({ ...todo, status: "completed" })), merge: true })
+      return { choices }
     }, async (harness, send) => {
       const runtime = harness.container.getCurrentRuntime()
       if (runtime === undefined) throw new Error("Test runtime is not open")
       const settings = await runtime.readSettings()
       await runtime.saveSettings({ ...settings, creationDesk: { ...settings.creationDesk, chapterWorkflowEnabled: true } })
-      const sent = await send({ maxModelCalls: 40, batchProceed })
-      expect(calls).toBe(8)
+      const drafted = await send({ maxModelCalls: 40, batchProceed })
+      expect(drafted.autoContinue).toBeUndefined()
+      expect(drafted.messages.at(-1)?.choices?.[0]?.action).toBe("promote_draft_to_body")
+      const sent = await send({ message: "草稿可以，发布正文", maxModelCalls: 40, batchProceed })
       const response = await harness.facade.handle({
         protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method: "chapter.list",
         payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef },
       })
       if (!response.ok) throw new Error(response.error.message)
       expect(response.data).toHaveLength(1)
-      expect(sent.messages.at(-1)?.toolRuns?.some((run) => run.name === "publish_draft" && run.status === "completed")).toBe(true)
+      expect(sent.messages.at(-1)?.content).toContain("正文已落盘")
+      expect(sent.messages.at(-1)?.toolRuns?.some((run) => run.name === "publish_draft")).toBeFalsy()
       if (batchProceed) {
         expect(sent.autoContinue?.message).toContain("正文已发布")
+        expect(sent.autoContinue?.message).toContain("本轮只切换焦点")
         expect(sent.autoContinue?.message).not.toContain("publish_draft")
-        if (changeFocus) {
-          expect(sent.session.chapterSequence).toBe(2)
-          expect(sent.autoContinue?.message).toContain("第2章")
-          expect(sent.autoContinue?.message).not.toContain("先切换")
-        } else {
-          expect(sent.autoContinue?.message).toContain("本轮只切换焦点")
-        }
+      } else {
+        expect(sent.autoContinue).toBeUndefined()
       }
     })
   })

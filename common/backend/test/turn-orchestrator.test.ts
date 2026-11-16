@@ -49,6 +49,8 @@ import {
   type WebResearchPort,
   type WorkspacePort,
 } from "../src/index.js"
+import { SettingsExtractionService } from "../src/application/settings/settings-extraction-service.js"
+import { SqliteSettingsExtractionRepository } from "../src/infrastructure/sqlite/repositories/sqlite-settings-extraction-repository.js"
 
 const temporaryDirectories: string[] = []
 const openDatabases: Array<{ destroy(): Promise<void> }> = []
@@ -4323,9 +4325,84 @@ describe("TurnOrchestrator", () => {
     })
 
     expect(result).toMatchObject({ kind: "evolution", graphMutationCount: 0 })
-    expect(observedPhases).toEqual(["graph_governance"])
+    expect(observedPhases).toEqual(["settings_extraction", "graph_governance"])
     expect(await fixture.database.selectFrom("tasks").select("status").where("id", "=", result.taskId).executeTakeFirstOrThrow())
       .toEqual({ status: "completed" })
+  })
+
+  it("writes extracted settings before graph governance and passes them into that context", async () => {
+    const fixture = await createFixture()
+    const fake = new FakeAiModelAdapter(randomUUID)
+    const first = await fixture.createOrchestrator(fake, fixture.commit).execute({
+      projectId: fixture.projectId,
+      workspaceRootRef: fixture.workspaceRoot,
+      internalStore: fixture.store,
+      userInput: "先建立一章可供修订的正文。",
+      chapterSequence: 1,
+      allowWorkspaceChapterReads: false,
+    })
+    if (first.kind !== "turn") throw new Error("Expected a committed turn")
+    const chapter = (await fixture.documentRepository.listCommittedChapters(fixture.projectId))[0]
+    if (chapter === undefined) throw new Error("Expected a committed chapter")
+    const sourceUnits = await fixture.documentRepository.listSourceUnits(fixture.projectId, chapter.sourceId)
+    const observedPhases: string[] = []
+    let graphArtifacts: TurnPhaseInput["artifacts"] | undefined
+    const extraction = {
+      summary: "本章新增旧桥。",
+      proposals: [{
+        payload: {
+          kind: "create" as const,
+          relativePath: "设定集/地点/旧桥.md",
+          markdown: "# 旧桥\n\n城外的石桥。\n",
+          readmeEntry: "`设定集/地点/旧桥.md` · 旧桥 · 第 1 章",
+        },
+        reason: "正文首次出现旧桥",
+      }],
+      finalSelfReview: "一条地点设定已抽出。",
+    }
+    const model: AIModelPort = {
+      info: fake.info,
+      execute: async (request, options) => {
+        observedPhases.push(request.phase)
+        const execution = await fake.execute(request, options)
+        if (request.phase === "graph_governance") {
+          graphArtifacts = (request.input as TurnPhaseInput).artifacts
+        }
+        if (request.phase !== "settings_extraction" || execution.result.artifact === undefined) return execution
+        const result = { ...execution.result, artifact: extraction }
+        return {
+          ...execution,
+          result,
+          contextExchange: {
+            ...execution.contextExchange,
+            responseMessage: {
+              ...execution.contextExchange.responseMessage,
+              content: JSON.stringify(result),
+            },
+          },
+        }
+      },
+    }
+
+    const result = await fixture.createOrchestrator(model, fixture.commit).execute({
+      workflow: "revision",
+      adaptiveGraphGovernance: true,
+      projectId: fixture.projectId,
+      workspaceRootRef: fixture.workspaceRoot,
+      internalStore: fixture.store,
+      userInput: "# 第一章 修订版\n\n[no-change] 林序第一次走上旧桥。",
+      chapterSequence: 1,
+      existingSourceUnitIds: sourceUnits.map((unit) => unit.id),
+      allowWorkspaceChapterReads: false,
+    })
+
+    expect(result).toMatchObject({ kind: "evolution", graphMutationCount: 0 })
+    expect(observedPhases).toEqual(["settings_extraction", "graph_governance"])
+    expect(graphArtifacts?.settings_extraction).toMatchObject({ summary: "本章新增旧桥。" })
+    expect(readFileSync(join(fixture.workspaceRoot, "设定集/地点/旧桥.md"), "utf8")).toContain("城外的石桥")
+    expect(readFileSync(join(fixture.workspaceRoot, "设定集/readme.md"), "utf8")).toContain("设定集/地点/旧桥.md")
+    const proposals = await fixture.database.selectFrom("settings_extraction_proposals").select(["status"]).execute()
+    expect(proposals).toEqual([{ status: "approved" }])
   })
 
   it("commits a self-contained local revision without the full governance chain", async () => {
@@ -4365,7 +4442,7 @@ describe("TurnOrchestrator", () => {
     })
 
     expect(result).toMatchObject({ kind: "evolution", graphMutationCount: 5 })
-    expect(observedPhases).toEqual(["graph_governance"])
+    expect(observedPhases).toEqual(["settings_extraction", "graph_governance"])
     expect(await fixture.database.selectFrom("graph_revisions").selectAll().execute()).toHaveLength(10)
     expect(await fixture.database.selectFrom("tasks").select("status").where("id", "=", result.taskId).executeTakeFirstOrThrow())
       .toEqual({ status: "completed" })
@@ -4652,6 +4729,12 @@ async function createFixture() {
         ...(diagnostics?.synopsisConversation === undefined
           ? {}
           : { synopsisConversation: diagnostics.synopsisConversation as never }),
+        settingsExtraction: new SettingsExtractionService({
+          proposals: new SqliteSettingsExtractionRepository(database),
+          workspace,
+          createId: randomUUID,
+          now: () => Date.now(),
+        }),
         createId: randomUUID,
         idAllocator: new SqliteProjectIdAllocator(database),
         now: () => Date.now(),

@@ -22,6 +22,25 @@ import {
 const promptRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
 
 describe("DeepSeekAiModelAdapter", () => {
+  it("sends the base and proposed chapter prose to the revision reviewer", async () => {
+    const revision = { chapterId: randomUUID(), baseSourceId: randomUUID(), proposedSourceId: randomUUID(),
+      baseContent: "旧站台亮着灯。", proposedContent: "旧站台的灯熄灭了，他取出手电。" }
+    const request = createRequest({ phase: "revision_review", input: { workflow: "revision", userInput: "审核编辑后的正文。",
+      allowWorkspaceChapterReads: false, readEvidence: [], artifacts: {}, revision } })
+    const fake = await new FakeAiModelAdapter().execute(request)
+    let visibleRevision: unknown
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot),
+      { complete: (input) => {
+        const delta = input.messages.find((message) => message.content.startsWith("Worldseed context delta JSON:\n"))
+        visibleRevision = delta === undefined ? undefined : JSON.parse(delta.content.slice(delta.content.indexOf("\n") + 1)).input.revision
+        return Promise.resolve({ content: JSON.stringify(toModelResult(fake.result)) })
+      } },
+    )
+    await adapter.execute(request)
+    expect(visibleRevision).toEqual({ baseContent: revision.baseContent, proposedContent: revision.proposedContent })
+  })
+
   it("resends visible evidence after removing historical phase exchanges from graph sync", async () => {
     const evidence = modelEvidence("evidence_42", "Current graph evidence")
     const request = createRequest({ committedReadIds: ["evidence_42"], input: { ...createRequest().input as object, workflow: "revision", readEvidence: [evidence] } })

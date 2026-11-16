@@ -56,7 +56,7 @@ export function SynopsisChoiceGroup(props: Readonly<{
         label: choice.action === "start_turn" ? "调用正文推演工具" : choice.label,
         original: choice.label,
         contribution: choiceContribution(choice),
-        ...(choice.action === "start_turn" || choice.action === "confirm_synopsis"
+        ...(choice.action === "start_turn" || choice.action === "confirm_synopsis" || choice.action === "promote_draft_to_body"
           ? { command: choiceContribution(choice) } : {}),
         ...(choice.workStyleSelection === undefined ? {} : { style: true }),
       }

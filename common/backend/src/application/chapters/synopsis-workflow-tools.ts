@@ -58,6 +58,8 @@ export type SynopsisPublishDraftResult = Readonly<{
   draftVersionId: string
   status: string
   summary?: string
+  graphSyncStatus?: string
+  error?: string
 }>
 export type SynopsisRestageInput = SynopsisToolContext & Readonly<{
   targetStage: "synopsis" | "outline"
@@ -181,10 +183,10 @@ const descriptions = {
   publish_draft: {
     parameters: { revisionTaskId: "string (required)", draftVersionId: "string (required)" },
     writingGuide: [
-      "【图治理工具】把指定**草稿版本**经图治理管线转换为/覆盖为**正式正文**。",
-      "必须从 drafts 或先前工具结果中选择明确 revisionTaskId+draftVersionId，不能用 latest。",
+      "【发布正文】用户确认「草稿可以，发布正文」后，宿主会自动执行：设定抽取写入设定集 → 图治理 → 正文落盘。确认前不要调用本工具，也不要再询问设定或图治理。",
+      "若仍由你调用：必须从 drafts 或先前工具结果中选择明确 revisionTaskId+draftVersionId，不能用 latest。",
       "正式正文不存在独立「旧版本」轴：只有草稿可回退/比较；正文落盘前必须经过本工具。",
-      "草稿必须先经过审核；审核发现设定或逻辑冲突会驳回并退回梗概阶段。工具会等待图同步完成：status=completed 即已发布，可直接继续写/发布下一章；",
+      "草稿审核、设定抽取和图治理都在本工具内自动完成；审核发现设定或逻辑冲突会驳回并退回梗概阶段。status=completed 即已发布，可直接继续下一章；",
       "status 仍为 graph_sync_pending 表示同步未完成，不能声称已发布，也不要停下来请用户选择——系统会自动续跑。",
     ].join(""),
   },
@@ -459,6 +461,8 @@ export async function executeSynopsisTool(input: Readonly<{
   callbacks: SynopsisWorkflowToolCallbacks
   visibleMessages: readonly VisibleModelContextMessage[]
   listDrafts: () => Promise<readonly SynopsisDraftReference[]>
+  /** False until the user confirms the draft. Host publication does not use this tool. */
+  allowPublish?: boolean
 }>): Promise<Record<string, unknown>> {
   const { request, context, callbacks } = input
   const envelope = { protocol, name: request.name, action: request.action, chapterSequence: context.chapterSequence }
@@ -595,6 +599,14 @@ export async function executeSynopsisTool(input: Readonly<{
       const result = await callbacks.downloadOriginalWork({ ...context, title: requiredText(args, "title"), bookId: requiredText(args, "bookId"), chapterLimit: args.chapterLimit, ...(args.startChapter === undefined ? {} : { startChapter: args.startChapter }) })
       return { ...envelope, status: "reference_imported", result }
     }
+    if (input.allowPublish === false) {
+      return {
+        ...envelope,
+        status: "error",
+        code: "draft_confirmation_required",
+        message: "草稿需要用户先确认「草稿可以，发布正文」。确认后宿主会自动完成设定抽取、图治理和正文落盘，不要再次调用本工具。",
+      }
+    }
     const args = parseArguments(request.arguments, ["revisionTaskId", "draftVersionId"])
     const revisionTaskId = requiredText(args, "revisionTaskId")
     const draftVersionId = requiredText(args, "draftVersionId")
@@ -605,6 +617,9 @@ export async function executeSynopsisTool(input: Readonly<{
     context.signal?.throwIfAborted()
     const result = await callbacks.publishDraft!({ ...context, revisionTaskId, draftVersionId })
     context.signal?.throwIfAborted()
+    if (result.error !== undefined) {
+      return { ...envelope, status: "error", code: "publication_failed", message: result.error, result }
+    }
     return { ...envelope, status: "publication_submitted", result }
   } catch (error) {
     context.signal?.throwIfAborted()
