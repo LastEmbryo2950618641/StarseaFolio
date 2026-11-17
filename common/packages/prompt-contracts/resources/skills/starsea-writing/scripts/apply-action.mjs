@@ -91,9 +91,9 @@ switch (action.name) {
       task.canContinue = false
       task.progress = {
         completed: 0,
-        total: 6,
-        phase: "graph_governance",
-        phases: [{ phase: "graph_governance", status: "running", attempt: 1 }],
+        total: 7,
+        phase: "settings_extraction",
+        phases: [{ phase: "settings_extraction", status: "running", attempt: 1 }],
       }
       task.updatedAtMs = now
     }

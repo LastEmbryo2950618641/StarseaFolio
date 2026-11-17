@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process"
-import { pathToFileURL, fileURLToPath } from "node:url"
+import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import type { FolioAction, FolioUiState } from "@starseafolio/contracts"
-import type { FolioRuntimeActionHandlers } from "./folio-action-host.js"
+import { executeFolioActionWithHost, type FolioRuntimeActionHandlers } from "./folio-action-host.js"
 import { FolioWorkspace } from "./folio-workspace.js"
 
 const defaultScriptsDir = join(
@@ -16,29 +16,21 @@ export type FolioSkillRunnerDependencies = Readonly<{
   folio?: FolioWorkspace
   /** When set, StarseaFolio / Codex host runtime executes real publish/graph work. */
   hostHandlers?: FolioRuntimeActionHandlers
-  /**
-   * Allow offline `scripts/*.mjs` stubs when hostHandlers are absent.
-   * Production Codex/StarseaFolio must use hostHandlers (folio-run); stubs are protocol tests only.
-   */
-  allowOfflineStubs?: boolean
 }>
 
 /**
- * Thin host runner: claims Folio actions and dispatches into skill-pack scripts.
- * With hostHandlers, `hosted-dispatch.mjs` owns the flow and calls host capabilities.
- * Without handlers, offline stubs require allowOfflineStubs.
+ * Thin host runner: enqueue/claim Folio actions and invoke skill scripts or host handlers.
+ * Business prompts and disk writes live in the skill pack / hostHandlers, not in UI code.
  */
 export class FolioSkillRunner {
   private readonly folio: FolioWorkspace
   private readonly scriptsDir: string
   private readonly hostHandlers: FolioRuntimeActionHandlers | undefined
-  private readonly allowOfflineStubs: boolean
 
   public constructor(private readonly dependencies: FolioSkillRunnerDependencies) {
     this.folio = dependencies.folio ?? new FolioWorkspace(dependencies.workspaceRoot)
     this.scriptsDir = dependencies.scriptsDir ?? defaultScriptsDir
     this.hostHandlers = dependencies.hostHandlers
-    this.allowOfflineStubs = dependencies.allowOfflineStubs === true
   }
 
   public async initialize(host: "starseafolio" | "codex" | "claude"): Promise<FolioUiState> {
@@ -66,12 +58,7 @@ export class FolioSkillRunner {
     const action = await this.folio.claimNextAction()
     if (action === undefined) return this.folio.readUiState()
     if (this.hostHandlers !== undefined) {
-      return this.dispatchHostedAction(action, this.hostHandlers)
-    }
-    if (!this.allowOfflineStubs) {
-      throw new Error(
-        `Folio action ${action.name} 需要 ProjectRuntime hostHandlers（folio-run / 星海余页）。离线 stub 仅用于协议自测（allowOfflineStubs）。`,
-      )
+      return executeFolioActionWithHost(this.folio, action, this.hostHandlers)
     }
     const donePath = join(
       this.dependencies.workspaceRoot,
@@ -89,43 +76,11 @@ export class FolioSkillRunner {
     return this.folio.readUiState()
   }
 
-  /** Skill-pack hosted-dispatch.mjs owns action routing; hostHandlers supply real disk/model work. */
-  public async dispatchHostedAction(
-    action: FolioAction,
-    handlers: FolioRuntimeActionHandlers,
-  ): Promise<FolioUiState> {
-    const moduleUrl = pathToFileURL(join(this.scriptsDir, "hosted-dispatch.mjs")).href
-    const hosted = await import(moduleUrl) as {
-      executeHostedAction: (
-        folio: {
-          readUiState: () => Promise<FolioUiState>
-          writeUiState: (state: FolioUiState) => Promise<FolioUiState>
-        },
-        action: FolioAction,
-        handlers: FolioRuntimeActionHandlers,
-      ) => Promise<FolioUiState>
-    }
-    return hosted.executeHostedAction(
-      {
-        readUiState: () => this.folio.readUiState(),
-        writeUiState: (state) => this.folio.writeUiState(state),
-      },
-      action,
-      handlers,
-    )
-  }
-
   public async runScript(scriptName: string, extraArgs: readonly string[] = []): Promise<string> {
     const scriptPath = join(this.scriptsDir, scriptName)
     const args = [scriptPath, "--workspace", this.dependencies.workspaceRoot, ...extraArgs]
     return await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, args, {
-        cwd: this.scriptsDir,
-        env: {
-          ...process.env,
-          ...(this.allowOfflineStubs ? { STARSEA_FOLIO_ALLOW_STUB: "1" } : {}),
-        },
-      })
+      const child = spawn(process.execPath, args, { cwd: this.scriptsDir })
       let stdout = ""
       let stderr = ""
       child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8") })

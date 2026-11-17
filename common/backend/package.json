@@ -14,8 +14,7 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "start:stdio": "node dist/bootstrap/standalone-entry.js",
-    "start:http": "node dist/bootstrap/http-entry.js",
-    "folio-run": "node dist/cli/folio-run.js"
+    "start:http": "node dist/bootstrap/http-entry.js"
   },
   "dependencies": {
     "@starseafolio/config": "workspace:*",

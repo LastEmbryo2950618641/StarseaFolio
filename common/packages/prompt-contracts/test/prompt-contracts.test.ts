@@ -120,7 +120,7 @@ describe("prompt contracts", () => {
     const packageRoot = resolve(process.cwd(), "common/packages/prompt-contracts")
     const readResource = (resource: string): string => readFileSync(resolve(packageRoot, resource), "utf8")
     const referenceGuide = readResource(SETTINGS_QUERY_GUIDE_RESOURCE)
-    const discussWorkflow = readResource("resources/skills/starsea-writing/prompts/creation-desk-workflow.md")
+    const discussWorkflow = readResource("resources/v1/discuss-creation-desk-workflow.md")
 
     for (const text of [referenceGuide, discussWorkflow]) {
       expect(text).toContain("参考文件/原作资料/")
@@ -334,9 +334,6 @@ describe("prompt contracts", () => {
     expect(extraction).toContain("## 性格")
     expect(extraction).toContain("姓名")
     expect(extraction).toContain("性别")
-    expect(extraction).toContain("workStyleRevision")
-    expect(extraction).toContain("userRequirements")
-    expect(extraction).toContain("融合")
   })
 
   it("keeps rule assembly semantic and lets the runtime own its snapshot identity", () => {

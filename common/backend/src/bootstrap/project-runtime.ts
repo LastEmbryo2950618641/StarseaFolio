@@ -14,13 +14,11 @@ import type {
   FolioActionName,
   FolioHostKind,
   FolioUiState,
-  SynopsisConversationSendResult,
 } from "@starseafolio/contracts"
 import { PROTOCOL_VERSION } from "@starseafolio/contracts"
-import { appendCreationDeskExchange, syncCreationDeskPanel } from "../application/folio/folio-action-host.js"
+import { appendCreationDeskExchange } from "../application/folio/folio-action-host.js"
 import { FolioSkillRunner } from "../application/folio/folio-skill-runner.js"
-import { FolioWorkspace, settingsExtractionRunArtifactName } from "../application/folio/folio-workspace.js"
-import { settingsExtractionArtifactSchema } from "@starseafolio/prompt-contracts"
+import { FolioWorkspace } from "../application/folio/folio-workspace.js"
 
 import {
   TurnOrchestrator,
@@ -44,7 +42,7 @@ import {
   type PromptResourcePort,
 } from "../application/index.js"
 import type { InternalProjectStore, WorkspacePort, InternalStorePort } from "../application/workspace/index.js"
-import { PROJECT_MANIFEST_VERSION, DEFAULT_VOLUME_FOLDER_NAME, collectUserRequirementText, digest, parseChapterSequenceFromLabel, WORK_STYLE_RULE_PATH } from "../core/index.js"
+import { PROJECT_MANIFEST_VERSION, DEFAULT_VOLUME_FOLDER_NAME, digest, parseChapterSequenceFromLabel, WORK_STYLE_RULE_PATH } from "../core/index.js"
 import { canProceedPastWorkStyleGate } from "../core/workspace/work-style-gate-state.js"
 import {
   incrementVolumePlanningWriteCount,
@@ -102,7 +100,6 @@ export class ProjectRuntime {
     done: Promise<void>
     activity?: GraphRevisionTask["activity"]
   }>()
-  private lastCreationDeskSendResult: SynopsisConversationSendResult | undefined
   private readonly nikowenku: NikowenkuReferenceService
 
   public async assertWorkStyleGateReady(): Promise<void> {
@@ -239,89 +236,6 @@ export class ProjectRuntime {
       workspaceRoot: this.workspaceRootRef,
       hostHandlers: {
         listGraphTasks: async () => this.listGraphRevisionTasks(),
-        creationDeskSend: async (action) => {
-          if (model === undefined) throw new Error("creationDesk.send 需要模型")
-          const message = String(action.input.message ?? action.input.text ?? "").trim()
-          if (message.length === 0) throw new Error("creationDesk.send 需要 message")
-          const result = await this.createSynopsisConversationService().send({
-            projectId: this.projectId,
-            workspaceRootRef: this.workspaceRootRef,
-            message,
-            model,
-            ...(typeof action.input.setupAnswerTo === "string"
-              ? { setupAnswerTo: action.input.setupAnswerTo }
-              : {}),
-            ...(action.input.presentation !== undefined && typeof action.input.presentation === "object"
-              ? { presentation: action.input.presentation as never }
-              : {}),
-            ...(action.input.chapterIntent !== undefined && typeof action.input.chapterIntent === "object"
-              ? { chapterIntent: action.input.chapterIntent as never }
-              : {}),
-            ...(typeof action.input.maxModelCalls === "number"
-              ? { maxModelCalls: action.input.maxModelCalls }
-              : {}),
-            ...(typeof action.input.deadlineMs === "number" ? { deadlineMs: action.input.deadlineMs } : {}),
-            ...(action.input.focusLocked === true ? { focusLocked: true } : {}),
-            ...(typeof action.input.lockedChapterSequence === "number"
-              ? { lockedChapterSequence: action.input.lockedChapterSequence }
-              : {}),
-            ...(typeof action.input.lockedFocusKind === "string"
-              ? { lockedFocusKind: action.input.lockedFocusKind as never }
-              : {}),
-            ...(typeof action.input.automation === "string"
-              ? { automation: action.input.automation as never }
-              : {}),
-            ...(action.input.batchProceed === true ? { batchProceed: true } : {}),
-            ...(typeof action.input.agentMode === "string"
-              ? { agentMode: action.input.agentMode as never }
-              : {}),
-          })
-          this.lastCreationDeskSendResult = result
-          const assistant = [...result.messages].reverse().find((entry) => entry.role === "assistant")
-          const choices = (assistant?.choices ?? []).map((choice, index) => ({
-            id: choice.setupQuestionId ?? `choice-${String(index)}`,
-            label: choice.label,
-            action: choice.action,
-          }))
-          const todos = (assistant?.todos ?? []).map((todo) => ({
-            id: todo.id,
-            content: todo.content,
-            status: todo.status,
-          }))
-          return {
-            userText: message,
-            assistantText: assistant?.content ?? "",
-            ...(assistant?.error === undefined ? {} : { error: assistant.error }),
-            ...(choices.length === 0 ? {} : { choices }),
-            ...(todos.length === 0 ? {} : { todos }),
-          }
-        },
-        syncCreationDesk: async () => this.syncCreationDeskPanelFromConversation(),
-        settingsWrite: async (action) => {
-          if (model === undefined) throw new Error("settings-write 需要模型")
-          const revisionTaskId = String(action.input.revisionTaskId ?? "")
-          const draftVersionId = String(action.input.draftVersionId ?? "")
-          if (revisionTaskId.length === 0 || draftVersionId.length === 0) {
-            throw new Error("settings-write 需要 revisionTaskId、draftVersionId")
-          }
-          const extraction = await this.executeSettingsWriteStage({
-            revisionTaskId,
-            draftVersionId,
-            model,
-          })
-          action.input = {
-            ...action.input,
-            settingsWriteDone: true,
-            skipReview: true,
-            settingsExtractionCommitted: true,
-            settingsExtractionTaskId: extraction.taskId,
-            settingsExtractionProposalCount: extraction.proposalCount,
-          }
-          return {
-            ok: true,
-            summary: extraction.summary,
-          }
-        },
         graphCancel: async (action) => {
           const revisionTaskId = String(action.input.revisionTaskId ?? "")
           if (revisionTaskId.length === 0) throw new Error("graph.cancel 需要 revisionTaskId")
@@ -354,7 +268,6 @@ export class ProjectRuntime {
             revisionTaskId,
             draftVersionId,
             model,
-            skipReview: action.input.skipReview === true || action.input.settingsWriteDone === true,
             ...(typeof action.input.deadlineMs === "number" ? { deadlineMs: action.input.deadlineMs } : {}),
           })
           const ok = published.status === "completed" && published.error === undefined
@@ -369,53 +282,8 @@ export class ProjectRuntime {
     })
   }
 
-  public takeLastCreationDeskSendResult(): SynopsisConversationSendResult {
-    const result = this.lastCreationDeskSendResult
-    this.lastCreationDeskSendResult = undefined
-    if (result === undefined) {
-      throw new Error("creationDesk.send 未产生讨论结果")
-    }
-    return result
-  }
-
   public async ensureFolioHost(host: FolioHostKind = "starseafolio", model?: AIModelPort): Promise<FolioUiState> {
-    await this.createFolioSkillRunner(model).initialize(host)
-    return this.syncCreationDeskPanelFromConversation()
-  }
-
-  /** Project conversation → `.folio/ui-state.json` creation-desk panel (shared with Codex). */
-  public async syncCreationDeskPanelFromConversation(): Promise<FolioUiState> {
-    const folio = new FolioWorkspace(this.workspaceRootRef)
-    await folio.ensureLayout()
-    const listed = await this.createSynopsisConversationService().list({
-      projectId: this.projectId,
-      workspaceRootRef: this.workspaceRootRef,
-    })
-    const visible = listed.messages.filter((message) => message.hidden !== true)
-    const lastAssistant = [...visible].reverse().find((message) => message.role === "assistant")
-    const choices = (lastAssistant?.choices ?? []).map((choice, index) => ({
-      id: choice.setupQuestionId ?? `choice-${String(index)}`,
-      label: choice.label,
-      action: choice.action,
-    }))
-    const todos = (lastAssistant?.todos ?? []).map((todo) => ({
-      id: todo.id,
-      content: todo.content,
-      status: todo.status,
-    }))
-    return syncCreationDeskPanel(folio, {
-      messages: visible.map((message) => ({
-        messageId: message.messageId,
-        role: message.role,
-        content: message.content,
-        ...(message.error === undefined ? {} : { error: message.error }),
-        createdAtMs: message.createdAtMs,
-      })),
-      ...(choices.length === 0 ? {} : { choices }),
-      ...(todos.length === 0 ? {} : { todos }),
-      status: "idle",
-      error: lastAssistant?.error ?? null,
-    })
+    return this.createFolioSkillRunner(model).initialize(host)
   }
 
   public async readFolioUiState(model?: AIModelPort): Promise<FolioUiState> {
@@ -471,104 +339,7 @@ export class ProjectRuntime {
     return appendCreationDeskExchange(folio, input)
   }
 
-  /** Visible creation-desk user messages. Style revision quotes these, not the draft. */
-  private async loadUserRequirements(projectId: ProjectId): Promise<string> {
-    const messages = await new SqliteSynopsisConversationRepository(this.database).listMessagesForProject(projectId)
-    return collectUserRequirementText(messages)
-  }
-
-  /**
-   * Skill `settings-write` stage: draft review + settings_extraction only (no graph governance).
-   * Persists the extraction artifact under `.folio/runs/` for graph-sync to preload.
-   */
-  public async executeSettingsWriteStage(input: Readonly<{
-    revisionTaskId: string
-    draftVersionId: string
-    model: AIModelPort
-    signal?: AbortSignal
-  }>): Promise<Readonly<{
-    taskId: string
-    proposalCount: number
-    summary: string
-    recommendation: string
-  }>> {
-    const revisions = this.createChapterRevisionService()
-    const reviewed = await revisions.review({
-      revisionTaskId: input.revisionTaskId,
-      draftVersionId: input.draftVersionId,
-      workspaceRootRef: this.workspaceRootRef,
-    }, input.model)
-    if (reviewed.review === undefined) {
-      throw new Error("草稿审核未生成结果")
-    }
-    const revision = await revisions.readRevision(input.revisionTaskId)
-    const draft = await revisions.readDraftVersion(input.draftVersionId)
-    const content = [draft.heading, draft.body].filter((part) => part.trim().length > 0).join("\n\n")
-    const chapterSequence = revision.chapterSequence
-      ?? (await new SqliteChapterIndexRepository(this.database).find(revision.projectId, revision.chapterId))?.sequence
-      ?? 1
-    const sourceUnits = await new SqliteDocumentRepository(this.database)
-      .listSourceUnits(revision.projectId, revision.proposedSourceId)
-    const folio = new FolioWorkspace(this.workspaceRootRef)
-    const cached = await folio.readRunArtifact(settingsExtractionRunArtifactName(input.revisionTaskId))
-    if (cached !== undefined && typeof cached === "object" && cached !== null
-      && (cached as { committed?: unknown }).committed === true
-      && (cached as { artifact?: unknown }).artifact !== undefined) {
-      const artifact = settingsExtractionArtifactSchema.parse((cached as { artifact: unknown }).artifact)
-      const taskId = typeof (cached as { taskId?: unknown }).taskId === "string"
-        ? (cached as { taskId: string }).taskId
-        : `settings-write:${input.revisionTaskId}`
-      return {
-        taskId,
-        proposalCount: artifact.proposals.length,
-        recommendation: reviewed.review.recommendation,
-        summary: `草稿审核完成（${reviewed.review.recommendation}）；复用已写入的设定抽取（${String(artifact.proposals.length)} 条），可进入图治理。`,
-      }
-    }
-    const settings = await this.readSettings()
-    // Task ids must be UUIDs for persistence schemas; correlate via .folio/runs artifact.
-    const extractionTaskId = randomUUID()
-    const orchestrator = this.createTurnOrchestrator(input.model, randomUUID, Date.now)
-    const result = await orchestrator.execute({
-      workflow: "revision",
-      adaptiveGraphGovernance: true,
-      settingsExtractionOnly: true,
-      projectId: revision.projectId,
-      workspaceRootRef: this.workspaceRootRef,
-      internalStore: this.internalStore,
-      userInput: content,
-      userRequirements: await this.loadUserRequirements(revision.projectId),
-      chapterSequence,
-      sourceId: revision.proposedSourceId,
-      existingSourceUnitIds: sourceUnits.map((unit) => unit.id),
-      taskId: extractionTaskId,
-      allowWorkspaceChapterReads: true,
-      maxModelCalls: settings.execution.maxModelCalls,
-      deadlineMs: settings.execution.maxWallTimeMs,
-      maxRetrievalRounds: settings.execution.maxRetrievalRounds,
-      projectSettings: settings,
-      executionOrigin: { kind: "user" },
-    }, { ...(input.signal === undefined ? {} : { signal: input.signal }) })
-    if (result.kind !== "settings_extraction") {
-      throw new Error(`settings-write 期望 settings_extraction 结果，实际为 ${result.kind}`)
-    }
-    await folio.writeRunArtifact(settingsExtractionRunArtifactName(input.revisionTaskId), {
-      committed: true,
-      taskId: result.taskId,
-      artifact: result.artifact,
-      reviewedAtMs: Date.now(),
-      recommendation: reviewed.review.recommendation,
-    })
-    const proposalCount = result.artifact.proposals.length
-    return {
-      taskId: result.taskId,
-      proposalCount,
-      recommendation: reviewed.review.recommendation,
-      summary: `草稿审核完成（${reviewed.review.recommendation}）；设定抽取 ${String(proposalCount)} 条提案已写入设定集，可进入图治理。`,
-    }
-  }
-
-  /** Shared publish pipeline invoked from folio publish stages (after optional settingsWrite review). */
+  /** Shared publish pipeline invoked only from the folio publish.confirm host handler. */
   public async executePublishDraftPipeline(input: Readonly<{
     projectId: ProjectId
     workspaceRootRef: string
@@ -578,8 +349,6 @@ export class ProjectRuntime {
     model: AIModelPort
     deadlineMs?: number
     signal?: AbortSignal
-    /** When true, reuse an existing review from the settings-write skill stage. */
-    skipReview?: boolean
   }>): Promise<Readonly<{
     revisionTaskId: string
     chapterId: string
@@ -599,15 +368,12 @@ export class ProjectRuntime {
     if (revision === undefined) throw new Error("未找到当前章节的草稿")
     const version = await revisions.readDraftVersion(input.draftVersionId)
     if (version.revisionTaskId !== revision.revisionTaskId) throw new Error("草稿版本不属于指定修订")
-    let reviewId = revision.review?.reviewId
-    if (!input.skipReview || reviewId === undefined) {
-      const reviewed = await revisions.review({
-        revisionTaskId: input.revisionTaskId,
-        draftVersionId: input.draftVersionId,
-        workspaceRootRef: input.workspaceRootRef,
-      }, input.model)
-      reviewId = reviewed.review?.reviewId
-    }
+    const reviewed = await revisions.review({
+      revisionTaskId: input.revisionTaskId,
+      draftVersionId: input.draftVersionId,
+      workspaceRootRef: input.workspaceRootRef,
+    }, input.model)
+    const reviewId = reviewed.review?.reviewId
     if (reviewId === undefined) throw new Error("当前草稿审核未生成结果，不能进入图治理")
     const submitted = await this.submitChapterRevision({
       revisionTaskId: input.revisionTaskId,
@@ -627,11 +393,7 @@ export class ProjectRuntime {
         summary: "图修订完成，已发布为正式正文；可继续下一章。",
       }
     }
-    // Default: return once the graph job is queued so hosts can cancel/monitor.
-    // Pass deadlineMs when the caller wants this pipeline to block until settle (CLI batch).
-    const waitMs = input.deadlineMs === undefined
-      ? 0
-      : Math.max(0, input.deadlineMs - 30_000)
+    const waitMs = Math.max(0, (input.deadlineMs ?? 300_000) - 30_000)
     const settled = await this.waitForActiveRevisionJobs({
       timeoutMs: waitMs,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -658,45 +420,6 @@ export class ProjectRuntime {
             ? `图修订结束但未发布（${status}），请检查图修订任务。`
             : "图同步仍在进行，本轮先等待；下一轮继续时会自动等它完成。",
     }
-  }
-
-  /**
-   * Primary publish entry for hosts: resolve draft + sequence, then folio publish.confirm.
-   * Returns the revision row after the folio drain finishes (or throws).
-   */
-  public async publishViaFolioAction(input: Readonly<{
-    revisionTaskId: string
-    draftVersionId?: string
-    chapterSequence?: number
-    model: AIModelPort
-    deadlineMs?: number
-  }>): Promise<ChapterRevision> {
-    const revisions = this.createChapterRevisionService()
-    const current = await revisions.readRevision(input.revisionTaskId)
-    let draftVersionId = input.draftVersionId
-    if (draftVersionId === undefined) {
-      const listed = await revisions.listDraftVersions(input.revisionTaskId)
-      draftVersionId = listed.versions.find((version) => version.isLatest && version.source !== "baseline")?.versionId
-        ?? listed.versions.find((version) => version.isLatest)?.versionId
-        ?? listed.versions[0]?.versionId
-    }
-    if (draftVersionId === undefined) throw new Error("未找到可发布的草稿版本")
-    const chapterSequence = input.chapterSequence
-      ?? current.chapterSequence
-      ?? (await new SqliteChapterIndexRepository(this.database).find(this.projectId, current.chapterId))?.sequence
-    if (chapterSequence === undefined) throw new Error("章节序号缺失，不能发布")
-    await this.enqueueFolioAction({
-      name: "publish.confirm",
-      model: input.model,
-      input: {
-        revisionTaskId: input.revisionTaskId,
-        draftVersionId,
-        chapterSequence,
-        workspaceRootRef: this.workspaceRootRef,
-        ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
-      },
-    })
-    return revisions.readRevision(input.revisionTaskId)
   }
 
   public async submitChapterRevision(input: Parameters<ChapterRevisionService["submit"]>[0]): Promise<ChapterRevision> {
@@ -1452,31 +1175,14 @@ export class ProjectRuntime {
           const job = this.revisionJobs.get(input.revision.revisionTaskId)
           if (job !== undefined) job.activity = activity
         })
-        const folio = new FolioWorkspace(input.workspaceRootRef)
-        const cachedExtraction = await folio.readRunArtifact(
-          settingsExtractionRunArtifactName(input.revision.revisionTaskId),
-        )
-        let preloadedArtifacts: Partial<Record<AIPhase, unknown>> | undefined
-        let skipSettingsExtractionCommit = false
-        if (cachedExtraction !== undefined && typeof cachedExtraction === "object" && cachedExtraction !== null
-          && (cachedExtraction as { committed?: unknown }).committed === true
-          && (cachedExtraction as { artifact?: unknown }).artifact !== undefined) {
-          preloadedArtifacts = {
-            settings_extraction: settingsExtractionArtifactSchema.parse(
-              (cachedExtraction as { artifact: unknown }).artifact,
-            ),
-          }
-          skipSettingsExtractionCommit = true
-        }
         const orchestrator = this.createTurnOrchestrator(model, randomUUID, Date.now)
         const orchestratorInput = {
-          workflow: "revision" as const,
-          adaptiveGraphGovernance: true as const,
+          workflow: "revision",
+          adaptiveGraphGovernance: true,
           projectId: input.revision.projectId,
           workspaceRootRef: input.workspaceRootRef,
           internalStore: this.internalStore,
           userInput: content,
-          userRequirements: await this.loadUserRequirements(input.revision.projectId),
           chapterSequence,
           sourceId: input.revision.proposedSourceId,
           existingSourceUnitIds: input.sourceUnitIds,
@@ -1486,10 +1192,8 @@ export class ProjectRuntime {
           deadlineMs: settings.execution.maxWallTimeMs,
           maxRetrievalRounds: settings.execution.maxRetrievalRounds,
           projectSettings: settings,
-          executionOrigin: { kind: "user" as const },
-          ...(preloadedArtifacts === undefined ? {} : { preloadedArtifacts }),
-          ...(skipSettingsExtractionCommit ? { skipSettingsExtractionCommit: true as const } : {}),
-        }
+          executionOrigin: { kind: "user" },
+        } as const
         const existingTask = await this.taskScopes.findTask(input.graphSyncTaskId)
         if (existingTask === undefined) {
           await orchestrator.execute(orchestratorInput, { ...(input.signal === undefined ? {} : { signal: input.signal }) })

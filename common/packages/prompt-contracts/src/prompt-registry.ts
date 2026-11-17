@@ -6,11 +6,10 @@ export const PROMPT_CONTRACT_VERSION = "v1" as const
 export const BASE_RULES_RESOURCE = "resources/v1/base-rules.md" as const
 export const CONTENT_HANDLING_RESOURCE = "resources/v1/content-handling.md" as const
 export const WEBNOVEL_PROSE_LOGIC_RESOURCE = "resources/v1/webnovel-prose-logic.md" as const
-export const PLOT_SYNOPSIS_GUIDE_RESOURCE = "resources/skills/starsea-writing/prompts/plot-synopsis-guide.md" as const
+export const PLOT_SYNOPSIS_GUIDE_RESOURCE = "resources/v1/plot-synopsis-guide.md" as const
 export const SETTINGS_QUERY_GUIDE_RESOURCE = "resources/v1/settings-query-guide.md" as const
-export const SETTINGS_REVISION_GUIDE_RESOURCE = "resources/skills/starsea-writing/prompts/settings-revision-guide.md" as const
-export const DISCUSS_CREATION_DESK_WORKFLOW_RESOURCE = "resources/skills/starsea-writing/prompts/creation-desk-workflow.md" as const
-export const SYNOPSIS_DISCUSS_PHASE_RESOURCE = "resources/skills/starsea-writing/prompts/synopsis-discuss.md" as const
+export const SETTINGS_REVISION_GUIDE_RESOURCE = "resources/v1/settings-revision-guide.md" as const
+export const DISCUSS_CREATION_DESK_WORKFLOW_RESOURCE = "resources/v1/discuss-creation-desk-workflow.md" as const
 
 /** Upstream MIT webnovel craft (tance-mang/chinese-webnovel-skills) — loaded via skills, not always-on composites. */
 export const WEBNOVEL_VENDOR_DESLOP_RESOURCE = "resources/vendor/chinese-webnovel-skills/skills/deslop.md" as const
@@ -65,9 +64,7 @@ export const promptDefinitions: Record<AIPhase, PromptDefinition> = Object.fromE
     {
       phase,
       version: PROMPT_CONTRACT_VERSION,
-      resourcePath: phase === "synopsis_discuss"
-        ? SYNOPSIS_DISCUSS_PHASE_RESOURCE
-        : `resources/v1/phases/${phase.replaceAll("_", "-")}.md`,
+      resourcePath: `resources/v1/phases/${phase.replaceAll("_", "-")}.md`,
     },
   ]),
 ) as Record<AIPhase, PromptDefinition>

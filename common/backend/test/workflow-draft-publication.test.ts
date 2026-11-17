@@ -162,8 +162,11 @@ describe("workflow drafts and publication", () => {
       expect(await call("chapter.workflowGate.get", { chapterSequence: 1 })).toMatchObject({
         draft: { contentState: "ai_written", versionId: alternative.versionId },
       })
-      // Folio publish.confirm auto-reviews inside settings-write; pin draftVersionId so a
-      // non-latest version can still be the published body (not the latest alternative).
+      await expect(call("chapter.submitRevision", {
+        revisionTaskId: draft.revisionTaskId,
+        mode: "reviewed",
+        forced: false,
+      })).rejects.toThrow("审核")
       const reviewed = await call<ChapterRevisionReadResult>("chapter.reviewRevision", {
         revisionTaskId: draft.revisionTaskId,
         draftVersionId: draft.versionId,
@@ -181,7 +184,7 @@ describe("workflow drafts and publication", () => {
         forced: false,
         reviewId: reviewed.review?.reviewId,
       })
-      expect(["graph_sync_pending", "graph_sync_running", "completed", "awaiting_user_decision"]).toContain(submitted.status)
+      expect(submitted.status).toBe("graph_sync_pending")
       await waitForRevisionGraphSync(harness.facade, harness.projectId, harness.workspaceRootRef, draft.revisionTaskId)
     } finally {
       await harness.container.close()
