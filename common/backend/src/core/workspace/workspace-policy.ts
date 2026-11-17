@@ -46,10 +46,22 @@ export class WorkspacePolicyError extends Error {}
 
 const BASE_RULES_PREFIX = "世界推演规则/基础规则"
 const BOOK_COVER_PATH_PATTERN = /^\.worldseed\/cover\.(?:png|jpg|jpeg|webp|gif|bmp)$/iu
+const FOLIO_HOST_ROOT = ".folio"
 
 /** Valid app-owned assets, not writing documents or AI/history evidence. */
 export function isBookCoverInventoryEntry(path: string, kind: WorkspaceInventoryEntry["kind"]): boolean {
   return path === ".worldseed" ? kind === "directory" : kind === "file" && BOOK_COVER_PATH_PATTERN.test(path)
+}
+
+/**
+ * Host protocol tree for starsea-writing (ui-state / actions / runs).
+ * Not part of the writing document inventory; JSON under `.folio/` is expected.
+ */
+export function isFolioHostInventoryEntry(path: string, kind: WorkspaceInventoryEntry["kind"]): boolean {
+  if (path === FOLIO_HOST_ROOT) return kind === "directory"
+  if (!path.startsWith(`${FOLIO_HOST_ROOT}/`)) return false
+  if (kind === "directory") return true
+  return path.endsWith(".json") || path.endsWith(".tmp")
 }
 
 export function normalizeWorkspacePath(path: string): string {
@@ -259,7 +271,15 @@ export function validateWorkspaceInventory(entries: readonly WorkspaceInventoryE
 
       const topLevel = path.split("/")[0]
       const isBookCoverEntry = isBookCoverInventoryEntry(path, entry.kind)
-      if (topLevel === undefined || (!fixedTopLevelDirectories.includes(topLevel as typeof fixedTopLevelDirectories[number]) && !isBookCoverEntry)) {
+      const isFolioHostEntry = isFolioHostInventoryEntry(path, entry.kind)
+      if (
+        topLevel === undefined
+        || (
+          !fixedTopLevelDirectories.includes(topLevel as typeof fixedTopLevelDirectories[number])
+          && !isBookCoverEntry
+          && !isFolioHostEntry
+        )
+      ) {
         issues.push({
           code: "unexpected_root_entry",
           path,
@@ -267,7 +287,13 @@ export function validateWorkspaceInventory(entries: readonly WorkspaceInventoryE
         })
       }
 
-      if (entry.kind === "file" && !path.endsWith(".md") && !isCharacterProfilePath(path) && !isBookCoverEntry) {
+      if (
+        entry.kind === "file"
+        && !path.endsWith(".md")
+        && !isCharacterProfilePath(path)
+        && !isBookCoverEntry
+        && !isFolioHostEntry
+      ) {
         issues.push({ code: "invalid_file_type", path, message: "Only .md files are allowed" })
       }
 
