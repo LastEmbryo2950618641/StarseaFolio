@@ -16,6 +16,7 @@ import type {
   FolioUiState,
 } from "@starseafolio/contracts"
 import { PROTOCOL_VERSION } from "@starseafolio/contracts"
+import { appendCreationDeskExchange } from "../application/folio/folio-action-host.js"
 import { FolioSkillRunner } from "../application/folio/folio-skill-runner.js"
 import { FolioWorkspace } from "../application/folio/folio-workspace.js"
 
@@ -320,6 +321,22 @@ export class ProjectRuntime {
       state = next
     }
     return state
+  }
+
+  /** Mirror a creation-desk turn into .folio/ui-state for host-agnostic visualization. */
+  public async mirrorDiscussTurnToFolio(input: Readonly<{
+    userText: string
+    assistantText: string
+    error?: string
+  }>): Promise<FolioUiState> {
+    const folio = new FolioWorkspace(this.workspaceRootRef)
+    await folio.ensureLayout()
+    await folio.writeHost({
+      host: "starseafolio",
+      workspaceRoot: this.workspaceRootRef,
+      skillId: "starsea-writing",
+    })
+    return appendCreationDeskExchange(folio, input)
   }
 
   /** Shared publish pipeline invoked only from the folio publish.confirm host handler. */

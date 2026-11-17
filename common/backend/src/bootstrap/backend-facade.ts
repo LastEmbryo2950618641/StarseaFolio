@@ -620,7 +620,7 @@ export class BackendFacade {
       case "synopsis.conversation.send": {
         const payload = synopsisConversationSendPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
-        return runtime.createSynopsisConversationService().send({
+        const result = await runtime.createSynopsisConversationService().send({
           projectId: payload.projectId,
           workspaceRootRef: payload.workspaceRootRef,
           message: payload.message,
@@ -639,6 +639,13 @@ export class BackendFacade {
           ...(payload.batchProceed === undefined ? {} : { batchProceed: payload.batchProceed }),
           ...(payload.agentMode === undefined ? {} : { agentMode: payload.agentMode }),
         })
+        const assistant = [...result.messages].reverse().find((message) => message.role === "assistant")
+        await runtime.mirrorDiscussTurnToFolio({
+          userText: payload.message,
+          assistantText: assistant?.content ?? "",
+          ...(assistant?.error === undefined ? {} : { error: assistant.error }),
+        }).catch(() => undefined)
+        return result
       }
       case "synopsis.conversation.refreshChoices": {
         const payload = synopsisConversationRefreshChoicesPayloadSchema.parse(request.payload)
