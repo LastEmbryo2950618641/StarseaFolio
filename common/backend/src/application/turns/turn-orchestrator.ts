@@ -48,6 +48,7 @@ import {
   type GraphGovernanceArtifact,
   type SemanticReviewArtifact,
   type SettlementReviewArtifact,
+  type SettingsExtractionArtifact,
 } from "@starseafolio/prompt-contracts"
 
 import {
@@ -67,9 +68,12 @@ import {
   formatWorkDescriptionRuleEvidence,
   isAutoDescriptionSelection,
   isDescriptionRuleMarkdownPath,
+  applyWorkStyleRevision,
   isWorkDescriptionRulePath,
   listWorkDescriptionRuleFiles,
   resolveDescriptionRulePaths,
+  resolveWorkStyleRequirementSource,
+  WORK_STYLE_RULE_PATH,
   type GraphRevision,
 } from "../../core/index.js"
 import type {
@@ -308,6 +312,8 @@ export type TurnOrchestratorInput = Readonly<{
   workspaceRootRef: string
   internalStore: InternalProjectStore
   userInput: string
+  /** Visible user messages. Style revision quotes these, not the revision draft. */
+  userRequirements?: string
   chapterSequence: number
   presentation?: Readonly<{
     descriptionRulePath?: string | undefined
@@ -782,16 +788,63 @@ export class TurnOrchestrator {
     phaseRunId: string,
     artifact: unknown,
   ): Promise<void> {
-    if (this.dependencies.settingsExtraction === undefined) return
     const extraction = settingsExtractionArtifactSchema.parse(artifact)
-    await this.dependencies.settingsExtraction.commitArtifact({
-      projectId: input.projectId,
-      workspaceRootRef: input.workspaceRootRef,
-      taskId,
-      phaseRunId,
-      proposals: extraction.proposals,
-      worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
-    })
+    if (this.dependencies.settingsExtraction !== undefined) {
+      await this.dependencies.settingsExtraction.commitArtifact({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        taskId,
+        phaseRunId,
+        proposals: extraction.proposals,
+        worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
+      })
+    }
+    await this.applyWorkStyleRevisionFromArtifact(input, taskId, extraction)
+  }
+
+  private async applyWorkStyleRevisionFromArtifact(
+    input: TurnOrchestratorInput,
+    taskId: string,
+    extraction: SettingsExtractionArtifact,
+  ): Promise<void> {
+    const sections = extraction.workStyleRevision?.sections
+    if (sections === undefined || sections.length === 0) return
+    const userRequirements = resolveWorkStyleRequirementSource(input)
+    if (userRequirements.length === 0) {
+      this.log("info", "revision.work_style.skipped", { taskId, reason: "no_user_requirements" })
+      return
+    }
+    let current = ""
+    try {
+      current = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, WORK_STYLE_RULE_PATH)
+    } catch (error) {
+      this.log("warn", "revision.work_style.skipped", {
+        taskId,
+        reason: "unreadable",
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    const result = applyWorkStyleRevision({ current, updates: sections, userRequirements })
+    if (result.markdown === current) {
+      this.log("info", "revision.work_style.unchanged", { taskId, skipped: result.skipped })
+      return
+    }
+    try {
+      await this.dependencies.workspace.saveUserMarkdown(
+        input.workspaceRootRef,
+        WORK_STYLE_RULE_PATH,
+        result.markdown,
+      )
+    } catch (error) {
+      this.log("warn", "revision.work_style.skipped", {
+        taskId,
+        reason: "write_failed",
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    this.log("info", "revision.work_style.updated", { taskId, applied: result.applied, skipped: result.skipped })
   }
 
   private async executeAdaptiveRevisionGraphGovernance(
@@ -2758,9 +2811,11 @@ export class TurnOrchestrator {
         verificationProbeExecutions: currentVerificationProbeExecutions,
         readEvidence: currentVisibleEvidence,
       })
+      const userRequirements = resolveWorkStyleRequirementSource(input.input)
       const phaseInput: TurnPhaseInput = {
         workflow: input.input.workflow ?? "turn",
         userInput: input.input.userInput,
+        ...(userRequirements.length === 0 ? {} : { userRequirements }),
         chapterSequence: input.input.chapterSequence,
         allowWorkspaceChapterReads: input.input.allowWorkspaceChapterReads ?? true,
         ...(input.input.presentation === undefined ? {} : { presentation: input.input.presentation }),
