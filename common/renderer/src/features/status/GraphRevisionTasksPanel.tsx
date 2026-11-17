@@ -139,8 +139,25 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async (): Promise<void> => {
       try {
-        const next = project === undefined ? [] : await invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project)
-        if (!disposed && generation.current === current) { setTasks(next); setLoadError(undefined) }
+        if (project === undefined) {
+          if (!disposed && generation.current === current) setTasks([])
+        } else {
+          // Prefer skill ui-state; refresh host sync so Codex/app share the same graph panel JSON.
+          await invokeBackend("folio.host.ensure", { ...project, host: "starseafolio" })
+          const ui = await invokeBackend<{
+            panels: { graphRevision: { tasks: readonly GraphRevisionTask[] } }
+          }>("folio.uiState.read", project)
+          const fromFolio = ui.panels.graphRevision.tasks
+          const next = fromFolio.length > 0
+            ? fromFolio.map((task) => ({
+                ...task,
+                chapterId: task.chapterId ?? "",
+                blocksTurn: task.blocksTurn ?? false,
+                canContinue: task.canContinue ?? false,
+              }))
+            : await invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project)
+          if (!disposed && generation.current === current) { setTasks(next); setLoadError(undefined) }
+        }
       } catch (cause) {
         if (!disposed) setLoadError(cause instanceof Error ? cause.message : String(cause))
       } finally {
@@ -158,9 +175,13 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
     setPending((previous) => ({ ...previous, [task.revisionTaskId]: action }))
     setError(undefined)
     try {
-      await invokeBackend(action === "cancel" ? "chapter.graphRevision.cancel" : "chapter.graphRevision.retry", {
-        ...project, revisionTaskId: task.revisionTaskId,
-        ...(action === "cancel" ? {} : { mode: action, ...(model === undefined ? {} : { model }) }),
+      // Graph recovery is skill-owned: UI only enqueues .folio actions.
+      await invokeBackend("folio.action.enqueue", {
+        ...project,
+        name: action === "cancel" ? "graph.cancel" : action === "rerun" ? "graph.rerun" : "graph.continue",
+        input: { revisionTaskId: task.revisionTaskId },
+        drain: true,
+        ...(model === undefined ? {} : { model }),
       })
       if (generation.current !== current) return
       setRefresh((value) => value + 1)

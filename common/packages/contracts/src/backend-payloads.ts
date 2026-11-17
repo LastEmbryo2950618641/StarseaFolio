@@ -735,6 +735,7 @@ export const folioActionEnqueuePayloadSchema = projectSettingsReadPayloadSchema.
   ]),
   input: z.record(z.string(), z.unknown()).default({}),
   drain: z.boolean().default(true),
+  model: modelSelectionSchema.optional(),
 })
 export type FolioActionEnqueuePayload = z.infer<typeof folioActionEnqueuePayloadSchema>
 

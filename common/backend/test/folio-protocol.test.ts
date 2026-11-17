@@ -74,6 +74,55 @@ describe("folio protocol", () => {
     }
   }, 30000)
 
+  it("executes graph continue through host handlers without stub scripts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "folio-host-"))
+    try {
+      let continued = false
+      const runner = new FolioSkillRunner({
+        workspaceRoot: root,
+        hostHandlers: {
+          listGraphTasks: async () => [{
+            revisionTaskId: "rev-1",
+            chapterId: "ch-1",
+            heading: "第一章",
+            status: continued ? "running" : "failed",
+            blocksTurn: true,
+            canCancel: true,
+            canRetry: true,
+            canContinue: !continued,
+            updatedAtMs: Date.now(),
+            progress: {
+              completed: 5,
+              total: 7,
+              phase: "frontier_settlement",
+              phases: [
+                { phase: "graph_governance", status: "completed", attempt: 1 },
+                { phase: "frontier_settlement", status: continued ? "running" : "failed", attempt: continued ? 2 : 1 },
+              ],
+            },
+          }],
+          publishConfirm: async () => ({ ok: true, summary: "ok" }),
+          graphCancel: async () => undefined,
+          graphRerun: async () => undefined,
+          graphContinue: async () => { continued = true },
+        },
+      })
+      await runner.initialize("starseafolio")
+      await runner.enqueue({
+        actionId: randomUUID(),
+        name: "graph.continue",
+        createdAtMs: Date.now(),
+        input: { revisionTaskId: "rev-1" },
+      })
+      const state = await runner.drainOnce()
+      expect(continued).toBe(true)
+      expect(state.panels.graphRevision.tasks[0]?.canContinue).toBe(false)
+      expect(state.panels.graphRevision.tasks[0]?.status).toBe("running")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("continues a failed graph stage via skill script without rerunning from host code", async () => {
     const root = await mkdtemp(join(tmpdir(), "folio-graph-"))
     try {

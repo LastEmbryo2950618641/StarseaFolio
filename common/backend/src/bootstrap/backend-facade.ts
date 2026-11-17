@@ -951,6 +951,7 @@ export class BackendFacade {
           name: payload.name,
           input: payload.input,
           drain: payload.drain,
+          ...(payload.model === undefined ? {} : { model: this.resolveModel(payload.model) }),
         })
       }
       case "folio.action.drain": {

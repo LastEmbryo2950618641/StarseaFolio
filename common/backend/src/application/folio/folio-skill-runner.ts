@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import type { FolioAction, FolioUiState } from "@starseafolio/contracts"
+import { executeFolioActionWithHost, type FolioRuntimeActionHandlers } from "./folio-action-host.js"
 import { FolioWorkspace } from "./folio-workspace.js"
 
 const defaultScriptsDir = join(
@@ -13,19 +14,23 @@ export type FolioSkillRunnerDependencies = Readonly<{
   workspaceRoot: string
   scriptsDir?: string
   folio?: FolioWorkspace
+  /** When set, StarseaFolio / Codex host runtime executes real publish/graph work. */
+  hostHandlers?: FolioRuntimeActionHandlers
 }>
 
 /**
- * Thin host runner: enqueue/claim Folio actions and invoke skill scripts.
- * Business prompts and disk writes live in the skill pack, not here.
+ * Thin host runner: enqueue/claim Folio actions and invoke skill scripts or host handlers.
+ * Business prompts and disk writes live in the skill pack / hostHandlers, not in UI code.
  */
 export class FolioSkillRunner {
   private readonly folio: FolioWorkspace
   private readonly scriptsDir: string
+  private readonly hostHandlers: FolioRuntimeActionHandlers | undefined
 
   public constructor(private readonly dependencies: FolioSkillRunnerDependencies) {
     this.folio = dependencies.folio ?? new FolioWorkspace(dependencies.workspaceRoot)
     this.scriptsDir = dependencies.scriptsDir ?? defaultScriptsDir
+    this.hostHandlers = dependencies.hostHandlers
   }
 
   public async initialize(host: "starseafolio" | "codex" | "claude"): Promise<FolioUiState> {
@@ -35,7 +40,13 @@ export class FolioSkillRunner {
       workspaceRoot: this.dependencies.workspaceRoot,
       skillId: "starsea-writing",
     })
-    await this.runScript("folio-init.mjs", [`--host`, host])
+    if (this.hostHandlers === undefined) {
+      await this.runScript("folio-init.mjs", ["--host", host])
+    }
+    if (this.hostHandlers !== undefined) {
+      const { syncGraphTasksIntoUiState } = await import("./folio-action-host.js")
+      await syncGraphTasksIntoUiState(this.folio, await this.hostHandlers.listGraphTasks())
+    }
     return this.folio.readUiState()
   }
 
@@ -46,8 +57,9 @@ export class FolioSkillRunner {
   public async drainOnce(): Promise<FolioUiState> {
     const action = await this.folio.claimNextAction()
     if (action === undefined) return this.folio.readUiState()
-    // Re-queue into a temp done-restore path by writing action file for apply-action --action
-    // apply-action claims from pending; we already claimed. Pass via stdin file in done/.
+    if (this.hostHandlers !== undefined) {
+      return executeFolioActionWithHost(this.folio, action, this.hostHandlers)
+    }
     const donePath = join(
       this.dependencies.workspaceRoot,
       ".folio",

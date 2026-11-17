@@ -230,23 +230,65 @@ export class ProjectRuntime {
     })
   }
 
-  public createFolioSkillRunner(): FolioSkillRunner {
-    return new FolioSkillRunner({ workspaceRoot: this.workspaceRootRef })
-  }
-
-  public async ensureFolioHost(host: FolioHostKind = "starseafolio"): Promise<FolioUiState> {
-    return this.createFolioSkillRunner().initialize(host)
-  }
-
-  public async readFolioUiState(): Promise<FolioUiState> {
-    const folio = new FolioWorkspace(this.workspaceRootRef)
-    await folio.ensureLayout()
-    await folio.writeHost({
-      host: "starseafolio",
+  public createFolioSkillRunner(model?: AIModelPort): FolioSkillRunner {
+    return new FolioSkillRunner({
       workspaceRoot: this.workspaceRootRef,
-      skillId: "starsea-writing",
+      hostHandlers: {
+        listGraphTasks: async () => this.listGraphRevisionTasks(),
+        graphCancel: async (action) => {
+          const revisionTaskId = String(action.input.revisionTaskId ?? "")
+          if (revisionTaskId.length === 0) throw new Error("graph.cancel 需要 revisionTaskId")
+          await this.cancelGraphRevision(revisionTaskId)
+        },
+        graphRerun: async (action) => {
+          const revisionTaskId = String(action.input.revisionTaskId ?? "")
+          if (revisionTaskId.length === 0) throw new Error("graph.rerun 需要 revisionTaskId")
+          if (model === undefined) throw new Error("graph.rerun 需要模型")
+          await this.retryGraphRevision(revisionTaskId, model, "rerun")
+        },
+        graphContinue: async (action) => {
+          const revisionTaskId = String(action.input.revisionTaskId ?? "")
+          if (revisionTaskId.length === 0) throw new Error("graph.continue 需要 revisionTaskId")
+          if (model === undefined) throw new Error("graph.continue 需要模型")
+          await this.retryGraphRevision(revisionTaskId, model, "continue")
+        },
+        publishConfirm: async (action) => {
+          if (model === undefined) throw new Error("publish.confirm 需要模型")
+          const revisionTaskId = String(action.input.revisionTaskId ?? "")
+          const draftVersionId = String(action.input.draftVersionId ?? "")
+          const chapterSequence = Number(action.input.chapterSequence)
+          if (revisionTaskId.length === 0 || draftVersionId.length === 0 || !Number.isFinite(chapterSequence)) {
+            throw new Error("publish.confirm 需要 revisionTaskId、draftVersionId、chapterSequence")
+          }
+          const published = await this.executePublishDraftPipeline({
+            projectId: this.projectId,
+            workspaceRootRef: this.workspaceRootRef,
+            chapterSequence,
+            revisionTaskId,
+            draftVersionId,
+            model,
+            ...(typeof action.input.deadlineMs === "number" ? { deadlineMs: action.input.deadlineMs } : {}),
+          })
+          const ok = published.status === "completed" && published.error === undefined
+          return {
+            ok,
+            summary: published.summary
+              ?? (ok ? "设定抽取、图治理已完成，正文已落盘。" : published.error ?? "正文尚未落盘"),
+            ...(published.error === undefined ? {} : { error: published.error }),
+          }
+        },
+      },
     })
-    return folio.readUiState()
+  }
+
+  public async ensureFolioHost(host: FolioHostKind = "starseafolio", model?: AIModelPort): Promise<FolioUiState> {
+    return this.createFolioSkillRunner(model).initialize(host)
+  }
+
+  public async readFolioUiState(model?: AIModelPort): Promise<FolioUiState> {
+    const runner = this.createFolioSkillRunner(model)
+    await runner.initialize("starseafolio")
+    return new FolioWorkspace(this.workspaceRootRef).readUiState()
   }
 
   public async enqueueFolioAction(input: Readonly<{
@@ -254,8 +296,9 @@ export class ProjectRuntime {
     name: FolioActionName
     input?: Record<string, unknown>
     drain?: boolean
+    model?: AIModelPort
   }>): Promise<FolioUiState> {
-    const runner = this.createFolioSkillRunner()
+    const runner = this.createFolioSkillRunner(input.model)
     await runner.initialize("starseafolio")
     await runner.enqueue({
       actionId: input.actionId ?? randomUUID(),
@@ -267,8 +310,8 @@ export class ProjectRuntime {
     return runner.drainOnce()
   }
 
-  public async drainFolioActions(): Promise<FolioUiState> {
-    const runner = this.createFolioSkillRunner()
+  public async drainFolioActions(model?: AIModelPort): Promise<FolioUiState> {
+    const runner = this.createFolioSkillRunner(model)
     await runner.initialize("starseafolio")
     let state = await runner.drainOnce()
     for (let i = 0; i < 32; i += 1) {
@@ -277,6 +320,89 @@ export class ProjectRuntime {
       state = next
     }
     return state
+  }
+
+  /** Shared publish pipeline invoked only from the folio publish.confirm host handler. */
+  public async executePublishDraftPipeline(input: Readonly<{
+    projectId: ProjectId
+    workspaceRootRef: string
+    chapterSequence: number
+    revisionTaskId: string
+    draftVersionId: string
+    model: AIModelPort
+    deadlineMs?: number
+    signal?: AbortSignal
+  }>): Promise<Readonly<{
+    revisionTaskId: string
+    chapterId: string
+    draftVersionId: string
+    status: string
+    graphSyncStatus?: string
+    error?: string
+    summary?: string
+  }>> {
+    input.signal?.throwIfAborted()
+    const revisions = this.createChapterRevisionService()
+    const revision = await revisions.getDraftWorkspace({
+      projectId: input.projectId,
+      chapterSequence: input.chapterSequence,
+      revisionTaskId: input.revisionTaskId,
+    })
+    if (revision === undefined) throw new Error("未找到当前章节的草稿")
+    const version = await revisions.readDraftVersion(input.draftVersionId)
+    if (version.revisionTaskId !== revision.revisionTaskId) throw new Error("草稿版本不属于指定修订")
+    const reviewed = await revisions.review({
+      revisionTaskId: input.revisionTaskId,
+      draftVersionId: input.draftVersionId,
+      workspaceRootRef: input.workspaceRootRef,
+    }, input.model)
+    const reviewId = reviewed.review?.reviewId
+    if (reviewId === undefined) throw new Error("当前草稿审核未生成结果，不能进入图治理")
+    const submitted = await this.submitChapterRevision({
+      revisionTaskId: input.revisionTaskId,
+      draftVersionId: input.draftVersionId,
+      workspaceRootRef: input.workspaceRootRef,
+      mode: "reviewed",
+      forced: false,
+      reviewId,
+      model: input.model,
+    })
+    if (submitted.status === "completed") {
+      return {
+        revisionTaskId: submitted.revisionTaskId,
+        chapterId: submitted.chapterId,
+        draftVersionId: input.draftVersionId,
+        status: submitted.status,
+        summary: "图修订完成，已发布为正式正文；可继续下一章。",
+      }
+    }
+    const waitMs = Math.max(0, (input.deadlineMs ?? 300_000) - 30_000)
+    const settled = await this.waitForActiveRevisionJobs({
+      timeoutMs: waitMs,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    })
+    const latest = await new SqliteChapterRevisionRepository(this.database).find(submitted.revisionTaskId)
+    const status = latest?.status ?? submitted.status
+    const graphTask = status === "completed" || !settled ? undefined
+      : (await this.listGraphRevisionTasks()).find((task) => task.revisionTaskId === submitted.revisionTaskId)
+    const error = graphTask !== undefined && ["failed", "interrupted", "cancelled"].includes(graphTask.status)
+      ? graphTask.error ?? `图治理执行未完成（${graphTask.status}）。`
+      : undefined
+    return {
+      revisionTaskId: submitted.revisionTaskId,
+      chapterId: submitted.chapterId,
+      draftVersionId: input.draftVersionId,
+      status,
+      ...(latest === undefined ? {} : { graphSyncStatus: latest.graphSyncStatus }),
+      ...(error === undefined ? {} : { error }),
+      summary: status === "completed"
+        ? "图修订完成，已发布为正式正文；可继续下一章。"
+        : error !== undefined
+          ? `图治理执行失败：${error} 本次未发布，草稿已保留，无需重复确认正文；请排查错误后重试图修订。`
+          : settled
+            ? `图修订结束但未发布（${status}），请检查图修订任务。`
+            : "图同步仍在进行，本轮先等待；下一轮继续时会自动等它完成。",
+    }
   }
 
   public async submitChapterRevision(input: Parameters<ChapterRevisionService["submit"]>[0]): Promise<ChapterRevision> {
@@ -1198,67 +1324,37 @@ export class ProjectRuntime {
         }
       },
       publishDraft: async (input) => {
-        input.signal?.throwIfAborted()
-        const revisions = this.createChapterRevisionService()
-        const revision = await revisions.getDraftWorkspace({
-          projectId: input.projectId,
-          chapterSequence: input.chapterSequence,
-          revisionTaskId: input.revisionTaskId,
-        })
-        if (revision === undefined) throw new Error("未找到当前章节的草稿")
-        const version = await revisions.readDraftVersion(input.draftVersionId)
-        if (version.revisionTaskId !== revision.revisionTaskId) throw new Error("草稿版本不属于指定修订")
-        const reviewed = await revisions.review({
-          revisionTaskId: input.revisionTaskId,
-          draftVersionId: input.draftVersionId,
-          workspaceRootRef: input.workspaceRootRef,
-        }, input.model)
-        const reviewId = reviewed.review?.reviewId
-        if (reviewId === undefined) throw new Error("当前草稿审核未生成结果，不能进入图治理")
-        const submitted = await this.submitChapterRevision({
-          revisionTaskId: input.revisionTaskId,
-          draftVersionId: input.draftVersionId,
-          workspaceRootRef: input.workspaceRootRef,
-          mode: "reviewed",
-          forced: false,
-          reviewId,
+        // All settings → graph → publish work is entered through the starsea-writing folio action.
+        await this.enqueueFolioAction({
+          name: "publish.confirm",
           model: input.model,
-        })
-        if (submitted.status === "completed") {
-          return {
-            revisionTaskId: submitted.revisionTaskId,
-            chapterId: submitted.chapterId,
+          input: {
+            revisionTaskId: input.revisionTaskId,
             draftVersionId: input.draftVersionId,
-            status: submitted.status,
-          }
-        }
-        // Keep the discuss turn alive until graph sync publishes the chapter, so the agent can move on.
-        const waitMs = Math.max(0, (input.deadlineMs ?? 300_000) - 30_000)
-        const settled = await this.waitForActiveRevisionJobs({
-          timeoutMs: waitMs,
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
+            chapterSequence: input.chapterSequence,
+            workspaceRootRef: input.workspaceRootRef,
+            ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
+          },
         })
-        const latest = await new SqliteChapterRevisionRepository(this.database).find(submitted.revisionTaskId)
-        const status = latest?.status ?? submitted.status
-        const graphTask = status === "completed" || !settled ? undefined
-          : (await this.listGraphRevisionTasks()).find((task) => task.revisionTaskId === submitted.revisionTaskId)
+        const latest = await new SqliteChapterRevisionRepository(this.database).find(input.revisionTaskId)
+        const status = latest?.status ?? "awaiting_user_decision"
+        const graphTask = (await this.listGraphRevisionTasks()).find((task) => task.revisionTaskId === input.revisionTaskId)
         const error = graphTask !== undefined && ["failed", "interrupted", "cancelled"].includes(graphTask.status)
-          ? graphTask.error ?? `图治理执行未完成（${graphTask.status}）。`
+          ? graphTask.error
           : undefined
+        const done = status === "completed" && error === undefined
         return {
-          revisionTaskId: submitted.revisionTaskId,
-          chapterId: submitted.chapterId,
+          revisionTaskId: input.revisionTaskId,
+          chapterId: latest?.chapterId ?? "",
           draftVersionId: input.draftVersionId,
           status,
           ...(latest === undefined ? {} : { graphSyncStatus: latest.graphSyncStatus }),
           ...(error === undefined ? {} : { error }),
-          summary: status === "completed"
+          summary: done
             ? "图修订完成，已发布为正式正文；可继续下一章。"
             : error !== undefined
               ? `图治理执行失败：${error} 本次未发布，草稿已保留，无需重复确认正文；请排查错误后重试图修订。`
-              : settled
-                ? `图修订结束但未发布（${status}），请检查图修订任务。`
-                : "图同步仍在进行，本轮先等待；下一轮继续时会自动等它完成。",
+              : `图修订结束但未发布（${status}），请检查图修订任务。`,
         }
       },
       waitForPendingPublications: async (input) => this.waitForActiveRevisionJobs(input),

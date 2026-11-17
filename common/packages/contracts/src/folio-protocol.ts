@@ -61,11 +61,13 @@ export type FolioGraphPhase = z.infer<typeof folioGraphPhaseSchema>
 
 export const folioGraphTaskSchema = z.object({
   revisionTaskId: z.string().min(1),
+  chapterId: z.string().min(1).optional(),
   heading: z.string().min(1),
   status: z.string().min(1),
   canCancel: z.boolean(),
   canRetry: z.boolean(),
   canContinue: z.boolean(),
+  blocksTurn: z.boolean().optional(),
   error: z.string().optional(),
   progress: z.object({
     completed: z.number().int().nonnegative(),

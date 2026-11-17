@@ -2,6 +2,7 @@ import { dialog, ipcMain, type BrowserWindow } from "electron"
 import { randomUUID } from "node:crypto"
 import {
   chapterGraphRevisionRetryPayloadSchema,
+  folioActionEnqueuePayloadSchema,
   chapterReviewRevisionPayloadSchema,
   chapterSubmitRevisionPayloadSchema,
   clientRequestSchema,
@@ -58,6 +59,7 @@ const MODEL_CREDENTIAL_PAYLOAD_SCHEMAS = {
   "chapter.reviewRevision": chapterReviewRevisionPayloadSchema,
   "chapter.submitRevision": chapterSubmitRevisionPayloadSchema,
   "chapter.graphRevision.retry": chapterGraphRevisionRetryPayloadSchema,
+  "folio.action.enqueue": folioActionEnqueuePayloadSchema,
   "synopsis.conversation.send": synopsisConversationSendPayloadSchema,
   "synopsis.conversation.refreshChoices": synopsisConversationRefreshChoicesPayloadSchema,
   "synopsis.conversation.beginTurn": synopsisBeginTurnPayloadSchema,
