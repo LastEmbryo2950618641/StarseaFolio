@@ -105,6 +105,7 @@ import type { SqliteSynopsisConversationRepository } from "../../infrastructure/
 import { runtimeLog } from "../../infrastructure/diagnostics/index.js"
 import { synopsisConversationStreamHub } from "./synopsis-conversation-stream-hub.js"
 import { retainDiscussWrites, restoreDiscussWrites, type PendingDiscussWrites } from "./discuss-pending-artifact.js"
+import { describeDiscussWrites, formatDiscussBlockNote } from "./discuss-block-note.js"
 import {
   AGENT_MEMORY_INDEX_PATH,
   truncateAgentMemoryIndex,
@@ -2775,7 +2776,9 @@ export class SynopsisConversationService {
       await this.dependencies.conversation.appendDiscussContextMessages({
         sessionId: input.sessionId, projectId: input.projectId, createdAtMs: this.dependencies.now(),
         messages: [{ role: "system", kind: "phase_instruction", content: JSON.stringify({
-          protocol: DISCUSS_STEP_FAILURE_PROTOCOL, failures: Object.fromEntries(saved.failures),
+          protocol: DISCUSS_STEP_FAILURE_PROTOCOL,
+          failures: Object.fromEntries(saved.failures),
+          ...(failure === undefined ? {} : { step, reason: failure.slice(0, 500) }),
         }) }],
       })
       if (saved.obsoleteMessageIds.length > 0) {
@@ -2847,7 +2850,59 @@ export class SynopsisConversationService {
         ].join("\n")
     let latestBudgetAdvisory: SynopsisConversationBudgetAdvisory | undefined
     let latestToolDraft: SynopsisWorkflowToolResult | undefined
-    const stopDiscussLoop = (content: string) => {
+    const noteDiscussBlock = async (
+      gate: string,
+      message: string,
+      options?: Readonly<{ source?: unknown; held?: boolean; discarded?: readonly string[] }>,
+    ): Promise<void> => {
+      const discarded = options?.discarded ?? (options?.source === undefined ? [] : describeDiscussWrites(options.source))
+      const note = formatDiscussBlockNote({
+        message,
+        discarded,
+        disposition: options?.held === true ? "held" : discarded.length > 0 ? "rejected" : "noted",
+      })
+      // Keep the original hint so settled-todo filters can drop it. The durable note below is what later turns read.
+      repairHints.push(message)
+      await this.dependencies.conversation.appendDiscussContextMessages({
+        sessionId: input.sessionId,
+        projectId: input.projectId,
+        createdAtMs: this.dependencies.now(),
+        messages: [{
+          role: "system",
+          kind: "phase_instruction",
+          content: JSON.stringify({
+            protocol: "discuss-gate-v1",
+            gate,
+            message: note,
+            ...(discarded.length === 0 ? {} : { discarded }),
+          }),
+        }],
+      })
+      storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
+      const gateMessages = storedContext.filter((message) => {
+        if (message.kind !== "phase_instruction" || message.content === undefined) return false
+        try {
+          return (JSON.parse(message.content) as { protocol?: unknown }).protocol === "discuss-gate-v1"
+        } catch {
+          return false
+        }
+      })
+      const overflow = gateMessages.slice(0, Math.max(0, gateMessages.length - 12))
+      if (overflow.length === 0) return
+      const hiddenIds = overflow.map((message) => message.messageId)
+      await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, hiddenIds, this.dependencies.now())
+      const hidden = new Set(hiddenIds)
+      storedContext = storedContext.filter((message) => !hidden.has(message.messageId))
+    }
+    const releaseHeldWrites = async (reason: string): Promise<void> => {
+      if (pendingWrites === undefined) return
+      const discarded = describeDiscussWrites(pendingWrites)
+      pendingWrites = undefined
+      if (discarded.length === 0) return
+      await noteDiscussBlock("held_writes_released", reason, { discarded })
+    }
+    const stopDiscussLoop = async (content: string) => {
+      await noteDiscussBlock("discuss_stopped", content)
       runtimeLog("warn", "synopsis-conversation", "discuss.safety_stop", {
         projectId: input.projectId, sessionId: input.sessionId, attempt,
         remainingCalls, todoNoProgressStreak, consecutiveTodoWrites,
@@ -2953,11 +3008,11 @@ export class SynopsisConversationService {
         )
       }
       if (hasExplicitCallLimit && attempt > maxModelCalls + maxRetrievalRounds + 8) {
-        return stopDiscussLoop("本轮重复尝试过多，已暂停自动推进。已保存的结果与未完成任务均已保留，请检查当前阻塞原因后重试。")
+        return await stopDiscussLoop("本轮重复尝试过多，已暂停自动推进。已保存的结果与未完成任务均已保留，请检查当前阻塞原因后重试。")
       }
       if (remainingCalls <= 0) {
         if (!shouldAllowDiscussBudgetGrace(remainingCalls, budgetGraceUsed)) {
-          return stopDiscussLoop("本轮模型调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留，请检查当前进度后重试。")
+          return await stopDiscussLoop("本轮模型调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留，请检查当前进度后重试。")
         }
         budgetGraceUsed = true
         remainingCalls = 1
@@ -3167,8 +3222,9 @@ export class SynopsisConversationService {
         if (isMissingSynopsisArtifactError(error) && missingArtifactRetries < 2 && remainingCalls > 1) {
           missingArtifactRetries += 1
           remainingCalls -= 1
-          repairHints.push(
-            "上一轮模型结果无效：outcome=continue 时缺少 artifact 对象。请立即返回完整 JSON，artifact 内必须有 assistantMessage 与 finalSelfReview。",
+          await noteDiscussBlock(
+            "missing_artifact",
+            "上一轮模型结果无效：outcome=continue 时缺少 artifact 对象。请立即返回完整 JSON，artifact 内必须有 assistantMessage 与 finalSelfReview。这一轮没有落盘。",
           )
           runtimeLog("warn", "synopsis-conversation", "missing_artifact.retry", {
             projectId: input.projectId,
@@ -3180,9 +3236,9 @@ export class SynopsisConversationService {
           continue
         }
         if (isMissingSynopsisArtifactError(error)) {
-          throw new SynopsisInvalidStateError(
-            "模型未返回完整讨论结果（缺少 artifact）。请重试发送；若反复失败，可先简化指令或检查模型是否支持 JSON 模式。",
-          )
+          const message = "模型未返回完整讨论结果（缺少 artifact）。请重试发送；若反复失败，可先简化指令或检查模型是否支持 JSON 模式。"
+          await noteDiscussBlock("missing_artifact", message)
+          throw new SynopsisInvalidStateError(message)
         }
         // Only tool-exclusivity violations may change the tool/write Todo gate.
         if (isRecoverableDiscussPhaseContractError(error) && remainingCalls > 1) {
@@ -3193,7 +3249,7 @@ export class SynopsisConversationService {
               "choices", "focusChange", "synopsisBody", "outlineBody", "chapterDraftProposal",
             ])
           }
-          repairHints.push(discussPhaseContractRepairHint(error))
+          await noteDiscussBlock("phase_contract", discussPhaseContractRepairHint(error))
           runtimeLog("warn", "synopsis-conversation", "phase_contract.gate_retry", {
             projectId: input.projectId,
             sessionId: input.sessionId,
@@ -3216,8 +3272,12 @@ export class SynopsisConversationService {
             attempt,
             error: error instanceof Error ? error.message : String(error),
           })
-          return stopDiscussLoop(`本次显式设置的模型调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留。最后校验原因：${error instanceof Error ? error.message : String(error)}`)
+          return await stopDiscussLoop(`本次显式设置的模型调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留。最后校验原因：${error instanceof Error ? error.message : String(error)}`)
         }
+        await noteDiscussBlock(
+          "model_result_rejected",
+          `模型结果被拒绝，没有落盘。原因：${(error instanceof Error ? error.message : String(error)).slice(0, 800)}`,
+        )
         throw error
       }
       lastRequestInputTokens = execution.usage.lastRequestInputTokens
@@ -3283,6 +3343,13 @@ export class SynopsisConversationService {
           updatedAtMs: this.dependencies.now(),
         })
       }
+      if ((execution.schemaRepairs?.length ?? 0) > 0) {
+        await noteDiscussBlock("schema_validation", [
+          "上一份模型输出没有通过校验，系统已要求重生成。被拒绝的那份没有落盘。",
+          ...(execution.schemaRepairs ?? []).map((item, index) => `${String(index + 1)}. ${item}`),
+          "后面这条通过校验的结果才算数；不要把被拒绝的那份说成已写入。",
+        ].join("\n"))
+      }
       remainingCalls = Math.max(0, remainingCalls - Math.max(1, execution.usage.modelCalls ?? 1))
       synopsisConversationStreamHub.addUsage(input.projectId, {
         inputTokens: execution.usage.inputTokens,
@@ -3326,6 +3393,7 @@ export class SynopsisConversationService {
             }),
           }],
         })
+        storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
         runtimeLog("info", "synopsis-conversation", "tool_exclusive.gate_applied", {
           projectId: input.projectId,
           sessionId: input.sessionId,
@@ -3353,7 +3421,7 @@ export class SynopsisConversationService {
       if (manualFocusChange && (pendingUserFocusSequence !== undefined
         || (proposedFocusSequence !== undefined && proposedFocusSequence !== input.chapterSequence))) {
         // Resolve navigation before draft/todo/reference repairs can replay work for the captured old chapter.
-        pendingWrites = undefined
+        await releaseHeldWrites("本轮先处理换章，先前暂存的旧章写入已取消，没有落盘。")
         if (toolArtifact.success && proposedFocusSequence !== undefined && proposedFocusSequence !== input.chapterSequence
           && isCurrentUserFocusChange(toolArtifact.data.focusChange, input.userMessage)) {
           const transition = prepareUserFocusTransition(toolArtifact.data, input.chapterSequence, input.userMessage)
@@ -3379,8 +3447,10 @@ export class SynopsisConversationService {
         }
         if (pendingUserFocusSequence === undefined && remainingCalls > 0) {
           pendingUserFocusSequence = proposedFocusSequence
-          repairHints.push(
+          await noteDiscussBlock(
+            "focus_change_quote",
             `【换章指令补正，仅一次】上一轮提出切到第${String(proposedFocusSequence)}章，但 focusChange.userRequestQuote 缺失或不在本轮 userMessage 中。先核对本轮用户是否要求换章；若是，原样摘录该指令到 userRequestQuote，只返回 focusChange、assistantMessage、finalSelfReview 和可选 choices，用户还要求目标章写作时加 continueTurn=true；只换章不续跑。不要提交任何章节内容，不要补交旧章草稿，也不要调用工具。若本轮用户未要求换章，撤回该动作并说明。系统仅补正一次，仍不合格就停止且不应用该回复的章节改动。`,
+            { source: toolArtifact.success ? toolArtifact.data : undefined },
           )
           runtimeLog("warn", "synopsis-conversation", "focus_change.quote_repair", {
             projectId: input.projectId, sessionId: input.sessionId,
@@ -3389,7 +3459,7 @@ export class SynopsisConversationService {
           attempt += 1
           continue
         }
-        return stopDiscussLoop("换章请求未通过核验：模型补正后仍未提供有效的本轮指令引用，或撤回了换章动作。章节焦点保持原位，没有写入草稿版本，也未应用该回复的章节改动。请检查本轮请求后重试。")
+        return await stopDiscussLoop("换章请求未通过核验：模型补正后仍未提供有效的本轮指令引用，或撤回了换章动作。章节焦点保持原位，没有写入草稿版本，也未应用该回复的章节改动。请检查本轮请求后重试。")
       }
       const interviewChoices = toolArtifact.success ? [...new Map((toolArtifact.data.choices ?? [])
         .filter(choice => !/^(?:你的想法|我有自己的想法)$/u.test(choice.label.trim()))
@@ -3400,7 +3470,7 @@ export class SynopsisConversationService {
           || (input.creativeSetup.status === "awaiting_write" && input.creativeSetup.scope === "protagonist"
             && toolArtifact.data.protagonistSupplementFields === undefined)) {
           if (remainingCalls > 0 && attempt < 2) {
-            repairHints.push("当前是用户必答的主角罗盘/卷主支线问答，禁止调用工具或写章节。请只提出当前字段问题和至少两个贴合主题的 continue_discuss 选项；收集完成时仅补充 protagonistSupplementFields，必须有非空姓名，身份、能力、人物关系等分别填入字段，不得替换用户核心。")
+            await noteDiscussBlock("creative_setup", "当前是用户必答的主角罗盘/卷主支线问答，禁止调用工具或写章节。请只提出当前字段问题和至少两个贴合主题的 continue_discuss 选项；收集完成时仅补充 protagonistSupplementFields，必须有非空姓名，身份、能力、人物关系等分别填入字段，不得替换用户核心。本轮章节写入没有落盘。", { source: toolArtifact.success ? toolArtifact.data : undefined })
             attempt += 1
             continue
           }
@@ -3454,7 +3524,8 @@ export class SynopsisConversationService {
           const repairStage = originalWorkStage === "none" && originalWorkGateRepairs > 1
             ? "web_attempted"
             : originalWorkStage
-          repairHints.push(
+          await noteDiscussBlock(
+            "original_work_evidence",
             originalWorkStage === "archive_imported"
               ? "【同人原作核验·读取结果】nikowenku-archive 已导入资料，但本轮尚未把本地索引/章节读入 readEvidence。请 outcome=request_read，exactKeys 指向 参考文件/原作资料/ 下与当前问题相关的 Markdown，只读所需片段后再作答。"
               : originalWorkEvidenceRepairHint({
@@ -3462,6 +3533,7 @@ export class SynopsisConversationService {
                   hasWebResearch: this.dependencies.webResearch !== undefined,
                   hasArchive: originalWorkToolsAvailable,
                 }),
+            { source: toolArtifact.success ? toolArtifact.data : undefined },
           )
           attempt += 1
           continue
@@ -3473,13 +3545,15 @@ export class SynopsisConversationService {
       if (toolArtifact.success && toolArtifact.data.toolRequest !== undefined) {
         if (parsedResult.outcome !== "continue" || requestedReads.length > 0) {
           await recordStepOutcome("tool_contract", "工具调用必须单独返回，不能与读取请求混合")
-          repairHints.push("toolRequest 必须单独使用 outcome=continue，不能与 request_read 同回。")
+          await noteDiscussBlock("tool_contract", "toolRequest 必须单独使用 outcome=continue，不能与 request_read 同回。这一轮没有落盘。", { source: toolArtifact.data })
           attempt += 1
           continue
         }
         if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
         const toolRequest = toolArtifact.data.toolRequest
-        if (toolRequest.action === "invoke" && toolRequest.name !== "todo_write") pendingWrites = undefined
+        if (toolRequest.action === "invoke" && toolRequest.name !== "todo_write") {
+          await releaseHeldWrites(`本轮改为调用 ${toolRequest.name}，先前暂存的写入已取消，没有落盘。`)
+        }
         await recordStepOutcome("tool_contract")
         if (toolRequest.name !== "todo_write") {
           consecutiveTodoWrites = 0
@@ -3491,7 +3565,7 @@ export class SynopsisConversationService {
           && !discussTurnHasTodos(synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos)
         ) {
           await recordStepOutcome("todo_required", DISCUSS_TODO_REQUIRED_HINT)
-          repairHints.push(DISCUSS_TODO_REQUIRED_HINT)
+          await noteDiscussBlock("todo_required", DISCUSS_TODO_REQUIRED_HINT, { source: toolArtifact.data })
           attempt += 1
           continue
         }
@@ -3586,7 +3660,11 @@ export class SynopsisConversationService {
               nextSequence,
               [input.chapterSequence],
             )
-            repairHints.push(discussChapterSequenceGateHint(nextSequence, [input.chapterSequence]))
+            await noteDiscussBlock(
+              "chapter_sequence_publish",
+              discussChapterSequenceGateHint(nextSequence, [input.chapterSequence]),
+              { source: toolArtifact.data },
+            )
           }
           await this.dependencies.conversation.appendDiscussContextMessages({
             sessionId: input.sessionId,
@@ -3596,6 +3674,12 @@ export class SynopsisConversationService {
           })
           // The next model round must see the result it is expected to act on.
           storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
+          if (toolFailed && !isPrecedingChapterPublishGateError(new Error(toolErrorMessage))) {
+            await noteDiscussBlock(
+              "tool_failed",
+              `${toolRequest.name} 执行失败，没有产生落盘结果。原因：${toolErrorMessage || "工具执行失败"}`,
+            )
+          }
           if (toolResult.status === "reference_imported" || toolResult.status === "character_updated") {
             // Imports add files mid-send. Both the next model request and the
             // read executor must use the refreshed inventory, not the bootstrap snapshot.
@@ -3646,17 +3730,17 @@ export class SynopsisConversationService {
                 if (todoNoProgressStreak === DISCUSS_STEP_FAILURE_LIMIT - 1) {
                   todoLoopRepairIssued = true
                   autoContinueBlocked = true
-                  repairHints.push(DISCUSS_TODO_NO_PROGRESS_HINT)
+                  await noteDiscussBlock("todo_no_progress", DISCUSS_TODO_NO_PROGRESS_HINT)
                 }
               }
             }
             if (shouldStopTodoWriteLoop(todoNoProgressStreak, todoLoopRepairIssued, consecutiveTodoWrites)) {
-              return stopDiscussLoop("任务清单连续重复更新，修复提示后仍未推进，已暂停自动推进。已保存结果与未完成任务均已保留，请检查阻塞原因后重试。")
+              return await stopDiscussLoop("任务清单连续重复更新，修复提示后仍未推进，已暂停自动推进。已保存结果与未完成任务均已保留，请检查阻塞原因后重试。")
             }
             if (shouldIssueTodoLoopRepair(todoNoProgressStreak, todoLoopRepairIssued, consecutiveTodoWrites)) {
               todoLoopRepairIssued = true
               autoContinueBlocked = true
-              repairHints.push(DISCUSS_TODO_NO_PROGRESS_HINT)
+              await noteDiscussBlock("todo_no_progress", DISCUSS_TODO_NO_PROGRESS_HINT)
             }
           }
         } catch (error) {
@@ -3669,6 +3753,10 @@ export class SynopsisConversationService {
             resultSummary: error instanceof Error ? error.message : String(error),
             round: toolRound,
           }, this.dependencies.now())
+          await noteDiscussBlock(
+            "tool_failed",
+            `${toolRequest.name} 执行失败，没有落盘。原因：${(error instanceof Error ? error.message : String(error)).slice(0, 800)}`,
+          )
           throw error
         } finally {
           clearInterval(cancellationPoll)
@@ -3685,17 +3773,18 @@ export class SynopsisConversationService {
               .slice(0, 3)
               .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
               .join("；")
-            repairHints.push(
+            await noteDiscussBlock(
+              "invalid_artifact",
               zodHint.includes("toolRequest")
                 ? discussPhaseContractRepairHint(zodHint)
-                : `上一轮缺少合法 artifact（${zodHint}）。请 outcome=continue 并返回完整 artifact（assistantMessage、finalSelfReview 必填）。`,
+                : `上一轮缺少合法 artifact（${zodHint}）。请 outcome=continue 并返回完整 artifact（assistantMessage、finalSelfReview 必填）。这一轮没有落盘。`,
             )
             attempt += 1
             continue
           }
-          throw new SynopsisInvalidStateError(
-            "模型未返回完整讨论结果（缺少 artifact）。请重试发送。",
-          )
+          const message = "模型未返回完整讨论结果（缺少 artifact）。请重试发送。"
+          await noteDiscussBlock("missing_artifact", message)
+          throw new SynopsisInvalidStateError(message)
         }
         artifact.data = synopsisDiscussArtifactSchema.parse(restoreDiscussWrites(pendingWrites, artifact.data, input.chapterSequence))
         artifact.data = prepareUserFocusTransition(artifact.data, input.chapterSequence, input.userMessage)
@@ -3713,8 +3802,10 @@ export class SynopsisConversationService {
             && arcPlan !== undefined
             && arcPlan.markdown.trim().length > 0
           if (!completeVolumePlan && missingVolumePlanRetries < 1 && remainingCalls > 0) {
-            repairHints.push(
-              "【卷规划首写必交】当前仍处于卷级规划阶段，不能只解释门禁或继续讨论第一章。本轮请根据用户构思主动提出一份可修改的第一卷方案，并一次提交 volumePlanMeta（targetChapterCount、targetWordCount）、volumeSynopsis.markdown、arcPlan.markdown 三项完整结构化内容；缺少用户细节时合理估算并标明可调整，不要反问后停住。禁止输出任何章节级梗概、细纲、草稿或正文。",
+            await noteDiscussBlock(
+              "volume_plan_required",
+              "【卷规划首写必交】当前仍处于卷级规划阶段，不能只解释门禁或继续讨论第一章。本轮请根据用户构思主动提出一份可修改的第一卷方案，并一次提交 volumePlanMeta（targetChapterCount、targetWordCount）、volumeSynopsis.markdown、arcPlan.markdown 三项完整结构化内容；缺少用户细节时合理估算并标明可调整，不要反问后停住。禁止输出任何章节级梗概、细纲、草稿或正文。已提交的章节内容没有落盘。",
+              { source: artifact.data },
             )
             missingVolumePlanRetries += 1
             attempt += 1
@@ -3736,14 +3827,16 @@ export class SynopsisConversationService {
               && settings.causalityFocus !== undefined
             if (!completeSettings) {
               if (missingCreationDeskSettingsRetries >= 1 || remainingCalls <= 0) {
-                throw new SynopsisInvalidStateError(
-                  "卷规划未完成：AI 未返回有效的写作设置结构化字段，控件没有切换。请重试卷规划。",
-                )
+                const message = "卷规划未完成：AI 未返回有效的写作设置结构化字段，控件没有切换。请重试卷规划。"
+                await noteDiscussBlock("creation_desk_settings", message, { source: artifact.data })
+                throw new SynopsisInvalidStateError(message)
               }
               missingCreationDeskSettingsRetries += 1
               pendingWrites = retainDiscussWrites(artifact.data)
-              repairHints.push(
+              await noteDiscussBlock(
+                "creation_desk_settings",
                 "【卷规划写作设置必交】你刚才只在 assistantMessage 中声称切换设置，系统没有应用该文字。必须在 artifact.creationDeskSettings 返回完整字段：descriptionRulePath、proseStyleRulePath、novelMajorCategoryRulePath、novelSubcategoryRulePath、minimumWordCount、maximumWordCount、boundaryPace、causalityFocus。规则路径必须逐字来自本轮工作区真实 Markdown 文件；字数按卷总字数/章节数估算；未返回前禁止声称已切换或已同步。",
+                { source: artifact.data, held: true },
               )
               attempt += 1
               continue
@@ -3765,8 +3858,10 @@ export class SynopsisConversationService {
             const requiredRecommendations = Math.min(2, validStylePaths.length, validMajorCategoryPaths.size, validSubcategoryPaths.size)
             if (recommendations.length < requiredRecommendations) {
               await recordStepOutcome("style_recommendations", "风格候选未通过门禁，缺少有效的推荐选项")
-              repairHints.push(
-                "风格门禁要求你先阅读全部 workspace:presentation_style_candidate 证据，再给至少两个分别绑定大类、次大类、笔风真实 Markdown 路径的 continue_discuss 推荐；只做风格评估，不写任何文件。",
+              await noteDiscussBlock(
+                "style_recommendations",
+                "风格门禁要求你先阅读全部 workspace:presentation_style_candidate 证据，再给至少两个分别绑定大类、次大类、笔风真实 Markdown 路径的 continue_discuss 推荐；只做风格评估，不写任何文件。本轮文件写入没有落盘。",
+                { source: artifact.data },
               )
               attempt += 1
               continue
@@ -3782,8 +3877,10 @@ export class SynopsisConversationService {
               && assessWorkStyleMarkdown(styleWrite.markdown).complete
             if (!styleWriteApproved && recommendations.length < Math.min(2, validStylePaths.length, validMajorCategoryPaths.size, validSubcategoryPaths.size)) {
               await recordStepOutcome("style_write", "作品风格写入未通过门禁")
-              repairHints.push(
-                `审核所选笔风「${selectedPath ?? "（缺失）"}」后，必须给出完整合格的 ${WORK_STYLE_RULE_PATH}，且保留所选路径；若不适配，提供至少两个绑定真实候选路径的替代方案。禁止写章节内容。`,
+              await noteDiscussBlock(
+                "style_write",
+                `审核所选笔风「${selectedPath ?? "（缺失）"}」后，必须给出完整合格的 ${WORK_STYLE_RULE_PATH}，且保留所选路径；若不适配，提供至少两个绑定真实候选路径的替代方案。禁止写章节内容。本轮章节内容没有落盘。`,
+                { source: artifact.data },
               )
               attempt += 1
               continue
@@ -3798,7 +3895,7 @@ export class SynopsisConversationService {
           && !discussTurnHasTodos(turnTodos)) {
           await recordStepOutcome("todo_required", DISCUSS_TODO_REQUIRED_HINT)
           pendingWrites = retainDiscussWrites(artifact.data)
-          repairHints.push(DISCUSS_TODO_REQUIRED_HINT)
+          await noteDiscussBlock("todo_required", DISCUSS_TODO_REQUIRED_HINT, { source: artifact.data, held: true })
           attempt += 1
           continue
         }
@@ -3815,7 +3912,7 @@ export class SynopsisConversationService {
         ) {
           await recordStepOutcome("todo_incomplete", DISCUSS_TODO_INCOMPLETE_HINT)
           pendingWrites = retainDiscussWrites(artifact.data)
-          repairHints.push(DISCUSS_TODO_INCOMPLETE_HINT)
+          await noteDiscussBlock("todo_incomplete", DISCUSS_TODO_INCOMPLETE_HINT, { source: artifact.data, held: true })
           attempt += 1
           continue
         }
@@ -3832,12 +3929,12 @@ export class SynopsisConversationService {
               sessionId: input.sessionId,
               issues: scheduleIssues.length,
             })
-            repairHints.push([
+            await noteDiscussBlock("goal_schedule", [
               "【门禁·钩子时限】goalProposals 中以下伏笔/高潮缺起势章或兑现章（设置要求完整）：",
               ...scheduleIssues.map((issue) => `- ${issue}`),
               "请根据卷规划/细纲自行推断并补齐 plantChapterSequence 与 payoffChapterSequence（起势 ≤ 兑现），重新输出完整 artifact；",
-              "确实无法确定的，改为 narrativeKind=general 或暂不提该条，不要询问用户。",
-            ].join("\n"))
+              "确实无法确定的，改为 narrativeKind=general 或暂不提该条，不要询问用户。这次提交没有落盘。",
+            ].join("\n"), { source: artifact.data })
             attempt += 1
             continue
           }
@@ -3865,10 +3962,10 @@ export class SynopsisConversationService {
           && missingSynopsisArtifactRetries < 1
           && !budgetGraceUsed
         ) {
-          repairHints.push([
+          await noteDiscussBlock("synopsis_required", [
             `【剧情梗概必交】用户要求写入当前焦点第${String(input.chapterSequence)}章剧情梗概，但当前文件仍是空占位。本轮必须在 synopsisBody 提交完整、非空的梗概 Markdown；assistantMessage、暂存区、细纲或正文都不能代替。不得声称已写入，也不得推进细纲或草稿。`,
             "请直接返回结构化 synopsisBody，不要再 request_read 或继续规划后续章节。",
-          ].join("\n"))
+          ].join("\n"), { source: artifact.data })
           missingSynopsisArtifactRetries += 1
           attempt += 1
           continue
@@ -3887,10 +3984,10 @@ export class SynopsisConversationService {
           && missingOutlineArtifactRetries < 1
           && !budgetGraceUsed
         ) {
-          repairHints.push([
+          await noteDiscussBlock("outline_required", [
             `【剧情细纲必交】用户已要求为当前焦点第${String(input.chapterSequence)}章写入细纲，但文件仍为空。必须在 outlineBody 提交完整、非空的细纲 Markdown；assistantMessage、暂存区或正文草稿都不能代替。不得声称已写入，也不得推进正文草稿。`,
             "请直接返回结构化 outlineBody，不要再 request_read 或继续规划后续章节。",
-          ].join("\n"))
+          ].join("\n"), { source: artifact.data })
           missingOutlineArtifactRetries += 1
           attempt += 1
           continue
@@ -3913,10 +4010,10 @@ export class SynopsisConversationService {
           || latestToolDraft !== undefined
         const missingRequiredDraftProposal = draftProposalRequired && !hasCurrentChapterDraftProposal
         if (missingRequiredDraftProposal && missingDraftProposalRetries < 1 && !budgetGraceUsed) {
-          repairHints.push([
+          await noteDiscussBlock("draft_required", [
             `【草稿提案必交】用户已明确要求为当前焦点第${String(input.chapterSequence)}章写正文草稿。必须在 artifact.chapterDraftProposal 中提交完整、非空正文（或在 chapterDraftProposals 中提交 chapterSequence=${String(input.chapterSequence)} 的完整正文）；assistantMessage、暂存区文件或工具说明都不能代替草稿提案。没有结构化提案就不会创建草稿版本，也不得声称已写入或已保存。`,
             "请直接返回完整提案，不要再 request_read 或重复解释流程。",
-          ].join("\n"))
+          ].join("\n"), { source: artifact.data })
           missingDraftProposalRetries += 1
           attempt += 1
           continue
@@ -3955,6 +4052,7 @@ export class SynopsisConversationService {
               }),
             }],
           })
+          storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
           const hadDraftIntent = focusDraftRequested
             || (rawDraftProposals !== undefined && rawDraftProposals.length > 0)
           const allowedAnyDraft = (focusDraftRequested && focusDraftAllowed)
@@ -4002,8 +4100,10 @@ export class SynopsisConversationService {
         ) {
           missingChoicesRetries += 1
           pendingWrites = retainDiscussWrites(artifact.data)
-          repairHints.push(
+          await noteDiscussBlock(
+            "choices_required",
             "【停止前选项必交】本轮将结束并等待用户。请基于当前阶段补充至少两个彼此有区别、可直接执行的 choices，通常提供推荐路径与调整路径；每个 action 用 continue_discuss。不要只在 assistantMessage 中列选项。",
+            { source: artifact.data, held: true },
           )
           attempt += 1
           continue
@@ -4096,7 +4196,7 @@ export class SynopsisConversationService {
         })
       }
 
-      pendingWrites = undefined
+      await releaseHeldWrites("本轮改为读取，先前暂存的写入已取消，没有落盘。")
       if (retrievalRounds >= maxRetrievalRounds || budgetGraceUsed) {
         runtimeLog("warn", "synopsis-conversation", "retrieval.exhausted", {
           projectId: input.projectId,
@@ -4176,8 +4276,10 @@ export class SynopsisConversationService {
           && remainingCalls > 0
         ) {
           missingChoicesRetries += 1
-          repairHints.push(
-            "【停止前选项必交】本轮将结束并等待用户。请基于当前阶段补充至少两个彼此有区别、可直接执行的 choices，通常提供推荐路径与调整路径；每个 action 用 continue_discuss。不要只在 assistantMessage 中列选项。",
+          await noteDiscussBlock(
+            "choices_required",
+            "【停止前选项必交】本轮将结束并等待用户。请基于当前阶段补充至少两个彼此有区别、可直接执行的 choices，通常提供推荐路径与调整路径；每个 action 用 continue_discuss。不要只在 assistantMessage 中列选项。本轮还没有落盘。",
+            { source: artifact.data },
           )
           attempt += 1
           continue
@@ -4294,7 +4396,7 @@ export class SynopsisConversationService {
       if (input.workStyleGate === undefined
         && !discussTurnHasTodos(synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos)) {
         await recordStepOutcome("todo_required", DISCUSS_TODO_REQUIRED_HINT)
-        repairHints.push(DISCUSS_TODO_REQUIRED_HINT)
+        await noteDiscussBlock("todo_required", DISCUSS_TODO_REQUIRED_HINT)
         attempt += 1
         continue
       }

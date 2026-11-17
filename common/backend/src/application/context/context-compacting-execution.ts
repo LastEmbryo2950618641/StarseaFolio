@@ -31,7 +31,11 @@ function isProtectedDiscussState(message: VisibleModelContextMessage): boolean {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return false
     const protocol = (value as Record<string, unknown>).protocol
     return (message.role === "user" && protocol === "discuss-history-summary-v1")
-      || (message.role === "system" && (protocol === "discuss-step-failures-v1" || protocol === "discuss-progress-v1"))
+      || (message.role === "system" && (
+        protocol === "discuss-step-failures-v1"
+        || protocol === "discuss-progress-v1"
+        || protocol === "discuss-gate-v1"
+      ))
   } catch {
     return false
   }

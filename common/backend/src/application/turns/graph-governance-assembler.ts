@@ -1,4 +1,6 @@
 import {
+  assertGraphSpacetimeSettlementCoverage,
+  assertSpacetimeGovernanceCoverage,
   graphCapacityRewriteArtifactSchema,
   graphGovernanceArtifactSchema,
   graphRetrievalDesignArtifactSchema,
@@ -297,6 +299,34 @@ function uniqueGraphRefs<T extends { targetKind: "node" | "link"; targetRef: str
     `${reference.targetKind}:${reference.targetRef}`,
     reference,
   ])).values()]
+}
+
+/** The routing candidate failed coverage, while the later spacetime settlement satisfies the same audit. */
+export function stagedSettlementSupersedesRoutingGovernance(input: Readonly<{
+  dependencyAudit: unknown
+  governance: unknown
+  structure: unknown
+  spacetime: unknown
+  sourceUnitCount: number
+}>): string | undefined {
+  let governanceError: unknown
+  try {
+    assertSpacetimeGovernanceCoverage(input.dependencyAudit, input.governance, input.sourceUnitCount)
+  } catch (error) {
+    governanceError = error
+  }
+  if (governanceError === undefined) return undefined
+  try {
+    assertGraphSpacetimeSettlementCoverage(
+      input.dependencyAudit,
+      input.structure,
+      input.spacetime,
+      input.sourceUnitCount,
+    )
+  } catch {
+    return undefined
+  }
+  return governanceError instanceof Error ? governanceError.message : String(governanceError)
 }
 
 export function invalidatedGraphGovernancePhases(

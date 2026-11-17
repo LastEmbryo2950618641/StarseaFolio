@@ -48,6 +48,7 @@ import {
   type GraphGovernanceArtifact,
   type SemanticReviewArtifact,
   type SettlementReviewArtifact,
+  type SettingsExtractionArtifact,
 } from "@starseafolio/prompt-contracts"
 
 import {
@@ -67,9 +68,12 @@ import {
   formatWorkDescriptionRuleEvidence,
   isAutoDescriptionSelection,
   isDescriptionRuleMarkdownPath,
+  applyWorkStyleRevision,
   isWorkDescriptionRulePath,
   listWorkDescriptionRuleFiles,
   resolveDescriptionRulePaths,
+  resolveWorkStyleRequirementSource,
+  WORK_STYLE_RULE_PATH,
   type GraphRevision,
 } from "../../core/index.js"
 import type {
@@ -128,6 +132,7 @@ import {
   projectGraphRetrievalDesignFromGovernance,
   projectGraphStructurePlanFromGovernance,
   replayGraphCapacityRewrites,
+  stagedSettlementSupersedesRoutingGovernance,
 } from "./graph-governance-assembler.js"
 import {
   buildCommitReviewProjection,
@@ -308,6 +313,8 @@ export type TurnOrchestratorInput = Readonly<{
   workspaceRootRef: string
   internalStore: InternalProjectStore
   userInput: string
+  /** Visible user messages. Style revision quotes these, not the revision draft. */
+  userRequirements?: string
   chapterSequence: number
   presentation?: Readonly<{
     descriptionRulePath?: string | undefined
@@ -782,16 +789,63 @@ export class TurnOrchestrator {
     phaseRunId: string,
     artifact: unknown,
   ): Promise<void> {
-    if (this.dependencies.settingsExtraction === undefined) return
     const extraction = settingsExtractionArtifactSchema.parse(artifact)
-    await this.dependencies.settingsExtraction.commitArtifact({
-      projectId: input.projectId,
-      workspaceRootRef: input.workspaceRootRef,
-      taskId,
-      phaseRunId,
-      proposals: extraction.proposals,
-      worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
-    })
+    if (this.dependencies.settingsExtraction !== undefined) {
+      await this.dependencies.settingsExtraction.commitArtifact({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        taskId,
+        phaseRunId,
+        proposals: extraction.proposals,
+        worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
+      })
+    }
+    await this.applyWorkStyleRevisionFromArtifact(input, taskId, extraction)
+  }
+
+  private async applyWorkStyleRevisionFromArtifact(
+    input: TurnOrchestratorInput,
+    taskId: string,
+    extraction: SettingsExtractionArtifact,
+  ): Promise<void> {
+    const sections = extraction.workStyleRevision?.sections
+    if (sections === undefined || sections.length === 0) return
+    const userRequirements = resolveWorkStyleRequirementSource(input)
+    if (userRequirements.length === 0) {
+      this.log("info", "revision.work_style.skipped", { taskId, reason: "no_user_requirements" })
+      return
+    }
+    let current = ""
+    try {
+      current = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, WORK_STYLE_RULE_PATH)
+    } catch (error) {
+      this.log("warn", "revision.work_style.skipped", {
+        taskId,
+        reason: "unreadable",
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    const result = applyWorkStyleRevision({ current, updates: sections, userRequirements })
+    if (result.markdown === current) {
+      this.log("info", "revision.work_style.unchanged", { taskId, skipped: result.skipped })
+      return
+    }
+    try {
+      await this.dependencies.workspace.saveUserMarkdown(
+        input.workspaceRootRef,
+        WORK_STYLE_RULE_PATH,
+        result.markdown,
+      )
+    } catch (error) {
+      this.log("warn", "revision.work_style.skipped", {
+        taskId,
+        reason: "write_failed",
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    this.log("info", "revision.work_style.updated", { taskId, applied: result.applied, skipped: result.skipped })
   }
 
   private async executeAdaptiveRevisionGraphGovernance(
@@ -1550,6 +1604,71 @@ export class TurnOrchestrator {
         ? persistedSourceUnits.map((unit) => unit.id)
         : await this.persistDraftUnits(input, task.scopeId, sourceId, artifacts)
     }
+    const graphReviewIndex = executionPhases.indexOf("graph_governance_review")
+    if (input.adaptiveGraphGovernance !== "compact"
+      && graphReviewIndex >= 0
+      && startPhaseIndex > graphReviewIndex
+      && artifacts.dependency_audit !== undefined
+      && artifacts.graph_governance !== undefined
+      && artifacts.graph_structure_plan !== undefined
+      && artifacts.graph_spacetime_settlement !== undefined
+      && artifacts.graph_retrieval_design !== undefined) {
+      const staleGovernanceReason = stagedSettlementSupersedesRoutingGovernance({
+        dependencyAudit: artifacts.dependency_audit,
+        governance: artifacts.graph_governance,
+        structure: artifacts.graph_structure_plan,
+        spacetime: artifacts.graph_spacetime_settlement,
+        sourceUnitCount: restoredSourceUnitIds.length,
+      })
+      const reviewEntry = storedRunInputs.find(({ run }) => (
+        run.phase === "graph_governance_review" && effectiveRuns.includes(run)
+      ))
+      if (staleGovernanceReason !== undefined && reviewEntry !== undefined) {
+        const invalidatedRuns = effectiveRuns.filter((run) => (
+          executionPhases.indexOf(run.phase) >= graphReviewIndex
+        ))
+        invalidatedRuns.forEach((run) => { invalidatedPhaseRunIds.add(run.phaseRunId) })
+        await this.dependencies.persistence.supersedePhaseRuns(
+          input.taskId,
+          [...invalidatedPhaseRunIds],
+          input.nowMs ?? this.dependencies.now(),
+        )
+        effectiveRuns = effectiveRuns.filter((run) => !invalidatedPhaseRunIds.has(run.phaseRunId))
+        for (const invalidatedPhase of executionPhases.slice(graphReviewIndex)) {
+          Reflect.deleteProperty(artifacts, invalidatedPhase)
+          phaseRuns.delete(invalidatedPhase)
+        }
+        delete artifacts.semantic_review
+        delete artifacts.settlement_review
+        this.stageGraphGovernanceFromSettledArtifacts(artifacts, restoredSourceUnitIds.length)
+        latestInput = reviewEntry.input
+        restoredSourceUnitIds = [...latestInput.sourceUnitIds]
+        if (input.outputMode !== "draft" && restoredSourceUnitIds.length === 0 && artifacts.chapter_naming !== undefined) {
+          const persistedSourceUnits = await this.dependencies.documents.listSourceUnits(input.projectId, sourceId)
+          restoredSourceUnitIds = persistedSourceUnits.length > 0
+            ? persistedSourceUnits.map((unit) => unit.id)
+            : await this.persistDraftUnits(input, task.scopeId, sourceId, artifacts)
+        }
+        restoredPhaseEntryContext = restoreContextToPhaseEntry(
+          context,
+          [...invalidatedPhaseRunIds],
+          uniqueTurnReadEvidence([
+            ...storedRunInputs
+              .filter(({ run }) => effectiveRuns.includes(run))
+              .flatMap(({ input: storedInput }) => storedInput.readEvidence),
+            ...reviewEntry.input.readEvidence,
+          ]),
+          "graph_governance_review",
+        )
+        startPhaseIndex = graphReviewIndex
+        this.log("warn", "graph.governance.resume_rewound", {
+          taskId: input.taskId,
+          invalidatedPhaseRunIds: [...invalidatedPhaseRunIds],
+          error: staleGovernanceReason,
+          resumePhase: "graph_governance_review",
+        })
+      }
+    }
     const nowMs = resumeRequestedAtMs
     const runtimeMetrics = await this.dependencies.persistence.listRuntimeMetrics(input.taskId, nowMs)
     const runtimeBudgetUsage = await this.dependencies.persistence.readRuntimeBudgetUsage(input.taskId, nowMs)
@@ -1753,13 +1872,8 @@ export class TurnOrchestrator {
           visibleEvidence = uniqueTurnReadEvidence([...visibleEvidence, ...capacityEvidence.evidence])
           await this.dependencies.persistence.saveContext(context, this.dependencies.now())
         }
-        if (phase === "graph_governance_review" && artifacts.graph_governance === undefined) {
-          artifacts.graph_governance = assembleGraphGovernanceArtifact({
-            structure: graphStructurePlanArtifactSchema.parse(artifacts.graph_structure_plan),
-            spacetime: graphSpacetimeSettlementArtifactSchema.parse(artifacts.graph_spacetime_settlement),
-            retrieval: graphRetrievalDesignArtifactSchema.parse(artifacts.graph_retrieval_design),
-            sourceUnitCount: sourceUnitIds.length,
-          })
+        if (phase === "graph_governance_review" && (!compactRevision || artifacts.graph_governance === undefined)) {
+          this.stageGraphGovernanceFromSettledArtifacts(artifacts, sourceUnitIds.length)
         }
         if (phase === "frontier_settlement") {
           this.materializeStagedGraphGovernanceArtifacts(
@@ -2758,9 +2872,11 @@ export class TurnOrchestrator {
         verificationProbeExecutions: currentVerificationProbeExecutions,
         readEvidence: currentVisibleEvidence,
       })
+      const userRequirements = resolveWorkStyleRequirementSource(input.input)
       const phaseInput: TurnPhaseInput = {
         workflow: input.input.workflow ?? "turn",
         userInput: input.input.userInput,
+        ...(userRequirements.length === 0 ? {} : { userRequirements }),
         chapterSequence: input.input.chapterSequence,
         allowWorkspaceChapterReads: input.input.allowWorkspaceChapterReads ?? true,
         ...(input.input.presentation === undefined ? {} : { presentation: input.input.presentation }),
@@ -3401,6 +3517,18 @@ export class TurnOrchestrator {
       structure,
       limits: settings,
       graph: this.dependencies.graph,
+    })
+  }
+
+  private stageGraphGovernanceFromSettledArtifacts(
+    artifacts: Partial<Record<AIPhase, unknown>>,
+    sourceUnitCount: number,
+  ): void {
+    artifacts.graph_governance = assembleGraphGovernanceArtifact({
+      structure: graphStructurePlanArtifactSchema.parse(artifacts.graph_structure_plan),
+      spacetime: graphSpacetimeSettlementArtifactSchema.parse(artifacts.graph_spacetime_settlement),
+      retrieval: graphRetrievalDesignArtifactSchema.parse(artifacts.graph_retrieval_design),
+      sourceUnitCount,
     })
   }
 

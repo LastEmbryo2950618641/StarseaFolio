@@ -211,6 +211,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
     let lastRawResponse: string | undefined
     const startedAt = Date.now()
     let citationRepairUsed = false
+    const schemaRepairs: string[] = []
 
     for (let repairAttempt = 0; repairAttempt <= this.config.maxSchemaRepairAttempts + 1; repairAttempt += 1) {
       options?.signal?.throwIfAborted()
@@ -350,6 +351,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         const reasoningContent = nonEmptyReasoning(response.reasoningContent)
         return {
           result,
+          ...(schemaRepairs.length === 0 ? {} : { schemaRepairs }),
           contextExchange: {
             requestMessages,
             responseMessage: {
@@ -399,6 +401,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         })
         options?.signal?.throwIfAborted()
         if (!canRepair) break
+        schemaRepairs.push(formatValidationError(error).replace(/\s+/g, " ").slice(0, 500))
         if (dedicatedCitationRepair) citationRepairUsed = true
         const validationText = formatValidationError(error)
         const modelValidationText = referenceView.toModelText(validationText)

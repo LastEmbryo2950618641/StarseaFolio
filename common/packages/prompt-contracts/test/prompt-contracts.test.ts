@@ -334,6 +334,9 @@ describe("prompt contracts", () => {
     expect(extraction).toContain("## 性格")
     expect(extraction).toContain("姓名")
     expect(extraction).toContain("性别")
+    expect(extraction).toContain("workStyleRevision")
+    expect(extraction).toContain("userRequirements")
+    expect(extraction).toContain("融合")
   })
 
   it("keeps rule assembly semantic and lets the runtime own its snapshot identity", () => {
