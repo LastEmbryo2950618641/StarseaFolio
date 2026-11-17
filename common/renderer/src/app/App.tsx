@@ -22,6 +22,7 @@ import type {
   SynopsisConversationStartResult,
   SynopsisConversationStreamSnapshot,
   DiscussFocusKind,
+  FolioUiState,
   SynopsisConversationBudgetAdvisory,
   SynopsisConversationStreamUsage,
   SynopsisStagingPromoteProposal,
@@ -283,12 +284,35 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
 
   const refreshSynopsisConversation = useCallback(async (): Promise<void> => {
     if (project === undefined) return
-    const result = await invokeBackend<SynopsisConversationListResult>("synopsis.conversation.list", {
+    // Primary visualization source: .folio/ui-state.json (ensure syncs conversation → panel).
+    const ui = await invokeBackend<FolioUiState>("folio.host.ensure", {
+      projectId: project.projectId,
+      workspaceRootRef: project.workspaceRootRef,
+      host: "starseafolio",
+    }).catch(() => undefined)
+    const listed = await invokeBackend<SynopsisConversationListResult>("synopsis.conversation.list", {
       projectId: project.projectId,
       workspaceRootRef: project.workspaceRootRef,
     })
-    setSynopsisConversation(result)
-    setSynopsisUsage(result.usage)
+    const folioMessages = ui?.panels.creationDesk.messages ?? []
+    const byId = new Map(listed.messages.map((message) => [message.messageId, message]))
+    const messages = folioMessages.length > 0
+      ? folioMessages.map((folioMessage) => {
+        const rich = byId.get(folioMessage.messageId)
+        if (rich !== undefined) return rich
+        return {
+          messageId: folioMessage.messageId,
+          sessionId: listed.session?.sessionId ?? folioMessage.messageId,
+          projectId: project.projectId,
+          role: folioMessage.role,
+          content: folioMessage.content,
+          ...(folioMessage.error === undefined ? {} : { error: folioMessage.error }),
+          createdAtMs: folioMessage.createdAtMs,
+        } satisfies SynopsisConversationMessage
+      })
+      : listed.messages
+    setSynopsisConversation({ ...listed, messages })
+    setSynopsisUsage(listed.usage)
   }, [project])
 
   const handleCoverChanged = useCallback((projectId: string, dataUrl: string): void => {
@@ -1063,6 +1087,24 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     monitoredChapterRevisionIds.current.add(revisionTaskId)
     try {
       for (let attempt = 0; attempt < 1_200; attempt += 1) {
+        const ui = await invokeBackend<FolioUiState>("folio.uiState.read", {
+          projectId: project.projectId,
+          workspaceRootRef: project.workspaceRootRef,
+        }).catch(() => undefined)
+        const folioTask = ui?.panels.graphRevision.tasks.find((task) => task.revisionTaskId === revisionTaskId)
+        const publishStatus = ui?.panels.chapter.publishStatus
+        if (folioTask?.status === "completed" || publishStatus === "published") {
+          setPostCommitNotice("图修订已完成，草稿已发布为正文。")
+          await openDraftWorkspace(revisionTaskId, { preserveView: true })
+          await refreshWorkspace()
+          await refreshHistory()
+          return
+        }
+        if (folioTask?.status === "failed" || publishStatus === "failed") {
+          setError(folioTask?.error ?? ui?.run.error ?? "草稿发布未完成，请在图修订任务中查看原因并重试。")
+          setPostCommitNotice("草稿已保留。")
+          return
+        }
         const current = await invokeBackend<ChapterRevisionReadResult>("chapter.readRevision", {
           projectId: project.projectId,
           workspaceRootRef: project.workspaceRootRef,
@@ -1095,6 +1137,54 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     }
   }
 
+  /** Primary publish path: starsea-writing folio `publish.confirm` (settings → graph → body). */
+  const publishChapterViaFolio = async (input: Readonly<{
+    revisionTaskId: string
+    draftVersionId?: string
+    chapterSequence?: number
+  }>): Promise<ChapterRevision> => {
+    if (project === undefined) throw new Error("当前没有打开项目")
+    if (activeModelProfile === undefined) throw new Error("请先配置可用模型")
+    let draftVersionId = input.draftVersionId
+    if (draftVersionId === undefined) {
+      const listed = await invokeBackend<RevisionDraftVersionListResult>("chapter.revision.draftVersion.list", {
+        projectId: project.projectId,
+        workspaceRootRef: project.workspaceRootRef,
+        revisionTaskId: input.revisionTaskId,
+      })
+      draftVersionId = listed.versions.find((version) => version.isLatest && version.source !== "baseline")?.versionId
+    }
+    if (draftVersionId === undefined) throw new Error("未找到可发布的草稿版本")
+    let chapterSequence = input.chapterSequence ?? chapterRevision?.chapterSequence
+    if (chapterSequence === undefined) {
+      const drafts = await invokeBackend<readonly ChapterRevisionReadResult[]>("chapter.draft.list", {
+        projectId: project.projectId,
+        workspaceRootRef: project.workspaceRootRef,
+      })
+      chapterSequence = drafts.find((item) => item.revisionTaskId === input.revisionTaskId)?.chapterSequence
+    }
+    if (chapterSequence === undefined) throw new Error("无法解析章节序号，不能发布")
+    await invokeBackend<FolioUiState>("folio.action.enqueue", {
+      projectId: project.projectId,
+      workspaceRootRef: project.workspaceRootRef,
+      name: "publish.confirm",
+      drain: true,
+      input: {
+        revisionTaskId: input.revisionTaskId,
+        draftVersionId,
+        chapterSequence,
+      },
+      model: modelSelection(activeModelProfile),
+    }, {
+      waitTimeoutMs: projectSettings?.execution.backendRequestWaitTimeoutMs ?? 600_000,
+    })
+    return invokeBackend<ChapterRevisionReadResult>("chapter.readRevision", {
+      projectId: project.projectId,
+      workspaceRootRef: project.workspaceRootRef,
+      revisionTaskId: input.revisionTaskId,
+    })
+  }
+
   const submitChapterRevision = async (input: Readonly<{
     revisionTaskId: string
     mode: "direct" | "reviewed"
@@ -1106,28 +1196,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     setError(undefined)
     let revision: ChapterRevision
     try {
-      const submission = input.mode === "direct"
-        ? await invokeBackend<ChapterRevision>("chapter.reviewRevision", {
-            projectId: project.projectId,
-            workspaceRootRef: project.workspaceRootRef,
-            revisionTaskId: input.revisionTaskId,
-            ...(input.draftVersionId === undefined ? {} : { draftVersionId: input.draftVersionId }),
-            ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
-          }).then((reviewed) => {
-            if (reviewed.review === undefined) throw new Error("当前草稿审核未生成结果，不能提交正文")
-            return {
-              ...input,
-              mode: "reviewed" as const,
-              forced: false,
-              reviewId: reviewed.review.reviewId,
-            }
-          })
-        : input
-      revision = await invokeBackend<ChapterRevision>("chapter.submitRevision", {
-        projectId: project.projectId,
-        workspaceRootRef: project.workspaceRootRef,
-        ...submission,
-        ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
+      revision = await publishChapterViaFolio({
+        revisionTaskId: input.revisionTaskId,
+        ...(input.draftVersionId === undefined ? {} : { draftVersionId: input.draftVersionId }),
       })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -1638,19 +1709,36 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         }))
         if (started.usage !== undefined) setSynopsisUsage(started.usage)
       }
-      const sent = await invokeBackend<SynopsisConversationSendResult>("synopsis.conversation.send", {
+      // Primary path: folio.action.enqueue creationDesk.send (same host as Codex folio-run).
+      const folioSend = await invokeBackend<{
+        uiState: FolioUiState
+        creationDeskSend: SynopsisConversationSendResult
+      }>("folio.action.enqueue", {
         projectId: project.projectId,
         workspaceRootRef: project.workspaceRootRef,
-        message,
-        presentation: {
-          ...(novelMajorCategoryRulePath.trim().length === 0 ? {} : { novelMajorCategoryRulePath }),
-          ...(novelSubcategoryRulePath.trim().length === 0 ? {} : { novelSubcategoryRulePath }),
-          ...(descriptionRule.length === 0 ? {} : { descriptionRulePath: descriptionRule }),
-          ...(proseRule.length === 0 ? {} : { proseStyleRulePath: proseRule }),
-          minimumWordCount: parsedMinimumWordCount,
-          maximumWordCount: parsedMaximumWordCount,
+        name: "creationDesk.send",
+        drain: true,
+        input: {
+          message,
+          presentation: {
+            ...(novelMajorCategoryRulePath.trim().length === 0 ? {} : { novelMajorCategoryRulePath }),
+            ...(novelSubcategoryRulePath.trim().length === 0 ? {} : { novelSubcategoryRulePath }),
+            ...(descriptionRule.length === 0 ? {} : { descriptionRulePath: descriptionRule }),
+            ...(proseRule.length === 0 ? {} : { proseStyleRulePath: proseRule }),
+            minimumWordCount: parsedMinimumWordCount,
+            maximumWordCount: parsedMaximumWordCount,
+          },
+          chapterIntent: { boundaryPace, causalityFocus },
+          ...(options?.focusLocked === true ? { focusLocked: true } : {}),
+          ...(options?.lockedChapterSequence === undefined
+            ? {}
+            : { lockedChapterSequence: options.lockedChapterSequence, lockedFocusKind: "chapter_body" as const }),
+          ...(options?.automation === undefined ? {} : { automation: options.automation }),
+          ...(options?.batchProceed === undefined ? {} : { batchProceed: options.batchProceed }),
+          ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
+          ...(options?.setupAnswerTo === undefined || options?.autoContinued === true || options?.automation !== undefined
+            ? {} : { setupAnswerTo: options.setupAnswerTo }),
         },
-        chapterIntent: { boundaryPace, causalityFocus },
         model: {
           baseUrl: activeModelProfile.baseUrl,
           model: activeModelProfile.model,
@@ -1663,15 +1751,6 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           disableResponseStorage: activeModelProfile.disableResponseStorage,
           serviceTier: activeModelProfile.serviceTier,
         },
-        ...(options?.focusLocked === true ? { focusLocked: true } : {}),
-        ...(options?.lockedChapterSequence === undefined
-          ? {}
-          : { lockedChapterSequence: options.lockedChapterSequence, lockedFocusKind: "chapter_body" as const }),
-        ...(options?.automation === undefined ? {} : { automation: options.automation }),
-        ...(options?.batchProceed === undefined ? {} : { batchProceed: options.batchProceed }),
-        ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
-        ...(options?.setupAnswerTo === undefined || options?.autoContinued === true || options?.automation !== undefined
-          ? {} : { setupAnswerTo: options.setupAnswerTo }),
       }, {
         waitTimeoutMs: projectSettings?.execution.backendRequestWaitTimeoutMs
           ?? 600_000,
@@ -1696,6 +1775,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         return undefined
       })
       pollStopped = true
+      const sent = folioSend.creationDeskSend
       setSynopsisConversation(sent)
       let creationDeskSettingsNotice: string | undefined
       if (sent.creationDeskSettings !== undefined) {
@@ -2116,6 +2196,16 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     if (project === undefined) return "failed"
     for (let attempt = 0; attempt < 1_200; attempt += 1) {
       if (batchCancelRef.current) return "cancelled"
+      const ui = await invokeBackend<FolioUiState>("folio.uiState.read", {
+        projectId: project.projectId,
+        workspaceRootRef: project.workspaceRootRef,
+      }).catch(() => undefined)
+      const folioTask = ui?.panels.graphRevision.tasks.find((task) => task.revisionTaskId === revisionTaskId)
+      if (folioTask?.status === "completed" || ui?.panels.chapter.publishStatus === "published") {
+        await refreshWorkspace()
+        return "completed"
+      }
+      if (folioTask?.status === "failed" || ui?.panels.chapter.publishStatus === "failed") return "failed"
       const current = await invokeBackend<ChapterRevisionReadResult>("chapter.readRevision", {
         projectId: project.projectId,
         workspaceRootRef: project.workspaceRootRef,
@@ -2534,21 +2624,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             }
             updateBatchStatus("publish", chapterSequence)
             try {
-              const reviewed = await invokeBackend<ChapterRevision>("chapter.reviewRevision", {
-                projectId: project.projectId,
-                workspaceRootRef: project.workspaceRootRef,
+              const submitted = await publishChapterViaFolio({
                 revisionTaskId: publishDraft.revisionTaskId,
-                ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
-              })
-              if (reviewed.review === undefined) throw new Error("当前草稿审核未生成结果，不能提交正文")
-              const submitted = await invokeBackend<ChapterRevision>("chapter.submitRevision", {
-                projectId: project.projectId,
-                workspaceRootRef: project.workspaceRootRef,
-                revisionTaskId: publishDraft.revisionTaskId,
-                mode: "reviewed",
-                forced: false,
-                reviewId: reviewed.review.reviewId,
-                ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
+                chapterSequence,
               })
               setChapterRevision(submitted)
               if (submitted.graphSyncStatus !== "completed") {
@@ -2723,21 +2801,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           }
           updateBatchStatus("publish", sequence)
           try {
-            const reviewed = await invokeBackend<ChapterRevision>("chapter.reviewRevision", {
-              projectId: project.projectId,
-              workspaceRootRef: project.workspaceRootRef,
+            const submitted = await publishChapterViaFolio({
               revisionTaskId: draft.revisionTaskId,
-              ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
-            })
-            if (reviewed.review === undefined) throw new Error("当前草稿审核未生成结果，不能提交正文")
-            const submitted = await invokeBackend<ChapterRevision>("chapter.submitRevision", {
-              projectId: project.projectId,
-              workspaceRootRef: project.workspaceRootRef,
-              revisionTaskId: draft.revisionTaskId,
-              mode: "reviewed",
-              forced: false,
-              reviewId: reviewed.review.reviewId,
-              ...(activeModelProfile === undefined ? {} : { model: modelSelection(activeModelProfile) }),
+              chapterSequence: sequence,
             })
             setChapterRevision(submitted)
             if (submitted.graphSyncStatus !== "completed") {

@@ -48,6 +48,7 @@ import {
   type GraphGovernanceArtifact,
   type SemanticReviewArtifact,
   type SettlementReviewArtifact,
+  type SettingsExtractionArtifact,
 } from "@starseafolio/prompt-contracts"
 
 import {
@@ -67,9 +68,12 @@ import {
   formatWorkDescriptionRuleEvidence,
   isAutoDescriptionSelection,
   isDescriptionRuleMarkdownPath,
+  applyWorkStyleRevision,
   isWorkDescriptionRulePath,
   listWorkDescriptionRuleFiles,
   resolveDescriptionRulePaths,
+  resolveWorkStyleRequirementSource,
+  WORK_STYLE_RULE_PATH,
   type GraphRevision,
 } from "../../core/index.js"
 import type {
@@ -304,6 +308,23 @@ export type TurnOrchestratorInput = Readonly<{
   workflow?: WorldWorkflow
   outputMode?: "draft"
       adaptiveGraphGovernance?: boolean | "compact"
+  /**
+   * Revision publish stage 1: run `settings_extraction` only, then complete the task
+   * without graph governance (skill `settings-write` owns this boundary).
+   */
+  settingsExtractionOnly?: boolean
+  /** Seed phase artifacts before the first model call (e.g. preload settings_extraction). */
+  preloadedArtifacts?: Partial<Record<AIPhase, unknown>>
+  /**
+   * When a preloaded `settings_extraction` artifact was already committed by settings-write,
+   * skip `commitArtifact` during graph sync to avoid duplicate disk writes under a new taskId.
+   */
+  skipSettingsExtractionCommit?: boolean
+  /**
+   * Visible user messages for this project. Style revision reads these words,
+   * not the draft stored in `userInput` during revision publish.
+   */
+  userRequirements?: string
   projectId: ProjectId
   workspaceRootRef: string
   internalStore: InternalProjectStore
@@ -397,6 +418,21 @@ export type WorldEvolutionExecutionResult = Readonly<{
   kvCacheHitRate?: number
 }>
 
+export type SettingsExtractionExecutionResult = Readonly<{
+  kind: "settings_extraction"
+  taskId: string
+  turnId: string
+  scopeId: string
+  contextId: string
+  artifact: SettingsExtractionArtifact
+  modelCalls: number
+  inputTokens: number
+  outputTokens: number
+  modelProvider: string
+  modelName: string
+  kvCacheHitRate?: number
+}>
+
 export type DraftPersistenceReceipt = Readonly<{
   revisionTaskId: string
   draftVersionId: string
@@ -422,7 +458,12 @@ export type DraftExecutionResult = Readonly<{
   kvCacheHitRate?: number
 }>
 
-export type WorkflowExecutionResult = TurnExecutionResult | DraftExecutionResult | WorldQueryExecutionResult | WorldEvolutionExecutionResult
+export type WorkflowExecutionResult =
+  | TurnExecutionResult
+  | DraftExecutionResult
+  | WorldQueryExecutionResult
+  | WorldEvolutionExecutionResult
+  | SettingsExtractionExecutionResult
 
 export type TurnExecutionHooks = Readonly<{
   onPrepared?(): void
@@ -655,17 +696,20 @@ export class TurnOrchestrator {
     await this.dependencies.persistence.updateTask(taskId, "running", undefined, createdAtMs)
     hooks?.onPrepared?.()
 
-    const artifacts: Partial<Record<AIPhase, unknown>> = workflow === "revision"
-      ? {
-          draft: {
-            contentMarkdown: input.userInput,
-            adoptedDecisionIndexes: [],
-            currentTimeAnchorRefs: [],
-            currentLocationAnchorRefs: [],
-            detectedUnplannedContent: [],
-          },
-        }
-      : {}
+    const artifacts: Partial<Record<AIPhase, unknown>> = {
+      ...(workflow === "revision"
+        ? {
+            draft: {
+              contentMarkdown: input.userInput,
+              adoptedDecisionIndexes: [],
+              currentTimeAnchorRefs: [],
+              currentLocationAnchorRefs: [],
+              detectedUnplannedContent: [],
+            },
+          }
+        : {}),
+      ...(input.preloadedArtifacts ?? {}),
+    }
     const phaseRunIds: string[] = []
     const phaseRuns = new Map<AIPhase, string>()
     const sourceUnitIds: string[] = [...(input.existingSourceUnitIds ?? [])]
@@ -717,12 +761,19 @@ export class TurnOrchestrator {
     state: TurnExecutionState,
   ): Promise<void> {
     if (state.artifacts.settings_extraction !== undefined) {
-      await this.commitSettingsExtractionArtifact(
-        input,
-        state.taskId,
-        state.phaseRuns.get("settings_extraction") ?? this.dependencies.createId(),
-        state.artifacts.settings_extraction,
-      )
+      if (input.skipSettingsExtractionCommit !== true) {
+        await this.commitSettingsExtractionArtifact(
+          input,
+          state.taskId,
+          state.phaseRuns.get("settings_extraction") ?? this.dependencies.createId(),
+          state.artifacts.settings_extraction,
+        )
+      } else {
+        this.log("info", "revision.settings_extraction.preloaded_skip_commit", {
+          taskId: state.taskId,
+          proposalCount: settingsExtractionArtifactSchema.parse(state.artifacts.settings_extraction).proposals.length,
+        })
+      }
       return
     }
     const phase: AIPhase = "settings_extraction"
@@ -782,22 +833,69 @@ export class TurnOrchestrator {
     phaseRunId: string,
     artifact: unknown,
   ): Promise<void> {
-    if (this.dependencies.settingsExtraction === undefined) return
     const extraction = settingsExtractionArtifactSchema.parse(artifact)
-    await this.dependencies.settingsExtraction.commitArtifact({
-      projectId: input.projectId,
-      workspaceRootRef: input.workspaceRootRef,
-      taskId,
-      phaseRunId,
-      proposals: extraction.proposals,
-      worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
-    })
+    if (this.dependencies.settingsExtraction !== undefined) {
+      await this.dependencies.settingsExtraction.commitArtifact({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        taskId,
+        phaseRunId,
+        proposals: extraction.proposals,
+        worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
+      })
+    }
+    await this.applyWorkStyleRevisionFromArtifact(input, taskId, extraction)
+  }
+
+  private async applyWorkStyleRevisionFromArtifact(
+    input: TurnOrchestratorInput,
+    taskId: string,
+    extraction: SettingsExtractionArtifact,
+  ): Promise<void> {
+    const sections = extraction.workStyleRevision?.sections
+    if (sections === undefined || sections.length === 0) return
+    const userRequirements = resolveWorkStyleRequirementSource(input)
+    if (userRequirements.length === 0) {
+      this.log("info", "revision.work_style.skipped", { taskId, reason: "no_user_requirements" })
+      return
+    }
+    let current = ""
+    try {
+      current = await this.dependencies.workspace.readMarkdown(input.workspaceRootRef, WORK_STYLE_RULE_PATH)
+    } catch (error) {
+      this.log("warn", "revision.work_style.skipped", {
+        taskId,
+        reason: "unreadable",
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    const result = applyWorkStyleRevision({ current, updates: sections, userRequirements })
+    if (result.markdown === current) {
+      this.log("info", "revision.work_style.unchanged", { taskId, skipped: result.skipped })
+      return
+    }
+    try {
+      await this.dependencies.workspace.saveUserMarkdown(
+        input.workspaceRootRef,
+        WORK_STYLE_RULE_PATH,
+        result.markdown,
+      )
+    } catch (error) {
+      this.log("warn", "revision.work_style.skipped", {
+        taskId,
+        reason: "write_failed",
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    this.log("info", "revision.work_style.updated", { taskId, applied: result.applied, skipped: result.skipped })
   }
 
   private async executeAdaptiveRevisionGraphGovernance(
     input: TurnOrchestratorInput,
     state: TurnExecutionState,
-  ): Promise<WorldEvolutionExecutionResult> {
+  ): Promise<WorldEvolutionExecutionResult | SettingsExtractionExecutionResult> {
     let phase: AIPhase = "settings_extraction"
     try {
       await this.runSettingsExtraction(input, state)
@@ -811,6 +909,34 @@ export class TurnOrchestrator {
         createInterruptionRecord(error, phase, state.phaseRuns.get(phase), this.dependencies.now()),
       )
       throw error
+    }
+    if (input.settingsExtractionOnly === true) {
+      const artifact = settingsExtractionArtifactSchema.parse(state.artifacts.settings_extraction)
+      await this.dependencies.commit.retire(state.scopeId, this.dependencies.now())
+      await this.dependencies.persistence.updateTask(
+        state.taskId,
+        "completed",
+        "settings_extraction",
+        this.dependencies.now(),
+      )
+      this.log("info", "revision.settings_extraction.only_completed", {
+        taskId: state.taskId,
+        proposalCount: artifact.proposals.length,
+      })
+      return {
+        kind: "settings_extraction",
+        taskId: state.taskId,
+        turnId: state.turnId,
+        scopeId: state.scopeId,
+        contextId: state.contextId,
+        artifact,
+        modelCalls: state.totalUsage.modelCalls,
+        inputTokens: state.totalUsage.inputTokens,
+        outputTokens: state.totalUsage.outputTokens,
+        modelProvider: this.dependencies.model.info?.provider ?? "unknown",
+        modelName: this.dependencies.model.info?.model ?? "unknown",
+        ...cacheRateResult(state.totalUsage),
+      }
     }
     phase = "graph_governance"
     const phaseRunId = this.dependencies.createId()
@@ -1657,12 +1783,14 @@ export class TurnOrchestrator {
         const phase = executionPhases[phaseIndex]
         if (phase === undefined) break
         if (phase === "settings_extraction" && artifacts.settings_extraction !== undefined) {
-          await this.commitSettingsExtractionArtifact(
-            input,
-            state.taskId,
-            phaseRuns.get(phase) ?? this.dependencies.createId(),
-            artifacts.settings_extraction,
-          )
+          if (input.skipSettingsExtractionCommit !== true) {
+            await this.commitSettingsExtractionArtifact(
+              input,
+              state.taskId,
+              phaseRuns.get(phase) ?? this.dependencies.createId(),
+              artifacts.settings_extraction,
+            )
+          }
           phaseIndex += 1
           continue
         }
@@ -2758,9 +2886,11 @@ export class TurnOrchestrator {
         verificationProbeExecutions: currentVerificationProbeExecutions,
         readEvidence: currentVisibleEvidence,
       })
+      const userRequirements = resolveWorkStyleRequirementSource(input.input)
       const phaseInput: TurnPhaseInput = {
         workflow: input.input.workflow ?? "turn",
         userInput: input.input.userInput,
+        ...(userRequirements.length === 0 ? {} : { userRequirements }),
         chapterSequence: input.input.chapterSequence,
         allowWorkspaceChapterReads: input.input.allowWorkspaceChapterReads ?? true,
         ...(input.input.presentation === undefined ? {} : { presentation: input.input.presentation }),
