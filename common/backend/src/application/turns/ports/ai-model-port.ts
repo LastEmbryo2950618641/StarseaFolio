@@ -108,6 +108,8 @@ export interface PromptResourcePort {
 export type TurnPhaseInput = Readonly<{
   workflow: "turn" | "query" | "evolution" | "revision" | "synopsis"
   userInput: string
+  /** User's own requests. Style revision must quote this, not the draft. */
+  userRequirements?: string
   chapterSequence: number
   allowWorkspaceChapterReads: boolean
   presentation?: Readonly<{

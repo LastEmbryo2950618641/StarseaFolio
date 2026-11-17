@@ -37,6 +37,7 @@ import {
   deriveRetiredChapterBodyPath,
   isChapterBodyMarkdownPath,
   isBookCoverInventoryEntry,
+  isFolioHostInventoryEntry,
   isRetiredChapterBodyMarkdownPath,
   isSharedPresentationPath,
   isChapterPlanningMarkdownPath,
@@ -271,9 +272,12 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     return {
       workspaceRootRef: root,
       ...(this.sharedPresentationRoot === undefined ? {} : { sharedPresentationRoot: this.sharedPresentationRoot }),
-      // Validate every scanned entry first; only known cover assets are omitted
+      // Validate every scanned entry first; cover + .folio host protocol are omitted
       // from the document inventory shared by the UI, AI catalog and history.
-      inventory: inventory.filter((entry) => !isBookCoverInventoryEntry(entry.path, entry.kind)),
+      inventory: inventory.filter((entry) => (
+        !isBookCoverInventoryEntry(entry.path, entry.kind)
+        && !isFolioHostInventoryEntry(entry.path, entry.kind)
+      )),
       issues,
       baseRulesDigest,
     }

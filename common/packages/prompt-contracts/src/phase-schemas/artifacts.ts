@@ -806,9 +806,20 @@ export const workNamingArtifactSchema = z.object({
   finalSelfReview: z.string().min(1),
 })
 
+export const workStyleRevisionSchema = z.object({
+  summary: z.string().max(800).optional(),
+  sections: z.array(z.object({
+    heading: z.string().min(1).max(40),
+    mode: z.enum(["merge", "replace"]),
+    content: z.string().max(3_500),
+    userQuote: z.string().max(500),
+  })).max(8),
+})
+
 export const settingsExtractionArtifactSchema = z.object({
   summary: z.string().min(1),
   proposals: z.array(settingsExtractionProposalInputSchema),
+  workStyleRevision: workStyleRevisionSchema.optional(),
   finalSelfReview: z.string().min(1),
 })
 

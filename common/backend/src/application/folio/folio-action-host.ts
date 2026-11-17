@@ -77,7 +77,13 @@ export async function syncGraphTasksIntoUiState(
 
 export async function appendCreationDeskExchange(
   folio: FolioWorkspace,
-  input: Readonly<{ userText: string; assistantText: string; error?: string }>,
+  input: Readonly<{
+    userText: string
+    assistantText: string
+    error?: string
+    choices?: FolioUiState["panels"]["creationDesk"]["choices"]
+    todos?: FolioUiState["panels"]["creationDesk"]["todos"]
+  }>,
 ): Promise<FolioUiState> {
   const current = await folio.readUiState().catch(() => emptyFolioUiState())
   const now = Date.now()
@@ -96,6 +102,8 @@ export async function appendCreationDeskExchange(
         ...current.panels.creationDesk,
         status: input.error === undefined ? "idle" : "failed",
         error: input.error ?? null,
+        ...(input.choices === undefined ? {} : { choices: input.choices }),
+        ...(input.todos === undefined ? {} : { todos: input.todos }),
         messages: [
           ...current.panels.creationDesk.messages,
           {
@@ -118,98 +126,85 @@ export async function appendCreationDeskExchange(
   return folio.writeUiState(next)
 }
 
+export type FolioCreationDeskSendResult = Readonly<{
+  userText: string
+  assistantText: string
+  error?: string
+  choices?: FolioUiState["panels"]["creationDesk"]["choices"]
+  todos?: FolioUiState["panels"]["creationDesk"]["todos"]
+}>
+
+/** Replace creation-desk panel snapshot from host conversation history (Codex + StarseaFolio share). */
+export async function syncCreationDeskPanel(
+  folio: FolioWorkspace,
+  input: Readonly<{
+    messages: FolioUiState["panels"]["creationDesk"]["messages"]
+    choices?: FolioUiState["panels"]["creationDesk"]["choices"]
+    todos?: FolioUiState["panels"]["creationDesk"]["todos"]
+    status?: FolioUiState["panels"]["creationDesk"]["status"]
+    error?: string | null
+  }>,
+): Promise<FolioUiState> {
+  const current = await folio.readUiState().catch(() => emptyFolioUiState())
+  return folio.writeUiState({
+    ...current,
+    updatedAtMs: Date.now(),
+    run: {
+      runId: current.run.runId ?? randomUUID(),
+      status: input.error ? "failed" : current.run.status === "idle" ? "awaiting_user" : current.run.status,
+      phase: "creation_desk",
+      error: input.error ?? null,
+    },
+    panels: {
+      ...current.panels,
+      creationDesk: {
+        messages: input.messages,
+        choices: input.choices ?? current.panels.creationDesk.choices,
+        todos: input.todos ?? current.panels.creationDesk.todos,
+        status: input.status ?? "idle",
+        error: input.error ?? null,
+      },
+    },
+  })
+}
+
 export type FolioRuntimeActionHandlers = Readonly<{
+  /** Stage 1: draft review + settings_extraction (writes 设定集; caches artifact for graph-sync). */
+  settingsWrite?: (action: FolioAction) => Promise<Readonly<{
+    ok: boolean
+    summary: string
+    error?: string
+  }>>
+  /** Stage 2–3 core: graph governance + chapter body publish (after settingsWrite). */
   publishConfirm: (action: FolioAction) => Promise<Readonly<{
     ok: boolean
     summary: string
     error?: string
   }>>
+  /** Real discuss turn; when omitted, host only mirrors stub text into ui-state. */
+  creationDeskSend?: (action: FolioAction) => Promise<FolioCreationDeskSendResult>
+  /** After a real send, rewrite creation-desk panel from conversation (avoids append drift). */
+  syncCreationDesk?: () => Promise<FolioUiState>
   graphCancel: (action: FolioAction) => Promise<void>
   graphRerun: (action: FolioAction) => Promise<void>
   graphContinue: (action: FolioAction) => Promise<void>
   listGraphTasks: () => Promise<readonly GraphRevisionTask[]>
 }>
 
-/** Host-side skill action execution: real disk/graph/publish work, then ui-state refresh. */
+/**
+ * @deprecated Prefer FolioSkillRunner.dispatchHostedAction — skill `hosted-dispatch.mjs` owns the flow.
+ * Kept for direct unit tests that inject FolioWorkspace + handlers.
+ */
 export async function executeFolioActionWithHost(
   folio: FolioWorkspace,
   action: FolioAction,
   handlers: FolioRuntimeActionHandlers,
 ): Promise<FolioUiState> {
-  const now = Date.now()
-  if (action.name === "creationDesk.send" || action.name === "creationDesk.choose") {
-    const text = typeof action.input.text === "string"
-      ? action.input.text
-      : typeof action.input.label === "string"
-        ? action.input.label
-        : ""
-    return appendCreationDeskExchange(folio, {
-      userText: text,
-      assistantText: "已接收创作台输入（starsea-writing / .folio）。",
-    })
-  }
-
-  if (action.name === "publish.confirm") {
-    const state = await folio.readUiState().catch(() => emptyFolioUiState())
-    await folio.writeUiState({
-      ...state,
-      run: { runId: action.actionId, status: "running", phase: "settings_write", error: null },
-      panels: {
-        ...state.panels,
-        chapter: { ...state.panels.chapter, publishStatus: "settings_write" },
-        creationDesk: { ...state.panels.creationDesk, status: "running", error: null },
-      },
-      updatedAtMs: now,
-    })
-    const result = await handlers.publishConfirm(action)
-    const tasks = await handlers.listGraphTasks()
-    await syncGraphTasksIntoUiState(folio, tasks)
-    const after = await folio.readUiState()
-    return folio.writeUiState({
-      ...after,
-      run: {
-        runId: action.actionId,
-        status: result.ok ? "completed" : "failed",
-        phase: result.ok ? "chapter_publish" : "graph_sync",
-        error: result.error ?? null,
-      },
-      panels: {
-        ...after.panels,
-        chapter: {
-          ...after.panels.chapter,
-          publishStatus: result.ok ? "published" : "failed",
-        },
-        creationDesk: {
-          ...after.panels.creationDesk,
-          status: result.ok ? "idle" : "failed",
-          error: result.error ?? null,
-          messages: [
-            ...after.panels.creationDesk.messages,
-            {
-              messageId: randomUUID(),
-              role: "assistant",
-              content: result.summary,
-              ...(result.error === undefined ? {} : { error: result.error }),
-              createdAtMs: Date.now(),
-            },
-          ],
-        },
-      },
-    })
-  }
-
-  if (action.name === "graph.cancel") {
-    await handlers.graphCancel(action)
-    return syncGraphTasksIntoUiState(folio, await handlers.listGraphTasks())
-  }
-  if (action.name === "graph.rerun") {
-    await handlers.graphRerun(action)
-    return syncGraphTasksIntoUiState(folio, await handlers.listGraphTasks())
-  }
-  if (action.name === "graph.continue") {
-    await handlers.graphContinue(action)
-    return syncGraphTasksIntoUiState(folio, await handlers.listGraphTasks())
-  }
-
-  throw new Error(`Unsupported folio action: ${action.name}`)
+  const { FolioSkillRunner } = await import("./folio-skill-runner.js")
+  const runner = new FolioSkillRunner({
+    workspaceRoot: folio.workspaceRoot,
+    folio,
+    hostHandlers: handlers,
+  })
+  return runner.dispatchHostedAction(action, handlers)
 }

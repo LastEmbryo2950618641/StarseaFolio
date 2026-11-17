@@ -23,12 +23,28 @@
 - **人物提案**：每人一份 `设定集/人物/姓名.json`，create/update 仅提交 `characterOperations` 字段操作（set/delete），不提交 markdown 或完整 JSON。首次至少完善姓名、性别、性格、背景（对照 `## 性格`、`## 背景`）；未知事实留空，合理补充须说明依据，不得把无个体戏份的集体群像逐一建档。读取与更新既有人物须保留其他字段，禁止 merge 人物 JSON。
 - 查询与对照既有设定时遵循《设定集默认查询规则》。
 
+## 作品风格
+
+同一次输出可以修订 `表现输出/本作品描写/作品风格.md`。材料来源**只**是用户自己的话，不是草稿正文。
+
+- 修订发布（`workflow=revision`）时，用户的话在阶段输入 `userRequirements`。`userInput` 是草稿，禁止从草稿措辞、模型发挥或已写正文里归纳文风。
+- 其他流程没有 `userRequirements` 时，只看 `userInput` 里用户明确提出的呈现要求。
+- 当前全文在已读证据 `表现输出/本作品描写/作品风格.md`。只改用户这次要求碰到的小节，其余 7 节原样保留，8 个标题都要留着。
+- 没有新的文风、意象、声口、命名、人称、对话、尺度或章钩要求时，省略 `workStyleRevision`。
+- 默认 `mode: "merge"`。`content` 是该节融合后的正文（不含标题）：原有且不矛盾的句子必须逐句保留，再写进用户的新要求。只是补一条时，`content` 可以只写新增句子。
+- 仅当用户要求与该节已有句子明显矛盾、无法并存时，才用 `mode: "replace"`，用新要求重写该节。不要整文件替换。
+- `userQuote` 必须是 `userRequirements`（或上述 `userInput`）中的连续原句。对不上、只是「发布正文」这类确认，宿主不会落盘。
+- 不得改掉语体笔风里已经写明的规则路径，除非用户要求里给出了新的 `表现输出/笔风规则/`、`小说大类规则/` 或 `小说次大类规则/` 路径。
+- 剧情事实（人物、地点、势力、规则、术语）仍走 `proposals`，不要写进作品风格。
+
+`workStyleRevision` 形如：`{"summary":"补上用户要求的意象","sections":[{"heading":"## 6. 尺度意象章钩","mode":"merge","content":"意象固定为书、水、门，并落在实物上。","userQuote":"意象只用书、水和门"}]}`。
+
 ## 提案类型
 
 - `create`：`relativePath` + 完整 `markdown`；可选 `readmeEntry`（一行索引，如「`设定集/人物/林照.json` · 关键词 · 适用章节」）；
 - `update`：覆盖写入已有文件的完整新 `markdown`（先基于已读版本修订，不是 diff）；
 - `merge`：将多个来源合并进 `targetPath` 的完整 `markdown`，并列出 `mergedFromPaths`。
 
-输出 JSON：`summary`、`proposals[]`（每项含 `payload`、`reason`、`conflictNotes`）、`finalSelfReview`。
+输出 JSON：`summary`、`proposals[]`（每项含 `payload`、`reason`、`conflictNotes`）、可选 `workStyleRevision`、`finalSelfReview`。
 
 人物 payload 示例：`{"kind":"create","relativePath":"设定集/人物/林照.json","characterOperations":[{"op":"set","field":"姓名","value":"林照"},{"op":"set","field":"身份","value":"见习药师"}]}`。人物格式由宿主管理，AI 可新增、删除、更改 fields 内字段，不可改 JSON 外层。

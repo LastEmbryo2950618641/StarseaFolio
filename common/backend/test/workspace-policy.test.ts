@@ -38,6 +38,20 @@ describe("workspace policy", () => {
     expect(codes).toContain("invalid_file_type")
   })
 
+  it("accepts .folio host protocol json without treating it as writing inventory", () => {
+    const inventory = [
+      ...fixedWorkspaceEntries.map((entry) => ({ path: entry.relativePath, kind: entry.entryKind })),
+      { path: ".folio", kind: "directory" as const },
+      { path: ".folio/actions", kind: "directory" as const },
+      { path: ".folio/actions/done", kind: "directory" as const },
+      { path: ".folio/runs", kind: "directory" as const },
+      { path: ".folio/host.json", kind: "file" as const },
+      { path: ".folio/ui-state.json", kind: "file" as const },
+      { path: ".folio/actions/done/abc.json", kind: "file" as const },
+    ]
+    expect(validateWorkspaceInventory(inventory)).toEqual([])
+  })
+
   it("accepts staging root markdown edits", () => {
     expect(assertWorkspaceMutationAllowed("暂存区/本章讨论笔记.md", "file", "user")).toBe("暂存区/本章讨论笔记.md")
     expect(assertWorkspaceMutationAllowed("暂存区/readme.md", "file", "platform")).toBe("暂存区/readme.md")

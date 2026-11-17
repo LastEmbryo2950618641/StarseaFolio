@@ -512,6 +512,7 @@ export class BackendFacade {
         return runtime.createChapterRevisionService().update(payload.revisionTaskId, payload.heading, payload.body)
       }
       case "chapter.reviewRevision": {
+        // Review-only (issues preview). Publishing must go through folio publish.confirm / submitRevision.
         const payload = chapterReviewRevisionPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
         return runtime.createChapterRevisionService().review({
@@ -523,33 +524,41 @@ export class BackendFacade {
         }, this.resolveModel(payload.model))
       }
       case "chapter.graphRevision.list": {
+        // Prefer folio ui-state as the visualization source; sync then return tasks.
         const payload = chapterListPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        await runtime.ensureFolioHost("starseafolio").catch(() => undefined)
         return runtime.listGraphRevisionTasks()
       }
       case "chapter.graphRevision.cancel": {
+        // Thin wrapper: skill host path is folio graph.cancel.
         const payload = chapterRetireRevisionPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
-        await runtime.cancelGraphRevision(payload.revisionTaskId)
+        await runtime.enqueueFolioAction({
+          name: "graph.cancel",
+          input: { revisionTaskId: payload.revisionTaskId },
+        })
         return runtime.listGraphRevisionTasks()
       }
       case "chapter.graphRevision.retry": {
+        // Thin wrapper: skill host path is folio graph.rerun / graph.continue.
         const payload = chapterGraphRevisionRetryPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
-        return runtime.retryGraphRevision(payload.revisionTaskId, this.resolveModel(payload.model), payload.mode)
+        await runtime.enqueueFolioAction({
+          name: payload.mode === "continue" ? "graph.continue" : "graph.rerun",
+          model: this.resolveModel(payload.model),
+          input: { revisionTaskId: payload.revisionTaskId },
+        })
+        return runtime.listGraphRevisionTasks()
       }
       case "chapter.submitRevision": {
+        // Publishing is skill-owned: always enter via folio publish.confirm (settings-write → graph-sync → chapter-publish).
         const payload = chapterSubmitRevisionPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
-        return runtime.submitChapterRevision({
+        return runtime.publishViaFolioAction({
           revisionTaskId: payload.revisionTaskId,
           ...(payload.draftVersionId === undefined ? {} : { draftVersionId: payload.draftVersionId }),
-          workspaceRootRef: payload.workspaceRootRef,
-          mode: payload.mode,
-          forced: payload.forced,
           model: this.resolveModel(payload.model),
-          ...(payload.reviewId === undefined ? {} : { reviewId: payload.reviewId }),
-          ...(payload.note === undefined ? {} : { note: payload.note }),
         })
       }
       case "chapter.retireRevision": {
@@ -618,34 +627,31 @@ export class BackendFacade {
         })
       }
       case "synopsis.conversation.send": {
+        // Deprecated alias: UI/Codex should call folio.action.enqueue creationDesk.send.
+        // Kept for harness tests; same host pipeline underneath.
         const payload = synopsisConversationSendPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
-        const result = await runtime.createSynopsisConversationService().send({
-          projectId: payload.projectId,
-          workspaceRootRef: payload.workspaceRootRef,
-          message: payload.message,
-          ...(payload.setupAnswerTo === undefined ? {} : { setupAnswerTo: payload.setupAnswerTo }),
+        await runtime.enqueueFolioAction({
+          name: "creationDesk.send",
           model: this.resolveModel(payload.model),
-          ...(payload.presentation === undefined ? {} : { presentation: payload.presentation }),
-          ...(payload.chapterIntent === undefined ? {} : { chapterIntent: payload.chapterIntent }),
-          ...(payload.maxModelCalls === undefined ? {} : { maxModelCalls: payload.maxModelCalls }),
-          ...(payload.deadlineMs === undefined ? {} : { deadlineMs: payload.deadlineMs }),
-          ...(payload.focusLocked === undefined ? {} : { focusLocked: payload.focusLocked }),
-          ...(payload.lockedChapterSequence === undefined
-            ? {}
-            : { lockedChapterSequence: payload.lockedChapterSequence }),
-          ...(payload.lockedFocusKind === undefined ? {} : { lockedFocusKind: payload.lockedFocusKind }),
-          ...(payload.automation === undefined ? {} : { automation: payload.automation }),
-          ...(payload.batchProceed === undefined ? {} : { batchProceed: payload.batchProceed }),
-          ...(payload.agentMode === undefined ? {} : { agentMode: payload.agentMode }),
+          input: {
+            message: payload.message,
+            ...(payload.setupAnswerTo === undefined ? {} : { setupAnswerTo: payload.setupAnswerTo }),
+            ...(payload.presentation === undefined ? {} : { presentation: payload.presentation }),
+            ...(payload.chapterIntent === undefined ? {} : { chapterIntent: payload.chapterIntent }),
+            ...(payload.maxModelCalls === undefined ? {} : { maxModelCalls: payload.maxModelCalls }),
+            ...(payload.deadlineMs === undefined ? {} : { deadlineMs: payload.deadlineMs }),
+            ...(payload.focusLocked === undefined ? {} : { focusLocked: payload.focusLocked }),
+            ...(payload.lockedChapterSequence === undefined
+              ? {}
+              : { lockedChapterSequence: payload.lockedChapterSequence }),
+            ...(payload.lockedFocusKind === undefined ? {} : { lockedFocusKind: payload.lockedFocusKind }),
+            ...(payload.automation === undefined ? {} : { automation: payload.automation }),
+            ...(payload.batchProceed === undefined ? {} : { batchProceed: payload.batchProceed }),
+            ...(payload.agentMode === undefined ? {} : { agentMode: payload.agentMode }),
+          },
         })
-        const assistant = [...result.messages].reverse().find((message) => message.role === "assistant")
-        await runtime.mirrorDiscussTurnToFolio({
-          userText: payload.message,
-          assistantText: assistant?.content ?? "",
-          ...(assistant?.error === undefined ? {} : { error: assistant.error }),
-        }).catch(() => undefined)
-        return result
+        return runtime.takeLastCreationDeskSendResult()
       }
       case "synopsis.conversation.refreshChoices": {
         const payload = synopsisConversationRefreshChoicesPayloadSchema.parse(request.payload)
@@ -953,13 +959,20 @@ export class BackendFacade {
       case "folio.action.enqueue": {
         const payload = folioActionEnqueuePayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
-        return runtime.enqueueFolioAction({
+        const uiState = await runtime.enqueueFolioAction({
           ...(payload.actionId === undefined ? {} : { actionId: payload.actionId }),
           name: payload.name,
           input: payload.input,
           drain: payload.drain,
           ...(payload.model === undefined ? {} : { model: this.resolveModel(payload.model) }),
         })
+        if (payload.name === "creationDesk.send" && payload.drain !== false) {
+          return {
+            uiState,
+            creationDeskSend: runtime.takeLastCreationDeskSendResult(),
+          }
+        }
+        return uiState
       }
       case "folio.action.drain": {
         const payload = folioActionDrainPayloadSchema.parse(request.payload)

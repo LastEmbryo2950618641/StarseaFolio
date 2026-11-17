@@ -29,19 +29,61 @@
 | 脚本 | 作用 |
 | --- | --- |
 | `folio-init.mjs` | 确保 `.folio` 布局与空 `ui-state.json` |
-| `settings-write.mjs` | 从草稿抽取并写入设定集；更新 ui-state |
-| `graph-sync.mjs` | 图治理全流程 |
-| `graph-cancel.mjs` | 取消当前图同步 |
-| `graph-rerun.mjs` | 全部阶段重跑 |
-| `graph-continue.mjs` | 仅失败阶段继续 |
-| `chapter-publish.mjs` | 正文落盘 |
-| `apply-action.mjs` | 消费一个 action JSON（CLI / Codex） |
+| `hosted-dispatch.mjs` | **宿主主调度**：按 action 调阶段脚本 + hostHandlers |
+| `settings-write.mjs` | publish 阶段 1：草稿审核 + 设定抽取写入设定集，并按用户原话融合更新作品风格（`handlers.settingsWrite`） |
+| `graph-sync.mjs` | publish 阶段 2：图治理 + 正文（`handlers.publishConfirm`；复用 settings-write 产物） |
+| `chapter-publish.mjs` | publish 阶段 3：根据结果收口 ui-state |
+| `graph-cancel.mjs` | 取消当前图同步（stub / enqueue 辅助） |
+| `graph-rerun.mjs` | 全部阶段重跑（stub / enqueue 辅助） |
+| `graph-continue.mjs` | 仅失败阶段继续（stub / enqueue 辅助） |
+| `apply-action.mjs` | 无 host 时的离线 action 消费（需 ALLOW_STUB） |
+
+`publish.confirm` 在 hosted 模式下固定走 `settings-write → graph-sync → chapter-publish` 三段 skill 脚本；真实落盘由 hostHandlers 完成，编排属于 skill。
+
+### 阶段职责（诚实边界）
+
+| 阶段脚本 | 已落地 | 仍在图同步任务内 |
+| --- | --- | --- |
+| `settings-write` | 草稿审核 + `settings_extraction`（提案写入设定集，产物缓存 `.folio/runs/`） | — |
+| `graph-sync` | 调用 `publishConfirm`（submit + 等待）；预加载 settings-write 产物并跳过重复抽取 | 图治理各 phase |
+| `chapter-publish` | 收口 ui-state / 面板文案 | 正文文件由 publishConfirm/submit 落盘 |
 
 ## UI 协议
 
 见 `schema/ui-state.schema.json`、`schema/action.schema.json`。  
 脚本与宿主运行器写完磁盘后必须刷新 `ui-state.json`。
 
+## 提示词（本 skill 拥有）
+
+| 路径 | 用途 |
+| --- | --- |
+| `prompts/synopsis-discuss.md` | 创作台阶段 outcome / schema |
+| `prompts/creation-desk-workflow.md` | 创作台工具与门禁流程 |
+| `prompts/plot-synopsis-guide.md` | 梗概 / 细纲 |
+| `prompts/settings-revision-guide.md` | 设定修订 |
+
+星海余页与 Codex 都从这些路径加载；`resources/v1/` 下同名文件仅为迁移占位，不再承载业务正文。
+
+### 仍由平台层持有（非本 skill 流程正文）— 有意例外
+
+跨阶段硬门禁与索引仍在 `resources/v1/`（`base-rules` / `content-handling` / `webnovel-prose-logic` / `settings-query-guide` / `skill-index` 及非 discuss 的 `phases/*`）。  
+**不迁入本 skill**：它们是 TurnOrchestrator sticky 引擎规则与相位契约，宿主无关；本 skill 只拥有创作台→发布编排与讨论类业务提示词（`prompts/`）。平台层继续加载 `resources/v1/`，避免把引擎内核绑死在写作 skill 包上。
+
+## Codex 运行（真实宿主）
+
+优先用 `folio-run`（挂载 `ProjectRuntime` hostHandlers，与星海余页同一套 discuss / graph / publish）：
+
+```bash
+node common/backend/dist/cli/folio-run.js --workspace <书目录> ensure
+node common/backend/dist/cli/folio-run.js --workspace <书目录> enqueue --name creationDesk.send --input '{"message":"开书：…"}'
+node common/backend/dist/cli/folio-run.js --workspace <书目录> enqueue --name publish.confirm --input '{"revisionTaskId":"…","draftVersionId":"…","chapterSequence":1}'
+node common/backend/dist/cli/folio-run.js --workspace <书目录> enqueue --name graph.continue --input '{"revisionTaskId":"…"}'
+```
+
+`scripts/*.mjs` 在无 hostHandlers 时作离线 stub（只改 ui-state / 落盘标记）；有 hostHandlers 时由宿主执行真实设定抽取、图治理与正文发布，脚本不重复跑。
+
+无 GUI 时先询问用户工作区，再 `ensure`；用户自然语言写成 `.folio/actions` 后 `drain`。
+
 ## 与既有 craft skill
 
-去味 / 对话 / 人味等仍可通过 `load_skill` 加载 vendor skill；本 skill 负责 **流程与落盘宿主协议**。
+去味 / 对话 / 人味等仍可通过 `load_skill` 加载 vendor skill；本 skill 负责 **流程、创作台提示词与落盘宿主协议**。

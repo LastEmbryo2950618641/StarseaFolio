@@ -147,15 +147,13 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
           const ui = await invokeBackend<{
             panels: { graphRevision: { tasks: readonly GraphRevisionTask[] } }
           }>("folio.uiState.read", project)
-          const fromFolio = ui.panels.graphRevision.tasks
-          const next = fromFolio.length > 0
-            ? fromFolio.map((task) => ({
-                ...task,
-                chapterId: task.chapterId ?? "",
-                blocksTurn: task.blocksTurn ?? false,
-                canContinue: task.canContinue ?? false,
-              }))
-            : await invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project)
+          // Panel is visualization-only: skill host syncs graph tasks into ui-state on ensure.
+          const next = ui.panels.graphRevision.tasks.map((task) => ({
+            ...task,
+            chapterId: task.chapterId ?? "",
+            blocksTurn: task.blocksTurn ?? false,
+            canContinue: task.canContinue ?? false,
+          }))
           if (!disposed && generation.current === current) { setTasks(next); setLoadError(undefined) }
         }
       } catch (cause) {
