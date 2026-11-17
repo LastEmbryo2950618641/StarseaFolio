@@ -93,6 +93,7 @@ function selectCoreTurnInput(
   const entries: [string, unknown][] = [
     "workflow",
     "userInput",
+    "userRequirements",
     "chapterSequence",
     "allowWorkspaceChapterReads",
     "presentation",

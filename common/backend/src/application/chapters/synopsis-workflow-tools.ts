@@ -183,7 +183,7 @@ const descriptions = {
   publish_draft: {
     parameters: { revisionTaskId: "string (required)", draftVersionId: "string (required)" },
     writingGuide: [
-      "【发布正文】用户确认「草稿可以，发布正文」后，宿主会自动执行：设定抽取写入设定集 → 图治理 → 正文落盘。确认前不要调用本工具，也不要再询问设定或图治理。",
+      "【发布正文】用户确认「草稿可以，发布正文」后，宿主会自动执行：设定抽取写入设定集，并按用户原话融合更新作品风格 → 图治理 → 正文落盘。确认前不要调用本工具，也不要再询问设定或图治理。",
       "若仍由你调用：必须从 drafts 或先前工具结果中选择明确 revisionTaskId+draftVersionId，不能用 latest。",
       "正式正文不存在独立「旧版本」轴：只有草稿可回退/比较；正文落盘前必须经过本工具。",
       "草稿审核、设定抽取和图治理都在本工具内自动完成；审核发现设定或逻辑冲突会驳回并退回梗概阶段。status=completed 即已发布，可直接继续下一章；",
