@@ -9,6 +9,7 @@ arguments 示例：`{"skillId":"webnovel-dialogue","includeReferences":false}`�
 | `webnovel-dialogue` | 对话与台词 | default(draft,synopsis_discuss) | 口语化、潜台词、角色声音、禁对白乒乓；写对白或改书面腔时用。 |
 | `webnovel-human` | 人味 / 失控感 | onDemand | 表面去味后仍像说明书时用：非理性、留白、私货。 |
 | `webnovel-emotion` | 情绪演出 | onDemand | 喊情绪不演、缺身体反应时用；查情绪→外显对照。 |
+| `starsea-writing` | 星海写作主 Skill | default(synopsis_discuss) | 宿主无关主流程：创作台→设定→图治理→正文；`.folio` ui-state；脚本落盘。 |
 | `book-cold-start` | 开书冷启动 | default(synopsis_discuss) | 一句话→绑笔风的风格备选（命名/对话硬字段）→8维落盘→卷大纲；未完成禁正文。 |
 | `style-bible` | 项目风格手册与声口 | onDemand | 旁白距离、角色声音矩阵、称呼与禁改平。 |
 | `naming-consistency` | 命名称谓一致性 | onDemand | 防撞名、称呼术语前后一致。 |

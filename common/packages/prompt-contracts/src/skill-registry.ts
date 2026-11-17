@@ -73,6 +73,20 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     treeVisibility: "primary",
   },
   {
+    id: "starsea-writing",
+    name: "星海写作主 Skill",
+    summary: "宿主无关主流程：创作台→设定抽取→图治理→正文落盘；.folio ui-state 协议。",
+    injectPolicy: "default",
+    defaultPhases: ["synopsis_discuss"],
+    primaryResource: "resources/skills/starsea-writing/SKILL.md",
+    referenceResources: [
+      "resources/skills/starsea-writing/schema/ui-state.schema.json",
+      "resources/skills/starsea-writing/schema/action.schema.json",
+    ],
+    scriptsDir: "resources/skills/starsea-writing/scripts",
+    treeVisibility: "primary",
+  },
+  {
     id: "book-cold-start",
     name: "开书冷启动",
     summary: "一句话→绑笔风的风格备选→命名/对话硬落盘→卷大纲；未完成禁正文。",

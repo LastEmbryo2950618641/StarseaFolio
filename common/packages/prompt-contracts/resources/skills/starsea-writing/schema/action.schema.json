@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "starsea-writing/action.schema.json",
+  "title": "FolioAction",
+  "type": "object",
+  "required": ["actionId", "name", "createdAtMs", "input"],
+  "properties": {
+    "actionId": { "type": "string", "minLength": 1 },
+    "name": {
+      "enum": [
+        "creationDesk.send",
+        "creationDesk.choose",
+        "publish.confirm",
+        "graph.cancel",
+        "graph.rerun",
+        "graph.continue"
+      ]
+    },
+    "createdAtMs": { "type": "integer", "minimum": 0 },
+    "input": { "type": "object" }
+  }
+}

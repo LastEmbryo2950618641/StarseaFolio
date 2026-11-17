@@ -1,6 +1,7 @@
 # Skill 宿主工作区协议（星海余页可视化 / Codex 同能力）
 
-> **状态：** 设计定稿待你设定目标后进入实现计划  
+> **状态：** 已设定目标；实现进行中（协议骨架 + 脚本桩已落地）  
+ 
 > **范围：** 将创作能力从星海余页内置提示词与编排中抽离为通用 skill；星海余页仅绑定工作区并可视化；Codex/Claude 使用同一 skill，能力与流程不折扣。  
 > **关联：** [统一章节讨论 Agent](./2026-09-10-unified-chapter-discuss-agent-design.md) · 现有 `resources/skills/book-cold-start` · 图修订取消/重跑/继续（`v0.0.1-38`）
 

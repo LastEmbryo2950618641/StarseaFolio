@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "starsea-writing/ui-state.schema.json",
+  "title": "FolioUiState",
+  "type": "object",
+  "required": ["schemaVersion", "updatedAtMs", "run", "panels"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "updatedAtMs": { "type": "integer", "minimum": 0 },
+    "run": {
+      "type": "object",
+      "required": ["runId", "status", "phase", "error"],
+      "properties": {
+        "runId": { "type": ["string", "null"] },
+        "status": { "enum": ["idle", "running", "awaiting_user", "failed", "completed"] },
+        "phase": { "enum": ["creation_desk", "settings_write", "graph_sync", "chapter_publish", "idle"] },
+        "error": { "type": ["string", "null"] }
+      }
+    },
+    "panels": {
+      "type": "object",
+      "required": ["creationDesk", "graphRevision", "chapter"],
+      "properties": {
+        "creationDesk": { "type": "object" },
+        "graphRevision": { "type": "object" },
+        "chapter": { "type": "object" }
+      }
+    }
+  }
+}
