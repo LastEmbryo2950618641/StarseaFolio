@@ -1259,6 +1259,7 @@ describe("right rail process UI contract", () => {
         blocksTurn: false,
         canCancel: false,
         canRetry: true,
+        canContinue: false,
         updatedAtMs: 1,
         progress: {
           completed: 2,
@@ -1295,6 +1296,88 @@ describe("right rail process UI contract", () => {
     expect(stageHtml).toContain("AI 思考")
     expect(stageHtml).toContain("AI 输出")
     expect(stageHtml).toContain("正式输出")
+    expect(stageHtml).toContain("该阶段已经完成")
+    expect(stageHtml).not.toContain("尚未进入该阶段")
+  })
+
+  it("does not treat a finished graph revision stage as not started when another task is on screen", () => {
+    const html = renderToStaticMarkup(React.createElement(StageRecordPanel, {
+      task: {
+        revisionTaskId: "rev-4",
+        chapterId: "ch-4",
+        heading: "第四章",
+        graphSyncTaskId: "sync-4",
+        status: "completed",
+        blocksTurn: false,
+        canCancel: false,
+        canRetry: false,
+        canContinue: false,
+        updatedAtMs: 1,
+        progress: {
+          completed: 2,
+          total: 2,
+          phase: "dependency_audit",
+          phases: [
+            { phase: "graph_governance", status: "completed", attempt: 1 },
+            { phase: "dependency_audit", status: "completed", attempt: 1 },
+          ],
+        },
+      },
+      monitorTask: {
+        handle: { taskId: "other-turn", status: "completed" },
+        status: "completed",
+        phaseRuns: [{
+          phaseRunId: "other-run",
+          phase: "graph_governance",
+          status: "completed",
+          attempt: 1,
+          usage: {},
+          startedAtMs: 1,
+          result: { rawModelOutput: "这是另一条任务的输出" },
+        }],
+      },
+    }))
+    expect(html).not.toContain("尚未进入该阶段")
+    expect(html).not.toContain("这是另一条任务的输出")
+    expect(html).toContain("该阶段已经完成")
+    expect(html).toContain("准备修订与证据")
+    expect(html).toContain("分析依赖与影响")
+  })
+
+  it("shows a grouped graph stage from the phase that actually recorded output", () => {
+    const html = renderToStaticMarkup(React.createElement(StageRecordPanel, {
+      task: {
+        revisionTaskId: "rev-grouped",
+        chapterId: "ch-1",
+        heading: "第一章",
+        status: "completed",
+        blocksTurn: false,
+        canCancel: false,
+        canRetry: false,
+        canContinue: false,
+        updatedAtMs: 1,
+        progress: {
+          completed: 1,
+          total: 1,
+          phase: "graph_structure_plan",
+          phases: [{ phase: "graph_structure_plan", status: "completed", attempt: 1 }],
+        },
+      },
+      monitorTask: {
+        status: "completed",
+        phaseRuns: [{
+          phaseRunId: "space-1",
+          phase: "graph_spacetime_settlement",
+          status: "completed",
+          attempt: 1,
+          usage: {},
+          startedAtMs: 1,
+          result: { rawModelOutput: "时空结算输出" },
+        }],
+      },
+    }))
+    expect(html).toContain("时空结算输出")
+    expect(html).not.toContain("尚未进入该阶段")
   })
 
   it("ends the draft workflow at naming and omits graph and publication stages", () => {

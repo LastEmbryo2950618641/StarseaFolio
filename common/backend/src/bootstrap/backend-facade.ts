@@ -46,6 +46,7 @@ import {
   chapterStartRevisionPayloadSchema,
   chapterStartDraftPayloadSchema,
   chapterUpdateRevisionPayloadSchema,
+  chapterGraphRevisionRetryPayloadSchema,
   chapterReviewRevisionPayloadSchema,
   chapterSubmitRevisionPayloadSchema,
   chapterRetireRevisionPayloadSchema,
@@ -527,9 +528,9 @@ export class BackendFacade {
         return runtime.listGraphRevisionTasks()
       }
       case "chapter.graphRevision.retry": {
-        const payload = chapterReviewRevisionPayloadSchema.parse(request.payload)
+        const payload = chapterGraphRevisionRetryPayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
-        return runtime.retryGraphRevision(payload.revisionTaskId, this.resolveModel(payload.model))
+        return runtime.retryGraphRevision(payload.revisionTaskId, this.resolveModel(payload.model), payload.mode)
       }
       case "chapter.submitRevision": {
         const payload = chapterSubmitRevisionPayloadSchema.parse(request.payload)

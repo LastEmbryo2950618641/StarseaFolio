@@ -661,6 +661,8 @@ export class ChapterRevisionService {
     note?: string
     model?: AIModelPort
     signal?: AbortSignal
+    /** Keep a failed graph-sync checkpoint and rerun only its unfinished phase. */
+    resumeInterruptedGraphSync?: boolean
   }>): Promise<ChapterRevision> {
     let revision = await this.requireRevision(input.revisionTaskId)
     if (input.draftVersionId !== undefined) {
@@ -754,9 +756,13 @@ export class ChapterRevisionService {
       throw new RevisionInvalidStateError("Graph synchronization is already running")
     }
     await this.stageContent(withDecision)
+    const resumeExisting = input.resumeInterruptedGraphSync === true && (
+      oldTask?.status === "awaiting_user_decision" || oldTask?.status === "paused" || oldTask?.status === "waiting_for_review"
+    )
     const graphSyncTaskId = oldTask === undefined
-      ? revision.graphSyncTaskId ?? this.dependencies.createId() : this.dependencies.createId()
-    if (oldTask !== undefined) {
+      ? revision.graphSyncTaskId ?? this.dependencies.createId()
+      : resumeExisting ? oldTask.taskId : this.dependencies.createId()
+    if (oldTask !== undefined && !resumeExisting) {
       const scope = await this.dependencies.taskScopes.findScope(oldTask.scopeId)
       if (scope?.visibility === "pending") await this.dependencies.commit.retire(scope.scopeId, this.dependencies.now())
     }

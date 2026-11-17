@@ -291,11 +291,16 @@ export const chapterSubmitRevisionPayloadSchema = projectSettingsReadPayloadSche
 export const chapterRetireRevisionPayloadSchema = projectSettingsReadPayloadSchema.extend({
   revisionTaskId: idSchema,
 })
+export const chapterGraphRevisionRetryPayloadSchema = chapterRetireRevisionPayloadSchema.extend({
+  model: modelSelectionSchema.optional(),
+  mode: z.enum(["rerun", "continue"]).default("rerun"),
+})
 export type ChapterStartRevisionPayload = z.infer<typeof chapterStartRevisionPayloadSchema>
 export type ChapterUpdateRevisionPayload = z.infer<typeof chapterUpdateRevisionPayloadSchema>
 export type ChapterReviewRevisionPayload = z.infer<typeof chapterReviewRevisionPayloadSchema>
 export type ChapterSubmitRevisionPayload = z.infer<typeof chapterSubmitRevisionPayloadSchema>
 export type ChapterRetireRevisionPayload = z.infer<typeof chapterRetireRevisionPayloadSchema>
+export type ChapterGraphRevisionRetryPayload = z.infer<typeof chapterGraphRevisionRetryPayloadSchema>
 
 export const chapterDraftVersionListPayloadSchema = projectSettingsReadPayloadSchema.extend({
   revisionTaskId: idSchema,
@@ -743,7 +748,7 @@ export const backendPayloadSchemas = {
   "chapter.submitRevision": chapterSubmitRevisionPayloadSchema,
   "chapter.graphRevision.list": chapterListPayloadSchema,
   "chapter.graphRevision.cancel": chapterRetireRevisionPayloadSchema,
-  "chapter.graphRevision.retry": chapterRetireRevisionPayloadSchema.extend({ model: modelSelectionSchema.optional() }),
+  "chapter.graphRevision.retry": chapterGraphRevisionRetryPayloadSchema,
   "chapter.retireRevision": chapterRetireRevisionPayloadSchema,
   "chapter.revision.draftVersion.list": chapterDraftVersionListPayloadSchema,
   "chapter.revision.draftVersion.read": chapterDraftVersionReadPayloadSchema,

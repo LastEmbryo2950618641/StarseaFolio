@@ -598,7 +598,7 @@ export class FakeAiModelAdapter implements AIModelPort {
         explanation: "The occurrence, time, and location nodes form the initial scene binding",
         selfReview: "The binding covers every source unit without inventing a domain schema",
       }],
-      affectedFrontierRefs: isRevision ? [] : ["local:occurrence"],
+      affectedFrontierRefs: !isRevision || input.userInput.includes("[affect-frontier]") ? ["local:occurrence"] : [],
       archiveOutletRefs: [],
       decisionRecords: [{
         decisionKind: "initial_graph_governance",

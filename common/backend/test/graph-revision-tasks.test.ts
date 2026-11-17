@@ -101,7 +101,7 @@ describe("graph revision task operations", () => {
       await call("chapter.graphRevision.cancel", revision)
       expect(aborted).toBe(true)
       expect(await call("chapter.read", { chapterId: chapter.chapterId })).toMatchObject(before)
-      expect((await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]).toMatchObject({ status: "cancelled", canCancel: false, canRetry: true, blocksTurn: true })
+      expect((await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]).toMatchObject({ status: "cancelled", canCancel: false, canRetry: true, canContinue: false, blocksTurn: true })
       await harness.container.getCurrentRuntime()?.close()
       expect((await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]).toMatchObject({ status: "cancelled", canRetry: true })
       hold = false
@@ -117,6 +117,98 @@ describe("graph revision task operations", () => {
       await rm(harness.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   }, 30000)
+
+  it("retries a failed graph phase without repeating completed stages", async () => {
+    const fake = new FakeAiModelAdapter()
+    let governanceCalls = 0
+    let frontierCalls = 0
+    const harness = await openChapterHarness("Graph revision resume", { model: {
+      info: fake.info,
+      execute: async (request, options) => {
+        if (request.phase === "graph_governance") governanceCalls += 1
+        if (request.phase === "frontier_settlement") {
+          frontierCalls += 1
+          if (frontierCalls === 1) throw new Error("DeepSeek request failed: 402 Insufficient Balance")
+        }
+        return fake.execute(request, options)
+      },
+    } })
+    const call = async <T>(method: BackendMethod, payload = {}): Promise<T> => {
+      const response = await harness.facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method,
+        payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef, ...payload } })
+      if (!response.ok) throw new Error(response.error.message)
+      return response.data as T
+    }
+    try {
+      const chapter = await seedCommittedChapter(harness)
+      const revision = await call<{ revisionTaskId: string }>("chapter.startRevision", {
+        chapterId: chapter.chapterId, baseSourceId: chapter.sourceId, heading: chapter.heading,
+        body: `${chapter.body}\n\nA frontier detail. [affect-frontier]`,
+      })
+      await call("chapter.submitRevision", { ...revision, mode: "direct", forced: true })
+      await expect.poll(async () => (await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]?.status, { timeout: 20000 }).toBe("failed")
+      const failed = (await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]
+      expect(failed).toMatchObject({ status: "failed", canCancel: true, canRetry: true, canContinue: true })
+      expect(failed?.progress.phases).toEqual(expect.arrayContaining([
+        expect.objectContaining({ phase: "graph_governance", status: "completed" }),
+        expect.objectContaining({ phase: "frontier_settlement", status: "failed" }),
+      ]))
+      const syncTaskId = failed?.graphSyncTaskId
+      const governanceBeforeRetry = governanceCalls
+      expect(governanceBeforeRetry).toBeGreaterThan(0)
+      expect(frontierCalls).toBe(1)
+      await call("chapter.graphRevision.retry", { ...revision, mode: "continue" })
+      await expect.poll(async () => (await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]?.status, { timeout: 20000 }).toBe("completed")
+      expect(governanceCalls).toBe(governanceBeforeRetry)
+      expect(frontierCalls).toBe(2)
+      expect((await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]?.graphSyncTaskId).toBe(syncTaskId)
+    } finally {
+      await harness.container.close()
+      await rm(harness.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    }
+  }, 40000)
+
+  it("reruns every graph stage when retry mode is rerun", async () => {
+    const fake = new FakeAiModelAdapter()
+    let governanceCalls = 0
+    let frontierCalls = 0
+    const harness = await openChapterHarness("Graph revision rerun", { model: {
+      info: fake.info,
+      execute: async (request, options) => {
+        if (request.phase === "graph_governance") governanceCalls += 1
+        if (request.phase === "frontier_settlement") {
+          frontierCalls += 1
+          if (frontierCalls === 1) throw new Error("DeepSeek request failed: 402 Insufficient Balance")
+        }
+        return fake.execute(request, options)
+      },
+    } })
+    const call = async <T>(method: BackendMethod, payload = {}): Promise<T> => {
+      const response = await harness.facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method,
+        payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef, ...payload } })
+      if (!response.ok) throw new Error(response.error.message)
+      return response.data as T
+    }
+    try {
+      const chapter = await seedCommittedChapter(harness)
+      const revision = await call<{ revisionTaskId: string }>("chapter.startRevision", {
+        chapterId: chapter.chapterId, baseSourceId: chapter.sourceId, heading: chapter.heading,
+        body: `${chapter.body}\n\nA frontier detail. [affect-frontier]`,
+      })
+      await call("chapter.submitRevision", { ...revision, mode: "direct", forced: true })
+      await expect.poll(async () => (await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]?.status, { timeout: 20000 }).toBe("failed")
+      const failed = (await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]
+      const before = governanceCalls
+      expect(before).toBeGreaterThan(0)
+      await call("chapter.graphRevision.retry", { ...revision, mode: "rerun" })
+      await expect.poll(async () => (await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]?.status, { timeout: 20000 }).toBe("completed")
+      expect(governanceCalls).toBeGreaterThan(before)
+      expect((await call<GraphRevisionTask[]>("chapter.graphRevision.list"))[0]?.graphSyncTaskId).not.toBe(failed?.graphSyncTaskId)
+    } finally {
+      await harness.container.close()
+      await rm(harness.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    }
+  }, 40000)
 
   it("rejects an existing file conflict before committing content or blocking later turns", async () => {
     const harness = await openChapterHarness("Revision preflight")

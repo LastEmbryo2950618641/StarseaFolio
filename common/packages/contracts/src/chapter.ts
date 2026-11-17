@@ -41,6 +41,7 @@ export type GraphRevisionTask = Readonly<{
   blocksTurn: boolean
   canCancel: boolean
   canRetry: boolean
+  canContinue: boolean
   error?: string
   updatedAtMs: number
   activity?: GraphRevisionModelActivity

@@ -207,14 +207,17 @@ export class ProjectRuntime {
         const stored: unknown = JSON.parse(errorJson)
         if (typeof stored === "object" && stored !== null && "message" in stored && typeof stored.message === "string") error = stored.message
       }
-      const progress = graphRevisionProgress(runs.filter((run) => run.task_id === row.graph_sync_task_id), complete)
+      const taskRuns = runs.filter((run) => run.task_id === row.graph_sync_task_id)
+      const progress = graphRevisionProgress(taskRuns, complete)
       const activity = this.revisionJobs.get(row.id)?.activity
+      const resumable = row.task_status === "awaiting_user_decision" || row.task_status === "paused" || row.task_status === "waiting_for_review"
       return {
         revisionTaskId: row.id, chapterId: row.chapter_id, heading: row.heading,
         ...(row.graph_sync_task_id === null ? {} : { graphSyncTaskId: row.graph_sync_task_id }),
         status, blocksTurn: row.decision === "submit" && !complete && !retired,
-        canCancel: !complete && !retired && !publishing && row.task_status !== "committing" && (live || status === "pending" || status === "interrupted"),
+        canCancel: !complete && !retired && !publishing && status !== "cancelled" && row.task_status !== "committing" && row.task_status !== "completed",
         canRetry: !complete && !retired && this.revisionJobs.size === 0,
+        canContinue: !complete && !retired && this.revisionJobs.size === 0 && resumable && taskRuns.some((run) => run.status !== "superseded"),
         ...(error === undefined ? {} : { error }), updatedAtMs: row.updated_at,
         ...(activity === undefined ? {} : { activity }),
         progress,
@@ -281,8 +284,12 @@ export class ProjectRuntime {
       if (previous === undefined || previous.projectId !== this.projectId) throw new Error("图修订任务不存在")
       if (previous.decision === "submit" && previous.status !== "completed" && previous.status !== "retired" && previous.graphSyncTaskId !== undefined) {
         const oldTask = await this.taskScopes.findTask(previous.graphSyncTaskId)
-        // Interrupted graph work is retired; successful graph work is recovered by submit.
-        if (oldTask !== undefined && oldTask.status !== "completed") {
+        const resumable = input.resumeInterruptedGraphSync === true
+          && oldTask !== undefined
+          && (oldTask.status === "awaiting_user_decision" || oldTask.status === "paused" || oldTask.status === "waiting_for_review")
+          && (await this.listPhaseRuns(oldTask.taskId)).some((run) => run.status !== "superseded")
+        // A failed checkpoint stays in place so retry reruns that phase. Cancelled or empty work starts over.
+        if (oldTask !== undefined && oldTask.status !== "completed" && !resumable) {
           const scope = await this.taskScopes.findScope(oldTask.scopeId)
           if (scope?.visibility === "pending") await new SqliteScopeCommitRepository(this.database).retire(oldTask.scopeId, Date.now())
           await this.persistenceUpdateTask(oldTask.taskId, "cancelled")
@@ -336,7 +343,7 @@ export class ProjectRuntime {
     return true
   }
 
-  public async retryGraphRevision(revisionTaskId: string, model: AIModelPort): Promise<ChapterRevision> {
+  public async retryGraphRevision(revisionTaskId: string, model: AIModelPort, mode: "rerun" | "continue" = "rerun"): Promise<ChapterRevision> {
     const revision = await new SqliteChapterRevisionRepository(this.database).find(revisionTaskId)
     if (revision === undefined || revision.projectId !== this.projectId || revision.decision !== "submit") throw new Error("没有可重试的图修订任务")
     const review = revision.review ?? await this.createChapterRevisionService().review({ revisionTaskId, workspaceRootRef: this.workspaceRootRef }, model).then(async () => {
@@ -344,9 +351,17 @@ export class ProjectRuntime {
       return refreshed?.review
     })
     if (review === undefined) throw new Error("当前草稿审核未生成结果，不能重试图治理")
+    if (mode === "continue") {
+      const oldTask = revision.graphSyncTaskId === undefined ? undefined : await this.taskScopes.findTask(revision.graphSyncTaskId)
+      const resumable = oldTask !== undefined
+        && (oldTask.status === "awaiting_user_decision" || oldTask.status === "paused" || oldTask.status === "waiting_for_review")
+        && (await this.listPhaseRuns(oldTask.taskId)).some((run) => run.status !== "superseded")
+      if (!resumable) throw new Error("没有可继续的失败阶段，请重跑全部阶段")
+    }
     return this.submitChapterRevision({
       revisionTaskId, workspaceRootRef: this.workspaceRootRef, model,
       mode: "reviewed", forced: false, reviewId: review.reviewId,
+      ...(mode === "continue" ? { resumeInterruptedGraphSync: true } : {}),
     })
   }
 
@@ -986,7 +1001,16 @@ export class ProjectRuntime {
         if (existingTask === undefined) {
           await orchestrator.execute(orchestratorInput, { ...(input.signal === undefined ? {} : { signal: input.signal }) })
         } else {
-          await orchestrator.resume(orchestratorInput, "retry_phase", { ...(input.signal === undefined ? {} : { signal: input.signal }) })
+          const runs = await this.listPhaseRuns(input.graphSyncTaskId)
+          const phases = new Set(runs.filter((run) => run.status !== "superseded").map((run) => run.phase))
+          const tookFullRoute = phases.has("interpret") || phases.has("rule_assembly") || phases.has("emergence_planning")
+          const tookCompactRoute = !tookFullRoute && (
+            phases.has("dependency_audit") || phases.has("graph_structure_plan") || phases.has("graph_governance_review") || phases.has("frontier_settlement")
+          )
+          await orchestrator.resume({
+            ...orchestratorInput,
+            adaptiveGraphGovernance: tookFullRoute ? false : tookCompactRoute ? "compact" : true,
+          }, "retry_phase", { ...(input.signal === undefined ? {} : { signal: input.signal }) })
         }
       },
     })

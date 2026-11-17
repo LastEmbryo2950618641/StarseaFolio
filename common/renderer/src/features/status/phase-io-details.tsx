@@ -18,6 +18,9 @@ export function PhaseIoPending({
   if (latestStatus === "running" || visualKind === "running") {
     return <p className="phase-empty">已向模型发起请求，等待 AI 返回思考记录与正式输出。</p>
   }
+  if (visualKind === "done" || latestStatus === "completed") {
+    return <p className="phase-empty">该阶段已经完成，这次没有单独留下可展开的模型记录。</p>
+  }
   return <p className="phase-empty">尚未进入该阶段；进入后会先显示请求态，返回后再展开 AI 思考与 AI 输出。</p>
 }
 

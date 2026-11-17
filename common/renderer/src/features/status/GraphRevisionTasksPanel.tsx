@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-import { AlertCircle, Check, CheckCircle2, Circle, Loader2, RefreshCw, RotateCcw, X } from "lucide-react"
+import { AlertCircle, Check, CheckCircle2, Circle, Loader2, Play, RefreshCw, RotateCcw, X } from "lucide-react"
 import type { ChapterReviewRevisionPayload, GraphRevisionTask, ResettableRuntimeMetricId } from "@starseafolio/contracts"
-import { invokeBackend, type OpenProject, type TaskSnapshot } from "../../api/client.js"
+import { invokeBackend, type OpenProject, type PhaseRunSnapshot, type TaskSnapshot } from "../../api/client.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
 import { PhaseIoDetails, PhaseIoPending } from "./phase-io-details.js"
 import { RuntimeMonitor } from "./TaskCheckpointPrototype.js"
@@ -24,6 +24,20 @@ const phaseLabels: Record<string, string> = {
   graph_capacity_rewrite: "重构局部结构", graph_spacetime_settlement: "结算时空与历史",
   graph_retrieval_design: "更新查询索引", graph_governance_review: "独立审核与查询验证",
   settlement_review: "审核结算", frontier_settlement: "更新推演前沿", commit_review: "校验并提交",
+}
+
+const stageMemberPhases: Record<string, readonly string[]> = {
+  graph_governance: ["graph_governance", "interpret", "rule_assembly", "source_retrieval", "emergence_planning", "emergence_review"],
+  graph_structure_plan: ["graph_structure_plan", "graph_capacity_rewrite", "graph_spacetime_settlement", "graph_retrieval_design"],
+  graph_governance_review: ["graph_governance_review", "settlement_review"],
+}
+
+function selectStageRun(stagePhase: string, runs: readonly PhaseRunSnapshot[] | undefined): PhaseRunSnapshot | undefined {
+  const names = new Set(stageMemberPhases[stagePhase] ?? [stagePhase])
+  const matched = (runs ?? []).filter((run) => names.has(run.phase))
+  const own = [...matched].reverse().find((run) => run.phase === stagePhase && run.result !== undefined)
+  if (own !== undefined) return own
+  return [...matched].reverse().find((run) => run.result !== undefined) ?? matched.at(-1)
 }
 
 type PhaseVisualKind = "done" | "failed" | "running" | "idle"
@@ -51,14 +65,38 @@ export function StageRecordPanel({
   monitorTask: TaskSnapshot | undefined
   onResetMetrics?: ((metricIds: readonly ResettableRuntimeMetricId[]) => Promise<void>) | undefined
 }): React.JSX.Element {
+  const syncTaskId = task.graphSyncTaskId
+  const monitorIsSyncTask = syncTaskId !== undefined && monitorTask?.handle?.taskId === syncTaskId
+  const [loadedTask, setLoadedTask] = useState<TaskSnapshot>()
+  useEffect(() => {
+    if (syncTaskId === undefined || monitorIsSyncTask) {
+      setLoadedTask(undefined)
+      return
+    }
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await invokeBackend<TaskSnapshot>("turn.status", { taskId: syncTaskId })
+        if (disposed) return
+        setLoadedTask(next)
+        if (next.status === "completed" || next.status === "failed" || next.status === "cancelled") return
+        timer = setTimeout(() => { void poll() }, 1500)
+      } catch {
+        if (!disposed) setLoadedTask(undefined)
+      }
+    }
+    void poll()
+    return () => { disposed = true; clearTimeout(timer) }
+  }, [syncTaskId, monitorIsSyncTask])
+  const detailTask = syncTaskId === undefined || monitorIsSyncTask ? monitorTask : loadedTask
   const { progress } = task
   return <div className="graph-revision-stage-record" data-testid="graph-revision-stage-record">
-    <RuntimeMonitor task={monitorTask} onResetMetrics={onResetMetrics} />
+    <RuntimeMonitor task={detailTask} onResetMetrics={onResetMetrics} />
     <div className="phase-list">
       {progress.phases.map((phase) => {
         const visual = phaseVisual(phase.status)
-        const runs = monitorTask?.phaseRuns?.filter((run) => run.phase === phase.phase) ?? []
-        const latest = runs.at(-1)
+        const latest = selectStageRun(phase.phase, detailTask?.phaseRuns)
         const label = phaseLabels[phase.phase] ?? phase.phase
         return <details className={`phase-detail ${visual.css}`} key={phase.phase}>
           <summary className={`phase-row ${visual.css}`}>
@@ -113,16 +151,16 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
     return () => { disposed = true; clearTimeout(timer) }
   }, [project?.projectId, project?.workspaceRootRef, refresh])
 
-  const act = async (task: GraphRevisionTask, action: "cancel" | "retry"): Promise<void> => {
+  const act = async (task: GraphRevisionTask, action: "cancel" | "rerun" | "continue"): Promise<void> => {
     if (project === undefined || operations.current.has(task.revisionTaskId)) return
     const current = generation.current
     operations.current.add(task.revisionTaskId)
     setPending((previous) => ({ ...previous, [task.revisionTaskId]: action }))
     setError(undefined)
     try {
-      await invokeBackend(`chapter.graphRevision.${action}`, {
+      await invokeBackend(action === "cancel" ? "chapter.graphRevision.cancel" : "chapter.graphRevision.retry", {
         ...project, revisionTaskId: task.revisionTaskId,
-        ...(action === "retry" && model !== undefined ? { model } : {}),
+        ...(action === "cancel" ? {} : { mode: action, ...(model === undefined ? {} : { model }) }),
       })
       if (generation.current !== current) return
       setRefresh((value) => value + 1)
@@ -168,7 +206,8 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
         </details> : null}
         <footer><time dateTime={new Date(task.updatedAtMs).toISOString()}>{new Date(task.updatedAtMs).toLocaleString("zh-CN", { hour12: false })}</time><div>
           <button type="button" disabled={!task.canCancel || busy !== undefined} onClick={() => { void act(task, "cancel") }}><X size={12} aria-hidden="true" />{busy === "cancel" ? "取消中" : "取消"}</button>
-          <button type="button" disabled={!task.canRetry || busy !== undefined} onClick={() => { void act(task, "retry") }}><RotateCcw size={12} aria-hidden="true" />{busy === "retry" ? "提交中" : "重试"}</button>
+          <button type="button" disabled={!task.canRetry || busy !== undefined} onClick={() => { void act(task, "rerun") }}><RotateCcw size={12} aria-hidden="true" />{busy === "rerun" ? "提交中" : "重跑"}</button>
+          <button type="button" disabled={!task.canContinue || busy !== undefined} onClick={() => { void act(task, "continue") }}><Play size={12} aria-hidden="true" />{busy === "continue" ? "提交中" : "继续"}</button>
         </div></footer>
       </article>
     })}
