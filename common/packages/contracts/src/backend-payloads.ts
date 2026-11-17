@@ -715,6 +715,32 @@ export const graphNeighborhoodPayloadSchema = z.object({
 })
 export type GraphNeighborhoodPayload = z.infer<typeof graphNeighborhoodPayloadSchema>
 
+export const folioHostEnsurePayloadSchema = projectSettingsReadPayloadSchema.extend({
+  host: z.enum(["starseafolio", "codex", "claude"]).default("starseafolio"),
+})
+export type FolioHostEnsurePayload = z.infer<typeof folioHostEnsurePayloadSchema>
+
+export const folioUiStateReadPayloadSchema = projectSettingsReadPayloadSchema
+export type FolioUiStateReadPayload = z.infer<typeof folioUiStateReadPayloadSchema>
+
+export const folioActionEnqueuePayloadSchema = projectSettingsReadPayloadSchema.extend({
+  actionId: z.string().min(1).optional(),
+  name: z.enum([
+    "creationDesk.send",
+    "creationDesk.choose",
+    "publish.confirm",
+    "graph.cancel",
+    "graph.rerun",
+    "graph.continue",
+  ]),
+  input: z.record(z.string(), z.unknown()).default({}),
+  drain: z.boolean().default(true),
+})
+export type FolioActionEnqueuePayload = z.infer<typeof folioActionEnqueuePayloadSchema>
+
+export const folioActionDrainPayloadSchema = projectSettingsReadPayloadSchema
+export type FolioActionDrainPayload = z.infer<typeof folioActionDrainPayloadSchema>
+
 export const backendPayloadSchemas = {
   "project.create": projectCreatePayloadSchema,
   "project.open": projectWorkspacePayloadSchema,
@@ -791,6 +817,10 @@ export const backendPayloadSchemas = {
   "model.profiles.read": modelProfilesReadPayloadSchema,
   "model.profiles.save": modelProfilesSavePayloadSchema,
   "graph.neighborhood": graphNeighborhoodPayloadSchema,
+  "folio.host.ensure": folioHostEnsurePayloadSchema,
+  "folio.uiState.read": folioUiStateReadPayloadSchema,
+  "folio.action.enqueue": folioActionEnqueuePayloadSchema,
+  "folio.action.drain": folioActionDrainPayloadSchema,
   "turn.start": turnStartPayloadSchema,
   "turn.resume": turnResumePayloadSchema,
   "turn.recoverable.list": turnRecoverableTasksPayloadSchema,

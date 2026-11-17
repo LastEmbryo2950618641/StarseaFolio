@@ -31,6 +31,10 @@ import {
   projectDeletePayloadSchema,
   projectSuggestDisplayNamePayloadSchema,
   graphNeighborhoodPayloadSchema,
+  folioHostEnsurePayloadSchema,
+  folioUiStateReadPayloadSchema,
+  folioActionEnqueuePayloadSchema,
+  folioActionDrainPayloadSchema,
   historyBranchesPayloadSchema,
   historyEntryOperationPayloadSchema,
   historyListPayloadSchema,
@@ -221,6 +225,8 @@ export class BackendFacade {
       case "project.open": {
         const payload = projectWorkspacePayloadSchema.parse(request.payload)
         const project = await this.container.openProject(payload.workspaceRootRef)
+        const runtime = await this.container.getRuntime(project.manifest.id, project.manifest.workspaceRootRef)
+        await runtime.ensureFolioHost("starseafolio")
         return {
           projectId: project.manifest.id,
           displayName: project.manifest.displayName,
@@ -926,6 +932,31 @@ export class BackendFacade {
       case "model.profiles.save": {
         const payload = modelProfilesSavePayloadSchema.parse(request.payload)
         return this.container.modelProfiles.save(payload)
+      }
+      case "folio.host.ensure": {
+        const payload = folioHostEnsurePayloadSchema.parse(request.payload)
+        const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        return runtime.ensureFolioHost(payload.host)
+      }
+      case "folio.uiState.read": {
+        const payload = folioUiStateReadPayloadSchema.parse(request.payload)
+        const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        return runtime.readFolioUiState()
+      }
+      case "folio.action.enqueue": {
+        const payload = folioActionEnqueuePayloadSchema.parse(request.payload)
+        const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        return runtime.enqueueFolioAction({
+          ...(payload.actionId === undefined ? {} : { actionId: payload.actionId }),
+          name: payload.name,
+          input: payload.input,
+          drain: payload.drain,
+        })
+      }
+      case "folio.action.drain": {
+        const payload = folioActionDrainPayloadSchema.parse(request.payload)
+        const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        return runtime.drainFolioActions()
       }
       case "graph.neighborhood": {
         const payload = graphNeighborhoodPayloadSchema.parse(request.payload)

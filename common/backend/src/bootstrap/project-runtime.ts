@@ -11,8 +11,13 @@ import type {
   ChapterRevision,
   DeductionTask,
   GraphRevisionTask,
+  FolioActionName,
+  FolioHostKind,
+  FolioUiState,
 } from "@starseafolio/contracts"
 import { PROTOCOL_VERSION } from "@starseafolio/contracts"
+import { FolioSkillRunner } from "../application/folio/folio-skill-runner.js"
+import { FolioWorkspace } from "../application/folio/folio-workspace.js"
 
 import {
   TurnOrchestrator,
@@ -223,6 +228,55 @@ export class ProjectRuntime {
         progress,
       }
     })
+  }
+
+  public createFolioSkillRunner(): FolioSkillRunner {
+    return new FolioSkillRunner({ workspaceRoot: this.workspaceRootRef })
+  }
+
+  public async ensureFolioHost(host: FolioHostKind = "starseafolio"): Promise<FolioUiState> {
+    return this.createFolioSkillRunner().initialize(host)
+  }
+
+  public async readFolioUiState(): Promise<FolioUiState> {
+    const folio = new FolioWorkspace(this.workspaceRootRef)
+    await folio.ensureLayout()
+    await folio.writeHost({
+      host: "starseafolio",
+      workspaceRoot: this.workspaceRootRef,
+      skillId: "starsea-writing",
+    })
+    return folio.readUiState()
+  }
+
+  public async enqueueFolioAction(input: Readonly<{
+    actionId?: string
+    name: FolioActionName
+    input?: Record<string, unknown>
+    drain?: boolean
+  }>): Promise<FolioUiState> {
+    const runner = this.createFolioSkillRunner()
+    await runner.initialize("starseafolio")
+    await runner.enqueue({
+      actionId: input.actionId ?? randomUUID(),
+      name: input.name,
+      createdAtMs: Date.now(),
+      input: input.input ?? {},
+    })
+    if (input.drain === false) return new FolioWorkspace(this.workspaceRootRef).readUiState()
+    return runner.drainOnce()
+  }
+
+  public async drainFolioActions(): Promise<FolioUiState> {
+    const runner = this.createFolioSkillRunner()
+    await runner.initialize("starseafolio")
+    let state = await runner.drainOnce()
+    for (let i = 0; i < 32; i += 1) {
+      const next = await runner.drainOnce()
+      if (next.updatedAtMs === state.updatedAtMs && next.run.status === state.run.status) break
+      state = next
+    }
+    return state
   }
 
   public async submitChapterRevision(input: Parameters<ChapterRevisionService["submit"]>[0]): Promise<ChapterRevision> {
