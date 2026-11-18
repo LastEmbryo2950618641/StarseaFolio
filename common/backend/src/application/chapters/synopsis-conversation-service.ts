@@ -34,7 +34,9 @@ import {
 import { defaultProjectSettings } from "@starseafolio/config"
 
 import {
+  buildContextBudgetContent,
   buildContextUsageBreakdown,
+  CONTEXT_FOLD_SUMMARY_PROTOCOL,
   contextTokensAfterProviderUsage,
   executeWithContextCompaction,
   filterNovelContextExchangeMessages,
@@ -2776,6 +2778,7 @@ export class SynopsisConversationService {
     readEvidence = [...readEvidence, ...workStyleCandidateEvidence, ...currentWorkStyleEvidence]
     const sendTurnId = this.dependencies.createId()
     let lastRequestInputTokens = await this.dependencies.conversation.loadDiscussContextInputTokens(input.projectId, input.sessionId)
+    let sendCompactedEstimate: number | undefined
     const contextId = this.dependencies.createId()
     let retrievalGaps: TurnRetrievalGap[] = []
     let remainingCalls = hasExplicitCallLimit ? maxModelCalls : Number.MAX_SAFE_INTEGER
@@ -3138,8 +3141,31 @@ export class SynopsisConversationService {
       if (pendingWrites !== undefined) {
         activeRepairHints.push("【已暂存写入提案】上一轮结构化内容已暂存，尚未落盘。本轮只需补齐提示要求的 Todo、choices 或写作设置；未修改的正文与规划无需重复输出。写入前仍会重新验证全部门禁。")
       }
+      const contextWindowTokens = input.model.info?.contextWindowTokens ?? 64_000
+      const triggerRatio = settings?.execution.contextCompactionThresholdRatio
+        ?? defaultProjectSettings.execution.contextCompactionThresholdRatio
+      const targetRatio = settings?.execution.contextCompressionTargetRatio
+        ?? defaultProjectSettings.execution.contextCompressionTargetRatio
+      const foldsApplied = storedContext.filter((message) => (
+        message.kind === "phase_instruction"
+        && message.content?.includes(`"protocol":"${CONTEXT_FOLD_SUMMARY_PROTOCOL}"`) === true
+      )).length
       const contextMessages = [
         ...toVisibleDiscussContextMessages(storedContext),
+        {
+          messageId: this.dependencies.createId(),
+          sequence: storedContext.length,
+          role: "user" as const,
+          kind: "phase_instruction" as const,
+          content: buildContextBudgetContent({
+            contextTokens: lastRequestInputTokens
+              ?? storedContext.reduce((sum, message) => sum + (message.tokenEstimate ?? 0), 0),
+            contextWindowTokens,
+            triggerRatio,
+            targetRatio,
+            foldsApplied,
+          }),
+        },
         {
           messageId: this.dependencies.createId(),
           sequence: storedContext.length,
@@ -3195,15 +3221,38 @@ export class SynopsisConversationService {
           onCompacted: async (event) => {
             if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
             await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, event.hiddenMessageIds, this.dependencies.now())
+            if (event.foldMessages.length > 0) {
+              await this.dependencies.conversation.appendDiscussContextMessages({
+                sessionId: input.sessionId,
+                projectId: input.projectId,
+                createdAtMs: this.dependencies.now(),
+                messages: event.foldMessages.map((message) => ({
+                  role: message.role,
+                  kind: message.kind,
+                  content: message.content,
+                })),
+              })
+            }
+            storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
             if (event.estimatedInputTokens !== undefined) {
               compactedEstimate = event.estimatedInputTokens
+              sendCompactedEstimate = event.estimatedInputTokens
               lastRequestInputTokens = event.estimatedInputTokens
               synopsisConversationStreamHub.addUsage(input.projectId, {
                 lastRequestInputTokens: event.estimatedInputTokens,
               }, this.dependencies.now())
             }
-            runtimeLog("info", "synopsis-conversation", "context.compaction.applied", { projectId: input.projectId, sessionId: input.sessionId, ...event })
+            runtimeLog("info", "synopsis-conversation", "context.compaction.applied", {
+              projectId: input.projectId,
+              sessionId: input.sessionId,
+              reason: event.reason,
+              hiddenMessageCount: event.hiddenMessageIds.length,
+              foldMessageCount: event.foldMessages.length,
+              estimatedInputTokens: event.estimatedInputTokens,
+              remainingMessageCount: event.remainingMessageCount,
+            })
           },
+          createMessageId: () => this.dependencies.createId(),
           options: {
             phasePrompt,
             forceThinking: true,
@@ -3309,7 +3358,7 @@ export class SynopsisConversationService {
         throw error
       }
       const measuredContextTokens = contextTokensAfterProviderUsage(
-        compactedEstimate,
+        compactedEstimate ?? sendCompactedEstimate,
         execution.usage.lastRequestInputTokens,
       )
       if (measuredContextTokens !== undefined) lastRequestInputTokens = measuredContextTokens

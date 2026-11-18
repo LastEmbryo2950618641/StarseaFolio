@@ -266,6 +266,49 @@ export class SqliteTurnPersistence implements TurnPersistencePort {
     return [...evidenceById.values()]
   }
 
+  public async appendModelContextMessages(input: Readonly<{
+    chainId: string
+    projectId: ProjectId
+    createdAtMs: number
+    messages: readonly import("@starseafolio/contracts").ModelContextMessageDraft[]
+  }>): Promise<void> {
+    if (input.messages.length === 0) return
+    await this.database.transaction().execute(async (transaction) => {
+      const chain = await transaction.selectFrom("model_context_chains").selectAll()
+        .where("id", "=", input.chainId).executeTakeFirstOrThrow()
+      const rows = input.messages.map((message, index) => {
+        const draft = modelContextMessageDraftSchema.parse(message)
+        const contentValue = draft.content ?? draft.contentRef
+        if (contentValue === undefined) throw new Error("Model context message has no content source")
+        return {
+          id: this.createId(),
+          project_id: input.projectId,
+          chain_id: input.chainId,
+          sequence_no: chain.message_count + index,
+          role: draft.role,
+          kind: draft.kind,
+          task_id: draft.taskId ?? null,
+          turn_id: draft.turnId ?? null,
+          phase: draft.phase ?? null,
+          content_text: draft.content ?? null,
+          content_ref: draft.contentRef ?? null,
+          content_digest: digest(contentValue),
+          token_estimate: draft.content === undefined ? 0 : estimateTextTokens(draft.content),
+          origin_phase_run_id: null,
+          origin_index: null,
+          hidden_at: null,
+          created_at: input.createdAtMs,
+        }
+      })
+      await transaction.insertInto("model_context_messages").values(rows).executeTakeFirstOrThrow()
+      await transaction.updateTable("model_context_chains").set({
+        message_count: chain.message_count + rows.length,
+        token_estimate: chain.token_estimate + rows.reduce((total, row) => total + row.token_estimate, 0),
+        updated_at: input.createdAtMs,
+      }).where("id", "=", input.chainId).executeTakeFirstOrThrow()
+    })
+  }
+
   public async hideModelContextMessages(
     chainId: string,
     messageIds: readonly string[],

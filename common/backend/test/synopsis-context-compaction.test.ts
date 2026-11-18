@@ -16,9 +16,14 @@ describe("synopsis context compaction integration", () => {
     let retriedWithSmallerHistory = false
     let beforeCount = 0
     let sawBootstrap = false
-    let oldMessagesSent = false
+    let sawFoldSummary = false
+    let compressCalls = 0
     const model: AIModelPort = {
       info: { ...fake.info, contextWindowTokens: 1_000_000 },
+      compressContext: async (input) => {
+        compressCalls += 1
+        return fake.compressContext(input)
+      },
       execute: async (request, options) => {
         synopsisConversationStreamHub.setTodos(request.projectId,
           [{ id: "planning", content: "检查本章讨论上下文", status: "completed" }], Date.now())
@@ -31,8 +36,13 @@ describe("synopsis context compaction integration", () => {
             rejected = true
             throw new Error("400 This model's maximum context length is 1048576 tokens. However, you requested 1056215 tokens (1056215 in the messages, 0 in the completion).")
           }
-          if (mode === "overflow" && count < beforeCount) retriedWithSmallerHistory = true
-          oldMessagesSent ||= options?.contextMessages?.some((m) => m.turnId === originalTurnId && m.kind !== "system_rules") ?? false
+          if (mode === "overflow" && rejected && (
+            count <= beforeCount
+            || (options?.contextMessages?.some((m) => m.content.includes("context-fold-summary-v1")) ?? false)
+          )) {
+            retriedWithSmallerHistory = true
+          }
+          sawFoldSummary ||= options?.contextMessages?.some((m) => m.content.includes("context-fold-summary-v1")) ?? false
           sawBootstrap ||= phaseInput.readEvidence.some((e) => e.ownerId === "设定集/readme.md")
         }
         const result = await fake.execute(request, options)
@@ -53,10 +63,13 @@ describe("synopsis context compaction integration", () => {
       const sent = await invoke("synopsis.conversation.send", { message: "继续讨论站台上的线索" })
       expect(sent.messages.filter((m) => m.role === "user" && m.content === "继续讨论站台上的线索")).toHaveLength(1)
       expect(sawBootstrap).toBe(false)
+      expect(compressCalls).toBeGreaterThan(0)
+      expect(sawFoldSummary || mode === "usage").toBe(true)
       if (mode === "overflow") {
-        expect(oldMessagesSent).toBe(false)
         expect(retriedWithSmallerHistory).toBe(true)
+        expect(sawFoldSummary).toBe(true)
       }
+      void originalTurnId
     } finally {
       await harness.container.close()
       rmSync(harness.root, { recursive: true, force: true })

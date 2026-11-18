@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto"
 import {
   ModelContextAppender,
   type AIModelPort,
+  type ContextCompressionInput,
+  type ContextCompressionResult,
   type ModelExecutionOptions,
   type PhaseModelExecution,
   type TurnPhaseInput,
@@ -30,6 +32,27 @@ export class FakeAiModelAdapter implements AIModelPort {
   private readonly contextAppender = new ModelContextAppender()
 
   public constructor(private readonly createId: () => string = randomUUID) {}
+
+  public compressContext(input: ContextCompressionInput): Promise<ContextCompressionResult> {
+    if (input.signal?.aborted) return Promise.reject(executionCancellationReason(input.signal))
+    const joined = input.texts.join("\n---\n")
+    const summary = joined.length <= 240
+      ? `【已折叠】${joined}`
+      : `【已折叠】${joined.slice(0, 200)}…（共 ${String(input.texts.length)} 段）`
+    const inputTokens = Math.max(1, Math.ceil(joined.length / 3))
+    const outputTokens = Math.max(1, Math.ceil(summary.length / 3))
+    return Promise.resolve({
+      summary,
+      usage: {
+        inputTokens,
+        lastRequestInputTokens: inputTokens,
+        outputTokens,
+        latencyMs: 0,
+        provider: this.info.provider,
+        model: this.info.model,
+      },
+    })
+  }
 
   public execute(request: PhaseRequestEnvelope, options?: ModelExecutionOptions): Promise<PhaseModelExecution> {
     if (options?.signal?.aborted) return Promise.reject(executionCancellationReason(options.signal))

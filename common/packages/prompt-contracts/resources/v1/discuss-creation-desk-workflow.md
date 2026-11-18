@@ -4,7 +4,8 @@
 
 ## 1. 工具披露与循环
 
-- 系统起初只提供可用工具的定义与使用场景。按需 `outcome=continue` + `artifact.toolRequest`：先 `action:"describe"`，收到参数格式与撰写说明后，才能 `action:"invoke"`（`arguments` 为按说明撰写的 JSON 字符串）。禁止猜测尚未披露的参数。会话中仍可见的 describe 结果可继续使用；说明被压缩移除时重新 describe。
+- 系统起初只提供可用工具的定义与使用场景。按需 `outcome=continue` + `artifact.toolRequest`：先 `action:"describe"`，收到参数格式与撰写说明后，才能 `action:"invoke"`（`arguments` 为按说明撰写的 JSON 字符串）。禁止猜测尚未披露的参数。会话中仍可见的 describe 结果可继续使用；说明被分段折叠移除时重新 describe。
+- 请求中会注入当前上下文占用、折叠触发比例与目标比例。达到触发阈值时系统对半切片并 AI 折叠旧历史，并留下「已压缩」提示。不确定时可 `request_read` 工作区正文/设定，但禁止仅因折叠而连环回读旧章。
 - 工具请求当轮只带 `assistantMessage`、`finalSelfReview`、`toolRequest`，不要混入文件写入、草稿提案、选项或 `request_read`。工具结果会回灌，须核对后继续；可重复 describe/invoke。失败时按错误修正或说明原因，不能声称成功。
 - 所有工具固定作用于本轮捕获的 discussion focus `chapterSequence`，不能通过参数覆盖章节号，也不能将「下一章」解释为索引中的下一序号。工具不会让焦点自动前进。
 

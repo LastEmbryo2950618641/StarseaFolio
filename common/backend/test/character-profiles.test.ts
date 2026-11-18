@@ -66,9 +66,9 @@ describe("character documents", () => {
     expect(await f.workspace.readMarkdown(f.root, path)).toBe(content)
   })
 
-  it("blocks generic text writes, invalid operations, duplicate creation and stale editor overwrites", async () => {
+  it("blocks generic text writes, invalid operations and duplicate creation", async () => {
     const f = await fixture()
-    const original = await f.create()
+    await f.create()
     await expect(f.workspace.saveUserMarkdown(f.root, path, "{}" )).rejects.toThrow(/字段接口/u)
     await expect(f.workspace.saveUserMarkdown(f.root, `${CHARACTER_DIRECTORY}/新人物.md`, "# 人物")).rejects.toThrow(/字段接口/u)
     await expect(f.workspace.createUserDirectory(f.root, `${CHARACTER_DIRECTORY}/子文件夹`)).rejects.toThrow()
@@ -76,19 +76,42 @@ describe("character documents", () => {
     expect(characterUpdateSchema.safeParse({ relativePath: path, mode: "update", operations: [{ op: "set", field: "姓名", value: "changed" }], content: "{}" }).success).toBe(false)
     expect(characterUpdateSchema.safeParse({ relativePath: path, mode: "update", operations: [{ op: "set", field: "__proto__", value: {} }] }).success).toBe(false)
     expect(characterUpdateSchema.safeParse({ relativePath: "设定集/人物/../a.json", mode: "create", operations: [] }).success).toBe(false)
+  })
+
+  it("rebases stale expectedContent onto the latest profile instead of failing", async () => {
+    const f = await fixture()
+    const original = await f.create()
     await f.workspace.updateCharacter(f.root, { relativePath: path, mode: "update", operations: [{ op: "set", field: "目标", value: "登顶" }] })
-    await expect(f.workspace.updateCharacter(f.root, { relativePath: path, mode: "update", expectedContent: original, operations: [{ op: "delete", field: "目标" }] })).rejects.toThrow(/重新打开/u)
-    expect(parseCharacterProfile(await f.workspace.readMarkdown(f.root, path)).fields.目标).toBe("登顶")
+    await f.workspace.updateCharacter(f.root, {
+      relativePath: path,
+      mode: "update",
+      expectedContent: original,
+      operations: [{ op: "set", field: "年龄", value: 17 }],
+    })
+    expect(parseCharacterProfile(await f.workspace.readMarkdown(f.root, path)).fields).toMatchObject({
+      目标: "登顶",
+      年龄: 17,
+    })
   })
 
   it("serializes concurrent updates without losing unrelated fields", async () => {
     const f = await fixture()
-    await f.create()
+    const original = await f.create()
     await Promise.all([
       f.workspace.updateCharacter(f.root, { relativePath: path, mode: "update", operations: [{ op: "set", field: "目标", value: "登顶" }] }),
       f.workspace.updateCharacter(f.root, { relativePath: path, mode: "update", operations: [{ op: "set", field: "年龄", value: 17 }] }),
+      f.workspace.updateCharacter(f.root, {
+        relativePath: path,
+        mode: "update",
+        expectedContent: original,
+        operations: [{ op: "set", field: "所属阵营", value: "观星社" }],
+      }),
     ])
-    expect(parseCharacterProfile(await f.workspace.readMarkdown(f.root, path)).fields).toMatchObject({ 目标: "登顶", 年龄: 17 })
+    expect(parseCharacterProfile(await f.workspace.readMarkdown(f.root, path)).fields).toMatchObject({
+      目标: "登顶",
+      年龄: 17,
+      所属阵营: "观星社",
+    })
   })
 
   it("includes character JSON in catalog and history snapshots and restores it", async () => {

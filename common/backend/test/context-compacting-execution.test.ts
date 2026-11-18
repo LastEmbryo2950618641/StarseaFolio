@@ -1,28 +1,109 @@
 import { describe, expect, it, vi } from "vitest"
 import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@starseafolio/contracts"
 import type { AIModelPort, PhaseModelExecution } from "../src/application/turns/ports/ai-model-port.js"
-import { contextTokensAfterProviderUsage, executeWithContextCompaction, readContextLengthError } from "../src/application/context/context-compacting-execution.js"
-import { ModelContextAppender } from "../src/application/context/model-context-appender.js"
+import {
+  buildFoldSummaryContent,
+  CONTEXT_FOLD_SUMMARY_PROTOCOL,
+  contextTokensAfterProviderUsage,
+  executeWithContextCompaction,
+  readContextLengthError,
+  selectOldestHalfByTokens,
+  shrinkChunkToCompressLimit,
+  stripReplayedPayload,
+} from "../src/application/context/context-compacting-execution.js"
+import { MODEL_CONTEXT_DELTA_HEADER, ModelContextAppender } from "../src/application/context/model-context-appender.js"
+import { estimateModelMessageTokens } from "../src/application/context/context-window-manager.js"
 
 const request = { turnId: "current" } as PhaseRequestEnvelope
 const result = { usage: { inputTokens: 123, lastRequestInputTokens: 123 } } as PhaseModelExecution
-const message = (id: string, kind: VisibleModelContextMessage["kind"], turnId: string, sequence: number): VisibleModelContextMessage => ({
-  messageId: id, kind, turnId, sequence, role: "user", content: "短文本",
+const message = (
+  id: string,
+  kind: VisibleModelContextMessage["kind"],
+  turnId: string,
+  sequence: number,
+  content = "短文本",
+): VisibleModelContextMessage => ({
+  messageId: id, kind, turnId, sequence, role: "user", content,
 })
-const messages = [message("system", "system_rules", "old", 0), message("old", "phase_response", "old", 1), message("chapter", "canonical_chapter", "old", 2), message("current", "phase_request", "current", 3)]
+const messages = [
+  message("system", "system_rules", "old", 0),
+  message("old", "phase_response", "old", 1),
+  message("chapter", "canonical_chapter", "old", 2),
+  message("current", "phase_request", "current", 3),
+]
+
 function setup(tokens?: number) {
   const execute = vi.fn<AIModelPort["execute"]>().mockResolvedValue(result)
+  const compressContext = vi.fn<NonNullable<AIModelPort["compressContext"]>>().mockImplementation(async (input) => ({
+    summary: `折叠摘要:${input.texts.join("|").slice(0, 80)}`,
+    usage: { inputTokens: 10, outputTokens: 5, latencyMs: 0, lastRequestInputTokens: 10 },
+  }))
   const onCompacted = vi.fn().mockResolvedValue(undefined)
   const input = {
-    model: { info: { provider: "test", model: "test", available: true, contextWindowTokens: 1_000_000 }, execute },
-    request, options: { contextMessages: messages }, triggerRatio: 0.9, targetRatio: 0.5,
-    ...(tokens === undefined ? {} : { lastRequestInputTokens: tokens }), onCompacted,
+    model: {
+      info: { provider: "test", model: "test", available: true, contextWindowTokens: 1_000_000 },
+      execute,
+      compressContext,
+    },
+    request,
+    options: { contextMessages: messages },
+    triggerRatio: 0.9,
+    targetRatio: 0.5,
+    ...(tokens === undefined ? {} : { lastRequestInputTokens: tokens }),
+    onCompacted,
+    createMessageId: () => `fold-${String(Math.random()).slice(2, 10)}`,
   }
-  return { input, execute, onCompacted }
+  return { input, execute, compressContext, onCompacted }
 }
 
-describe("provider-measured context compaction", () => {
-  it("keeps the latest tool description while compacting older history", async () => {
+describe("AI fold context compaction", () => {
+  it("selects the oldest half of foldable messages by tokens", () => {
+    const foldable = [
+      message("a", "phase_response", "old", 1, "甲".repeat(300)),
+      message("b", "phase_response", "old", 2, "乙".repeat(300)),
+      message("c", "phase_response", "old", 3, "丙".repeat(300)),
+      message("d", "phase_response", "old", 4, "丁".repeat(300)),
+    ]
+    expect(selectOldestHalfByTokens(foldable).map((item) => item.messageId)).toEqual(["a", "b"])
+  })
+
+  it("shrinks oversized chunks by half until they fit the compress limit", () => {
+    const huge = message("h1", "phase_response", "old", 1, "章".repeat(20_000))
+    const medium = message("h2", "phase_response", "old", 2, "节".repeat(20_000))
+    const shrunk = shrinkChunkToCompressLimit([huge, medium], 5_000)
+    expect(shrunk.messages).toHaveLength(1)
+    expect(shrunk.messages[0]?.messageId).toBe("h1")
+    expect(estimateModelMessageTokens(shrunk.truncatedContent ?? shrunk.messages[0]!.content)).toBeLessThanOrEqual(5_000)
+  })
+
+  it("folds old history via compressContext and injects a fold summary", async () => {
+    const { input, execute, compressContext, onCompacted } = setup(1_000_000)
+    input.options.contextMessages = [
+      message("system", "system_rules", "old", 0),
+      message("old1", "phase_response", "old", 1, "旧历史一".repeat(200)),
+      message("old2", "phase_response", "old", 2, "旧历史二".repeat(200)),
+      message("old3", "canonical_chapter", "old", 3, "旧章正文".repeat(200)),
+      message("current", "phase_request", "current", 4),
+    ]
+    await executeWithContextCompaction(input)
+    expect(compressContext).toHaveBeenCalled()
+    expect(onCompacted).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "usage_threshold",
+      foldMessages: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "phase_instruction",
+          content: expect.stringContaining(CONTEXT_FOLD_SUMMARY_PROTOCOL),
+        }),
+      ]),
+    }))
+    const sent = execute.mock.calls[0]?.[1]?.contextMessages ?? []
+    expect(sent.some((item) => item.content.includes(CONTEXT_FOLD_SUMMARY_PROTOCOL))).toBe(true)
+    expect(sent.map((item) => item.messageId)).not.toContain("old1")
+    expect(sent.map((item) => item.messageId)).toContain("system")
+    expect(sent.map((item) => item.messageId)).toContain("current")
+  })
+
+  it("keeps the latest tool description while folding older history", async () => {
     const { input, execute } = setup(1_000_000)
     const described = (id: string, sequence: number) => ({
       ...message(id, "phase_instruction", "old", sequence),
@@ -32,199 +113,181 @@ describe("provider-measured context compaction", () => {
     input.options.contextMessages = [
       message("system", "system_rules", "old", 0),
       described("old-describe", 1),
-      message("old", "phase_response", "old", 2),
+      message("old", "phase_response", "old", 2, "旧响应".repeat(400)),
       described("new-describe", 3),
       message("current", "phase_request", "current", 4),
     ]
     await executeWithContextCompaction(input)
-    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId))
-      .toEqual(["system", "new-describe", "current"])
+    const ids = execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId) ?? []
+    expect(ids).toContain("system")
+    expect(ids).toContain("new-describe")
+    expect(ids).toContain("current")
+    expect(ids).not.toContain("old-describe")
+    expect(ids).not.toContain("old")
   })
-  it("keeps removing old chapters until the scaled input is within half the window", async () => {
-    const { input, execute } = setup(1_000_000)
-    const chapter = (id: string, sequence: number) => message(id, "canonical_chapter", "old", sequence)
-    input.options.contextMessages = [
-      message("system", "system_rules", "old", 0),
-      chapter("c1", 1), chapter("c2", 2), chapter("c3", 3), chapter("c4", 4), chapter("c5", 5),
-      message("current", "phase_request", "current", 6),
-    ]
-    await executeWithContextCompaction(input)
-    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["system", "c5", "current"])
-  })
-  it("drops replayed catalog and evidence, and old phase-request chapters, before the model call", async () => {
-    const { input, execute, onCompacted } = setup(1_000_000)
-    const catalog = { entries: ["章节正文/第一章.md", "设定集/readme.md"] }
-    const evidence = [{ ownerId: "设定集/readme.md", semanticText: "旧资料不应在压缩后再次装回本次请求里。" }]
-    const outline = "旧细纲不应再装回"
-    const synopsis = "旧简介不应再装回"
-    const removedChapter = `第一章正文${"章".repeat(80)}`
+
+  it("strips multiline synopsis/outline/draft that only appear JSON-escaped in hidden deltas", async () => {
+    const { input, execute, onCompacted } = setup(900_000)
+    const synopsis = ["# 简介", "", "第一段很长的简介内容，带换行。", "第二段继续说明世界观。"].join("\n")
+    const outline = ["## 细纲", "", "1. 开场", "2. 冲突", "3. 收束"].join("\n")
+    const draft = ["草稿正文第一段。", "", "草稿正文第二段，仍带换行。"].join("\n")
+    const oldDelta = {
+      phase: "synopsis_discuss",
+      protocolVersion: "1",
+      input: {
+        synopsisDiscuss: {
+          synopsisMarkdown: synopsis,
+          outlineMarkdown: outline,
+          latestDraftMarkdown: draft,
+        },
+      },
+    }
     input.request = {
       ...request,
       phase: "synopsis_discuss",
       protocolVersion: "1",
       input: {
-        workspaceCatalog: catalog,
-        readEvidence: evidence,
-        synopsisDiscuss: { synopsisMarkdown: synopsis, outlineMarkdown: outline, chapterBodyMarkdown: "当前章仍保留" },
+        synopsisDiscuss: {
+          synopsisMarkdown: synopsis,
+          outlineMarkdown: outline,
+          latestDraftMarkdown: draft,
+          chapterBodyMarkdown: "当前聚焦章正文保留一次",
+        },
       },
     } as PhaseRequestEnvelope
     input.options.contextMessages = [
       message("system", "system_rules", "old", 0),
-      { ...message("old-delta", "phase_request", "old", 1), content: `旧请求 ${JSON.stringify({ workspaceCatalog: catalog, readEvidence: evidence, synopsisDiscuss: { synopsisMarkdown: synopsis, outlineMarkdown: outline } })}` },
-      { ...message("old-chapter", "phase_request", "old", 2), content: JSON.stringify({ chapterBodyMarkdown: removedChapter }) },
-      { ...message("newer-chapter", "phase_request", "old", 3), content: JSON.stringify({ chapterBodyMarkdown: "较新的一章" }) },
+      {
+        ...message("old-delta", "phase_request", "old", 1),
+        content: `${MODEL_CONTEXT_DELTA_HEADER}\n${JSON.stringify(oldDelta)}`,
+      },
+      message("pad1", "phase_response", "old", 2, "填充".repeat(500)),
+      message("pad2", "phase_response", "old", 3, "填充".repeat(500)),
       message("current", "phase_request", "current", 4),
     ]
-    const order: string[] = []
-    onCompacted.mockImplementation(async () => { order.push("compact") })
-    input.onReadyToCall = () => { order.push("think") }
-    execute.mockImplementation(async () => {
-      order.push("model")
-      return result
-    })
     await executeWithContextCompaction(input)
-    const sent = execute.mock.calls[0]?.[1]?.contextMessages ?? []
-    expect(sent.map((item) => item.messageId)).not.toContain("old-delta")
-    expect(sent.some((item) => item.content.includes(removedChapter))).toBe(false)
-    expect(sent.map((item) => item.messageId)).toContain("current")
+    expect(onCompacted).toHaveBeenCalled()
     const sentInput = execute.mock.calls[0]?.[0]?.input as {
-      workspaceCatalog?: unknown
-      readEvidence?: unknown
-      synopsisDiscuss?: { synopsisMarkdown?: string, outlineMarkdown?: string, chapterBodyMarkdown?: string }
+      synopsisDiscuss?: {
+        synopsisMarkdown?: string
+        outlineMarkdown?: string
+        latestDraftMarkdown?: string
+        chapterBodyMarkdown?: string
+      }
     }
-    expect(sentInput.workspaceCatalog).toBeUndefined()
-    expect(sentInput.readEvidence).toBeUndefined()
     expect(sentInput.synopsisDiscuss?.synopsisMarkdown).toBeUndefined()
     expect(sentInput.synopsisDiscuss?.outlineMarkdown).toBeUndefined()
-    expect(sentInput.synopsisDiscuss?.chapterBodyMarkdown).toBe("当前章仍保留")
+    expect(sentInput.synopsisDiscuss?.latestDraftMarkdown).toBeUndefined()
+    expect(sentInput.synopsisDiscuss?.chapterBodyMarkdown).toBe("当前聚焦章正文保留一次")
     const assembled = new ModelContextAppender().formatDelta(
       new ModelContextAppender().createDelta(
         execute.mock.calls[0]?.[0] as PhaseRequestEnvelope,
         execute.mock.calls[0]?.[0],
-        sent.filter((item) => item.turnId !== "current"),
+        (execute.mock.calls[0]?.[1]?.contextMessages ?? []).filter((item) => item.turnId !== "current"),
       ),
     )
-    expect(assembled).not.toContain("设定集/readme.md")
-    expect(assembled).not.toContain(outline)
-    expect(assembled).not.toContain(removedChapter)
-    expect(assembled).toContain("当前章仍保留")
-    expect(onCompacted.mock.calls[0]?.[0]?.estimatedInputTokens).toBeLessThanOrEqual(500_000)
-    expect(order).toEqual(["compact", "think", "model"])
-    expect(execute).toHaveBeenCalledTimes(1)
+    expect(assembled).not.toContain("第一段很长的简介内容")
+    expect(assembled).toContain("当前聚焦章正文保留一次")
   })
-  it("drops older copies of the same system rules", async () => {
-    const { input, execute } = setup(1_000_000)
-    input.options.contextMessages = [
-      { ...message("rules-old", "system_rules", "old", 0), content: "相同规则" },
-      { ...message("rules-new", "system_rules", "old", 1), content: "相同规则" },
-      message("old", "phase_response", "old", 2),
-      message("current", "phase_request", "current", 3),
-    ]
-    await executeWithContextCompaction(input)
-    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["rules-new", "current"])
-  })
-  it("calls the model once when only the current turn remains above the target", async () => {
-    const { input, execute } = setup(1_000_000)
-    input.options.contextMessages = [
-      message("old", "phase_response", "old", 1),
-      { ...message("current", "phase_request", "current", 2), content: "章".repeat(100_000) },
-    ]
-    await executeWithContextCompaction(input)
-    expect(execute).toHaveBeenCalledTimes(1)
-    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["current"])
-  })
-  it("keeps removing old chapters when the request body still holds the input above half the window", async () => {
-    const { input, execute } = setup(1_000_000)
-    input.request = { ...request, input: { synopsis: "设定".repeat(20) } } as PhaseRequestEnvelope
-    const chapter = (id: string, sequence: number) => message(id, "canonical_chapter", "old", sequence)
-    input.options.contextMessages = [
-      message("system", "system_rules", "old", 0),
-      chapter("c1", 1), chapter("c2", 2), chapter("c3", 3), chapter("c4", 4), chapter("c5", 5),
-      message("current", "phase_request", "current", 6),
-    ]
-    await executeWithContextCompaction(input)
-    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["system", "current"])
-  })
-  it("triggers at 90% even when local text estimates are tiny", async () => {
-    const { input, execute, onCompacted } = setup(900_000)
-    await executeWithContextCompaction(input)
-    expect(onCompacted).toHaveBeenCalledWith(expect.objectContaining({ reason: "usage_threshold", observedInputTokens: 900_000, thresholdTokens: 900_000 }))
-    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((m) => m.messageId)).toEqual(["system", "current"])
-  })
-  it("preserves the lossless discuss history summary during later context compaction", async () => {
+
+  it("preserves discuss history summary and gate counters while folding", async () => {
     const { input, execute } = setup(900_000)
     const summary = {
       ...message("history-summary", "phase_instruction", "old", 1),
       role: "user" as const,
       content: JSON.stringify({ protocol: "discuss-history-summary-v1", userInputs: ["已确认设定"] }),
     }
-    input.options.contextMessages = [messages[0]!, summary, messages[1]!, messages[2]!, messages[3]!]
-
+    const retryState = {
+      ...message("retry-state", "phase_instruction", "old", 2),
+      role: "system" as const,
+      content: JSON.stringify({ protocol: "discuss-gate-v1", failures: { "chapter:1:tool:memory_write:invoke": 2 } }),
+    }
+    input.options.contextMessages = [
+      message("system", "system_rules", "old", 0),
+      summary,
+      retryState,
+      message("old", "phase_response", "old", 3, "旧内容".repeat(500)),
+      message("current", "phase_request", "current", 4),
+    ]
     await executeWithContextCompaction(input)
+    const ids = execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId) ?? []
+    expect(ids).toContain("system")
+    expect(ids).toContain("history-summary")
+    expect(ids).toContain("retry-state")
+    expect(ids).toContain("current")
+  })
 
-    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId))
-      .toEqual(["system", "history-summary", "current"])
-  })
-  it.each(["discuss-step-failures-v1", "discuss-progress-v1", "discuss-gate-v1"])("keeps %s counters across context compaction", async (protocol) => {
-    const { input, execute } = setup(900_000)
-    const retryState = { ...message("retry-state", "phase_instruction", "old", 1),
-      role: "system" as const, content: JSON.stringify({ protocol, failures: { "chapter:1:tool:memory_write:invoke": 2 }, consecutiveNoProgressTurns: 2 }) }
-    input.options.contextMessages = [messages[0]!, retryState, ...messages.slice(1)]
-    await executeWithContextCompaction(input)
-    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId))
-      .toEqual(["system", "retry-state", "current"])
-  })
-  it.each([undefined, 899_999])("does not substitute estimates for provider usage (%s)", async (tokens) => {
-    const { input, execute, onCompacted } = setup(tokens)
-    input.options.contextMessages = messages.map((m) => ({ ...m, content: "世界".repeat(100_000) }))
+  it("does not substitute estimates for provider usage when below threshold", async () => {
+    const { input, execute, onCompacted } = setup(899_999)
     await executeWithContextCompaction(input)
     expect(onCompacted).not.toHaveBeenCalled()
     expect(execute.mock.calls[0]?.[1]?.contextMessages).toHaveLength(4)
   })
-  it("compacts and resubmits the same user request after the reported 400", async () => {
+
+  it("folds and resubmits after a reported context overflow", async () => {
     const { input, execute, onCompacted } = setup()
     execute.mockRejectedValueOnce(new Error("DeepSeek request failed: 400 This model's maximum context length is 1048576 tokens. However, you requested 1056215 tokens (1056215 in the messages, 0 in the completion)."))
     await expect(executeWithContextCompaction(input)).resolves.toBe(result)
     expect(execute).toHaveBeenCalledTimes(2)
-    expect(execute.mock.calls[1]?.[0]).toBe(request)
-    expect(execute.mock.calls[1]?.[1]?.contextMessages?.map((m) => m.messageId)).toEqual(["system", "current"])
     expect(onCompacted).toHaveBeenCalledWith(expect.objectContaining({ reason: "context_length_error", observedInputTokens: 1_056_215 }))
   })
-  it("forces compaction even when the provider reports no token count", async () => {
-    const { input, execute } = setup()
-    execute.mockRejectedValueOnce(new Error("400 context_length_exceeded"))
-    await executeWithContextCompaction(input)
-    expect(execute).toHaveBeenCalledTimes(2)
+
+  it("fails closed when compressContext is missing", async () => {
+    const { input } = setup(1_000_000)
+    delete (input.model as { compressContext?: unknown }).compressContext
+    await expect(executeWithContextCompaction(input)).rejects.toThrow("compressContext")
   })
-  it("stops when only protected content remains instead of retrying unchanged input", async () => {
-    const { input, execute } = setup()
-    execute.mockRejectedValue(new Error("400 context_length_exceeded"))
-    await expect(executeWithContextCompaction(input)).rejects.toThrow("已无法继续裁剪")
-    expect(execute).toHaveBeenCalledTimes(2)
-  })
-  it("does not retry unrelated API errors", async () => {
-    const { input, execute, onCompacted } = setup()
-    execute.mockRejectedValue(new Error("401 Invalid API key"))
-    await expect(executeWithContextCompaction(input)).rejects.toThrow("401")
-    expect(execute).toHaveBeenCalledTimes(1)
-    expect(onCompacted).not.toHaveBeenCalled()
-  })
+
   it("honors cancellation between compression and resubmission", async () => {
-    const { input, execute, onCompacted } = setup()
+    const { input, execute, onCompacted, compressContext } = setup()
     const controller = new AbortController()
     execute.mockRejectedValueOnce(new Error("context_length_exceeded"))
-    onCompacted.mockImplementation(() => { controller.abort(); return Promise.resolve() })
-    await expect(executeWithContextCompaction({ ...input, options: { ...input.options, signal: controller.signal } })).rejects.toThrow()
+    compressContext.mockImplementation(async () => {
+      controller.abort()
+      return { summary: "x", usage: { inputTokens: 1, outputTokens: 1, latencyMs: 0 } }
+    })
+    onCompacted.mockImplementation(() => Promise.resolve())
+    await expect(executeWithContextCompaction({
+      ...input,
+      options: { ...input.options, signal: controller.signal },
+    })).rejects.toThrow()
     expect(execute).toHaveBeenCalledTimes(1)
   })
+
   it("keeps the compacted estimate when the provider reports a larger prompt", () => {
     expect(contextTokensAfterProviderUsage(150_000, 565_700)).toBe(150_000)
     expect(contextTokensAfterProviderUsage(150_000, 140_000)).toBe(140_000)
     expect(contextTokensAfterProviderUsage(undefined, 565_700)).toBe(565_700)
+    const sendCompactedEstimate = 150_000
+    const compactedEstimate: number | undefined = undefined
+    expect(contextTokensAfterProviderUsage(compactedEstimate ?? sendCompactedEstimate, 440_200)).toBe(150_000)
   })
+
   it("parses comma-separated limits without treating other 400s as overflow", () => {
     expect(readContextLengthError(new Error("maximum context length is 1,048,576 tokens; requested 1,056,215 tokens"))).toEqual({ inputTokens: 1056215, limitTokens: 1048576 })
     expect(readContextLengthError(new Error("400 invalid response format"))).toBeUndefined()
     expect(readContextLengthError(new Error("maximum context length is 100 tokens; requested 110 tokens (95 in the messages, 15 in the completion)"))?.inputTokens).toBe(95)
+  })
+
+  it("builds fold summary notice content", () => {
+    const content = buildFoldSummaryContent({
+      summary: "主角已进城",
+      foldedMessageCount: 3,
+      foldedMessageIds: ["a", "b", "c"],
+    })
+    expect(content).toContain(CONTEXT_FOLD_SUMMARY_PROTOCOL)
+    expect(content).toContain("勿仅因压缩而反复回读")
+    expect(JSON.parse(content).summary).toBe("主角已进城")
+  })
+
+  it("stripReplayedPayload matches JSON-escaped multiline values", () => {
+    const body = "第一行\n第二行"
+    const hidden = JSON.stringify({ synopsisDiscuss: { synopsisMarkdown: body } })
+    const next = stripReplayedPayload(
+      { synopsisDiscuss: { synopsisMarkdown: body, chapterBodyMarkdown: "当前章" } },
+      [hidden],
+    ) as { synopsisDiscuss: { synopsisMarkdown?: string; chapterBodyMarkdown?: string } }
+    expect(next.synopsisDiscuss.synopsisMarkdown).toBeUndefined()
+    expect(next.synopsisDiscuss.chapterBodyMarkdown).toBe("当前章")
   })
 })

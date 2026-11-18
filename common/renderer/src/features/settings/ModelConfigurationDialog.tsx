@@ -4,24 +4,17 @@ import { ArrowLeft, ChevronRight, Plus, CheckCircle2, Eye, EyeOff, KeyRound, Loa
 import type { ModelDescriptor, ModelListResult } from "@starseafolio/contracts"
 
 import { listModelCatalog } from "../../api/client.js"
+import { MobileBottomSheet } from "../../components/MobileBottomSheet.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
+import {
+  API_PROTOCOL_OPTIONS,
+  createProfileFromPreset,
+  MODEL_PROVIDER_PRESETS,
+  type ModelProfile,
+  type ModelProviderPresetId,
+} from "./model-provider-presets.js"
 
-export type ModelProfile = Readonly<{
-  id: string
-  name: string
-  baseUrl: string
-  model: string
-  credentialRef: string
-  apiProtocol: "openai_chat_completions" | "openai_responses"
-  contextWindowTokens: number
-  apiKey: string
-  hasApiKey: boolean
-  thinkingModeEnabled: boolean
-  reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-  jsonModeEnabled: boolean
-  disableResponseStorage: boolean
-  serviceTier: "auto" | "default" | "flex" | "priority" | "fast"
-}>
+export type { ModelProfile } from "./model-provider-presets.js"
 
 type Props = Readonly<{
   profiles: readonly ModelProfile[]
@@ -41,6 +34,7 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   const [drafts, setDrafts] = useState<readonly ModelProfile[]>(profiles)
   const [selectedId, setSelectedId] = useState(activeProfileId)
   const [showList, setShowList] = useState(true)
+  const [showProviderSheet, setShowProviderSheet] = useState(false)
   const [nextActiveId, setNextActiveId] = useState(activeProfileId)
   const [showApiKey, setShowApiKey] = useState(false)
   const [testState, setTestState] = useState<TestState>("idle")
@@ -95,13 +89,14 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return
+      if (showProviderSheet) return
       event.preventDefault()
       if (showList) onClose()
       else setShowList(true)
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => { window.removeEventListener("keydown", handleKeyDown) }
-  }, [onClose, showList])
+  }, [onClose, showList, showProviderSheet])
 
   useEffect(() => {
     if (showList || selectedProfile === undefined || !isOfficialDeepSeekEndpoint(selectedProfile.baseUrl)) return
@@ -133,34 +128,29 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
       return "请输入有效的 Base URL"
     }
     if (requireModel && profile.model.trim().length === 0) return "请选择模型"
-    if (!Number.isInteger(profile.contextWindowTokens) || profile.contextWindowTokens <= 0 || profile.contextWindowTokens > 2_000_000) return "最大上下文必须是 1 到 2,000,000 之间的整数"
+    if (!Number.isInteger(profile.contextWindowTokens) || profile.contextWindowTokens <= 0 || profile.contextWindowTokens > 2_000_000) {
+      return "最大上下文必须是 1 到 2,000,000 之间的整数"
+    }
     if (profile.apiKey.trim().length === 0 && !profile.hasApiKey) return "请输入 API Key"
     return undefined
   }
 
-  const addProfile = (): void => {
-    const profile: ModelProfile = {
-      id: crypto.randomUUID(),
-      name: "",
-      baseUrl: "",
-      model: "",
-      credentialRef: `model-profile:${crypto.randomUUID()}`,
-      apiProtocol: "openai_responses",
-      contextWindowTokens: 1_000_000,
-      apiKey: "",
-      hasApiKey: false,
-      thinkingModeEnabled: true,
-      reasoningEffort: "high",
-      jsonModeEnabled: false,
-      disableResponseStorage: true,
-      serviceTier: "auto",
-    }
+  const openProviderSheet = (): void => {
+    if (saving) return
+    setShowProviderSheet(true)
+  }
+
+  const addProfileFromPreset = (presetId: ModelProviderPresetId): void => {
+    const profile = createProfileFromPreset(presetId)
     setDrafts((current) => [...current, profile])
     setSelectedId(profile.id)
+    setShowProviderSheet(false)
     setShowList(false)
     setShowApiKey(false)
     setTestState("idle")
-    setMessage("新配置尚未保存")
+    setMessage(presetId === "custom"
+      ? "自定义配置已创建：填写 API Key 与服务地址即可，JSON Mode 默认关闭"
+      : `${profile.name} 预设已填入，核对后填写 API Key 即可`)
   }
 
   const removeProfile = (profileId: string): void => {
@@ -225,10 +215,10 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   return <section className="model-dialog model-dialog-wide settings-drilldown" data-view={showList ? "list" : "detail"} data-testid="model-configuration-dialog" role="region" aria-labelledby="model-dialog-title">
       <header className="model-dialog-header">
         <button type="button" className="settings-back" autoFocus aria-label={showList ? "返回创作界面" : "返回模型配置列表"} onClick={() => { if (showList) onClose(); else setShowList(true) }}><ArrowLeft size={18} /></button>
-        <div><strong id="model-dialog-title">{showList ? "模型配置" : selectedProfile?.name || "添加模型配置"}</strong><span>{showList ? "选择配置进行编辑，或添加新的模型服务" : "管理并切换 OpenAI 兼容模型接口"}</span></div>
+        <div><strong id="model-dialog-title">{showList ? "模型配置" : selectedProfile?.name || "添加模型配置"}</strong><span>{showList ? "选择配置进行编辑，或添加新的模型服务" : "两种 API 协议均可选；厂商预设会自动填充差异项"}</span></div>
       </header>
       <div className="settings-options-page" hidden={!showList} data-testid="model-configuration-list">
-        <button type="button" className="settings-option-row settings-option-add" onClick={addProfile} disabled={saving}><Plus size={20} /><span><strong>添加配置</strong><small>新增一个模型服务</small></span><ChevronRight size={18} /></button>
+        <button type="button" className="settings-option-row settings-option-add" data-testid="model-add-profile" onClick={openProviderSheet} disabled={saving}><Plus size={20} /><span><strong>添加配置</strong><small>选择厂商或自定义服务</small></span><ChevronRight size={18} /></button>
         {drafts.map((profile, index) => <button key={profile.id} type="button" className="settings-option-row" disabled={saving} onClick={() => {
           setSelectedId(profile.id); setShowList(false); setShowApiKey(false); setTestState("idle"); setMessage("选择一个配置进行编辑")
         }}><Server size={20} /><span><strong>{profile.name || `未命名配置 ${String(index + 1)}`}</strong><small>{profile.model || "尚未选择模型"}{profile.id === nextActiveId ? " · 当前使用" : ""}</small></span><ChevronRight size={18} /></button>)}
@@ -240,7 +230,7 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
             <select id="model-profile-choice" aria-label="选择模型配置" data-testid="model-profile-selector"
               value={selectedProfile?.id ?? ""} disabled={saving}
               onChange={(event) => {
-                if (event.target.value === "__add_profile__") { addProfile(); return }
+                if (event.target.value === "__add_profile__") { openProviderSheet(); return }
                 setSelectedId(event.target.value)
                 setShowApiKey(false)
                 setTestState("idle")
@@ -271,17 +261,20 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
               <input value={selectedProfile.name} onChange={(event) => { updateSelected({ name: event.target.value }); }} placeholder="例如：DeepSeek 主账号" spellCheck={false} />
             </label>
             <label className="model-field">
-              <span>API 协议<small>按服务能力选择，不依赖供应商品牌</small></span>
-              <select className="model-enum-select" value={selectedProfile.apiProtocol} onChange={(event) => { updateSelected({ apiProtocol: event.target.value as ModelProfile["apiProtocol"] }); }}>
-                <option value="openai_responses">OpenAI Responses</option><option value="openai_chat_completions">OpenAI Chat Completions</option>
+              <span>API 协议<small>两种协议均支持，按服务能力选择，不绑定单一品牌</small></span>
+              <select className="model-enum-select" data-testid="model-api-protocol" value={selectedProfile.apiProtocol} onChange={(event) => { updateSelected({ apiProtocol: event.target.value as ModelProfile["apiProtocol"] }); }}>
+                {API_PROTOCOL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
+              <small className="model-field-hint">{API_PROTOCOL_OPTIONS.find((option) => option.value === selectedProfile.apiProtocol)?.hint}</small>
             </label>
             <label className="model-field">
               <span>Base URL<small>模型服务的 API 根地址</small></span>
               <input value={selectedProfile.baseUrl} onChange={(event) => { updateSelected({ baseUrl: event.target.value }); }} placeholder="https://api.deepseek.com" spellCheck={false} />
             </label>
             <label className="model-field">
-              <span>API Key<small>单独保存在本机，不写入项目 Markdown</small></span>
+              <span>API Key<small>单独保存在本机；自定义配置只要填好 Key 即可生效，不强制 JSON Mode</small></span>
               <div className="secret-input"><KeyRound size={15} /><input type={showApiKey ? "text" : "password"} value={selectedProfile.apiKey} onChange={(event) => { updateSelected({ apiKey: event.target.value, hasApiKey: event.target.value.trim().length > 0 }); }} placeholder={selectedProfile.hasApiKey ? "已保存（重新输入可替换）" : "输入 API Key"} autoComplete="off" spellCheck={false} /><UiTooltip label={showApiKey ? "隐藏密钥" : "显示密钥"}><button type="button" aria-label={showApiKey ? "隐藏密钥" : "显示密钥"} onClick={() => { setShowApiKey((visible) => !visible); }}>{showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}</button></UiTooltip></div>
             </label>
             <label className="model-field">
@@ -319,7 +312,7 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
               <button className={`model-toggle ${selectedProfile.disableResponseStorage ? "" : "enabled"}`} type="button" role="switch" aria-checked={!selectedProfile.disableResponseStorage} onClick={() => { updateSelected({ disableResponseStorage: !selectedProfile.disableResponseStorage }); }}><i /><strong>{selectedProfile.disableResponseStorage ? "已关闭" : "已开启"}</strong></button>
             </div>
             <div className="model-field">
-              <span>JSON Mode<small>默认关闭；输出仍由业务 Schema 校验</small></span>
+              <span>JSON Mode<small>默认关闭，非强制；输出仍由业务 Schema 校验</small></span>
               <button className={`model-toggle ${selectedProfile.jsonModeEnabled ? "enabled" : ""}`} type="button" role="switch" aria-checked={selectedProfile.jsonModeEnabled} onClick={() => { updateSelected({ jsonModeEnabled: !selectedProfile.jsonModeEnabled }); }}><i /><strong>{selectedProfile.jsonModeEnabled ? "已开启" : "已关闭"}</strong></button>
             </div>
             <div className={`model-test-status ${testState}`}>
@@ -335,6 +328,28 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
         <button className="secondary-command" onClick={activateSelected}>设为当前</button></>}
         <button className="dialog-primary-command" onClick={() => void save()} disabled={saving}>{saving ? "保存中..." : "保存更改"}</button>
       </footer>
+      {showProviderSheet ? <MobileBottomSheet title="选择模型厂商" name="model-provider" onClose={() => { setShowProviderSheet(false) }}>
+        <div className="model-provider-sheet" data-testid="model-provider-sheet">
+          <p className="model-provider-sheet-lead">选择常用厂商自动填充协议与思考/JSON 等差异项；自定义只需填 Key 与地址。</p>
+          {MODEL_PROVIDER_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className="model-provider-option"
+              data-testid={`model-provider-${preset.id}`}
+              onClick={() => { addProfileFromPreset(preset.id) }}
+            >
+              <Server size={20} />
+              <span>
+                <strong>{preset.name}</strong>
+                <small>{preset.description}</small>
+                <em>{preset.highlights.join(" · ")}</em>
+              </span>
+              <ChevronRight size={18} />
+            </button>
+          ))}
+        </div>
+      </MobileBottomSheet> : null}
     </section>
 }
 

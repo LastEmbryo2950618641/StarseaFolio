@@ -300,6 +300,12 @@ export interface TurnPersistencePort {
   readLatestContextInputTokens?(chainId: string): Promise<number | undefined>
   listVisibleModelContextEvidence(chainId: string): Promise<readonly TurnReadEvidence[]>
   hideModelContextMessages(chainId: string, messageIds: readonly string[], hiddenAtMs: number): Promise<void>
+  appendModelContextMessages(input: Readonly<{
+    chainId: string
+    projectId: ProjectId
+    createdAtMs: number
+    messages: readonly ModelContextMessageDraft[]
+  }>): Promise<void>
   createContext(input: CreateTurnContextRecord): Promise<void>
   initializeRuntimeBudgetWindows(input: InitializeRuntimeBudgetWindowsInput): Promise<void>
   readRuntimeBudgetUsage(taskId: string, nowMs: number): Promise<RuntimeBudgetUsage>

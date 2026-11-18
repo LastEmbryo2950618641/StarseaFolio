@@ -101,6 +101,10 @@ class RecordingFakeModel implements AIModelPort {
     return this.inner.info
   }
 
+  public compressContext(input: Parameters<FakeAiModelAdapter["compressContext"]>[0]) {
+    return this.inner.compressContext(input)
+  }
+
   public async execute(
     request: PhaseRequestEnvelope,
     options?: ModelExecutionOptions,
@@ -143,6 +147,10 @@ class ReactThenContinueModel implements AIModelPort {
 
   public get info() {
     return this.recorder.info
+  }
+
+  public compressContext(input: Parameters<RecordingFakeModel["compressContext"]>[0]) {
+    return this.recorder.compressContext(input)
   }
 
   public async execute(

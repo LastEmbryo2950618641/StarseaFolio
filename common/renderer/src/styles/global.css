@@ -3656,6 +3656,31 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
 .model-test-status.error { color: var(--danger-text); }
 .model-dialog-footer { min-height: 54px; display: flex; align-items: center; gap: 8px; padding: 9px 12px 9px 18px; border-top: 1px solid var(--border); background: var(--bg-sidebar); }
 .model-dialog-footer p { margin: 0 auto 0 0; color: var(--text-faint); font-size: 9.5px; }
+.model-field-hint { display: block; margin-top: 6px; color: var(--text-faint); font-size: 11px; line-height: 1.35; }
+.model-provider-sheet { display: grid; gap: 10px; }
+.model-provider-sheet-lead { margin: 0 0 4px; color: var(--text-muted); font-size: 13px; line-height: 1.45; }
+.model-provider-option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 72px;
+  padding: 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-primary);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.model-provider-option:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.model-provider-option span { display: grid; gap: 4px; min-width: 0; }
+.model-provider-option strong { font-size: 15px; }
+.model-provider-option small,
+.model-provider-option em { color: var(--text-muted); font-size: 12px; font-style: normal; line-height: 1.35; }
+.model-provider-option em { color: var(--text-faint); }
+.mobile-bottom-sheet[aria-label="选择模型厂商"] { max-width: 560px; margin-inline: auto; width: min(100%, 560px); }
 .secondary-command, .dialog-primary-command { height: 31px; padding: 0 13px; border-radius: 8px; font-size: 11px; }
 .secondary-command { border: 1px solid var(--border); background: var(--bg-active); color: var(--text-secondary); }
 .secondary-command:hover { background: var(--bg-hover); color: var(--text); }

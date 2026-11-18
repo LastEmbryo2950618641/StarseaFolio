@@ -72,6 +72,6 @@ JSON 外层固定为 schemaVersion: 1 与 fields 对象。程序以两个空格�
 
 ## AI 操作
 先读取已有 JSON 与本规则。使用 character_update 工具：首次 describe 获取参数，然后 invoke。创建 mode=create，更新 mode=update；relativePath 为 设定集/人物/姓名.json；operations 为字段操作列表。
-set 操作示例：{"op":"set","field":"所属阵营","value":"观星社"}；delete 操作示例：{"op":"delete","field":"旧称号"}。不传完整 JSON 文本，不使用 markdown 参数。修改嵌套资料时先读取该字段，再仅提交该字段的新值；保留其他内容。读取结果中的 content 可作为 expectedContent 防止并发覆盖。
+set 操作示例：{"op":"set","field":"所属阵营","value":"观星社"}；delete 操作示例：{"op":"delete","field":"旧称号"}。不传完整 JSON 文本，不使用 markdown 参数。修改嵌套资料时先读取该字段，再仅提交该字段的新值；保留其他内容。读取结果中的 content 可作为 expectedContent 提示基线；若磁盘已有更新，服务端会按写入锁顺序重读最新内容后再叠加本次操作，不会因并发直接失败。
 用户已确认的主角核心、已发布正文事实及原作证据优先；不得擅自覆盖。新增角色准备与后续修订都使用此工具，工具实际成功后才宣布写入。
 `

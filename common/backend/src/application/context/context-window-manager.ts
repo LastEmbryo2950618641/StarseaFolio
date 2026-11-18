@@ -3,7 +3,8 @@ import type { ModelContextMessage } from "@starseafolio/contracts"
 const MODEL_MESSAGE_OVERHEAD_TOKENS = 8
 
 export type ContextCompactionPlan = Readonly<{
-  phase: "none" | "non_narrative" | "chapter"
+  /** Mechanical drop phases are retired; AI fold runs via foldContextMessages. */
+  phase: "none" | "ai_fold_required"
   hiddenMessageIds: readonly string[]
   visibleMessages: readonly ModelContextMessage[]
   estimatedTokens: number
@@ -24,6 +25,9 @@ export type ContextCompactionInput = Readonly<{
   force?: boolean
 }>
 
+/**
+ * Estimates whether AI fold is required. Does not hide messages — use foldContextMessages.
+ */
 export class ContextWindowManager {
   public plan(input: ContextCompactionInput): ContextCompactionPlan {
     const thresholdTokens = Math.max(1, Math.floor(input.contextWindowTokens * input.triggerRatio))
@@ -47,71 +51,31 @@ export class ContextWindowManager {
       }
     }
     if (input.force !== true && initialTokens < thresholdTokens) {
-      return completePlan("none", [], currentMessages, initialTokens, thresholdTokens, targetTokens, protectedTokens)
+      return {
+        phase: "none",
+        hiddenMessageIds: [],
+        visibleMessages: currentMessages,
+        estimatedTokens: initialTokens,
+        thresholdTokens,
+        targetTokens,
+        protectedTokens,
+        blocked: false,
+      }
     }
-
-    const nonNarrative = currentMessages.filter((message) => (
-      !isProtected(message, input.currentTurnId) && !isNarrativeChapterMessage(message.kind)
-    ))
-    const firstVisible = currentMessages.filter((message) => !nonNarrative.includes(message))
-    const firstTokens = sumTokens(firstVisible) + input.incomingTokenEstimate
-    if (firstTokens <= targetTokens) {
-      return completePlan("non_narrative", nonNarrative.map((message) => message.messageId), firstVisible, firstTokens, thresholdTokens, targetTokens, protectedTokens)
-    }
-
-    const oldChapters = firstVisible
-      .filter((message) => isNarrativeChapterMessage(message.kind) && !isCurrentTurn(message, input.currentTurnId))
-      .sort((left, right) => left.sequence - right.sequence)
-    const hiddenMessageIds = nonNarrative.map((message) => message.messageId)
-    const secondVisible = [...firstVisible]
-    let estimatedTokens = firstTokens
-    for (const chapter of oldChapters) {
-      if (estimatedTokens <= targetTokens) break
-      const index = secondVisible.findIndex((message) => message.messageId === chapter.messageId)
-      if (index >= 0) secondVisible.splice(index, 1)
-      hiddenMessageIds.push(chapter.messageId)
-      estimatedTokens -= chapter.tokenEstimate
-    }
-    return completePlan(
-      "chapter",
-      hiddenMessageIds,
-      secondVisible,
-      estimatedTokens,
+    return {
+      phase: initialTokens > targetTokens ? "ai_fold_required" : "none",
+      hiddenMessageIds: [],
+      visibleMessages: currentMessages,
+      estimatedTokens: initialTokens,
       thresholdTokens,
       targetTokens,
       protectedTokens,
-      estimatedTokens > targetTokens
-        ? "Protected current-turn content prevents reaching the configured compression target"
-        : undefined,
-    )
+      blocked: false,
+      ...(initialTokens > targetTokens
+        ? { reason: "Visible context exceeds the compression target; run AI fold compaction" }
+        : {}),
+    }
   }
-}
-
-function completePlan(
-  phase: ContextCompactionPlan["phase"],
-  hiddenMessageIds: readonly string[],
-  visibleMessages: readonly ModelContextMessage[],
-  estimatedTokens: number,
-  thresholdTokens: number,
-  targetTokens: number,
-  protectedTokens: number,
-  reason?: string,
-): ContextCompactionPlan {
-  return {
-    phase,
-    hiddenMessageIds,
-    visibleMessages,
-    estimatedTokens,
-    thresholdTokens,
-    targetTokens,
-    protectedTokens,
-    blocked: false,
-    ...(reason === undefined ? {} : { reason }),
-  }
-}
-
-function isNarrativeChapterMessage(kind: ModelContextMessage["kind"]): boolean {
-  return kind === "canonical_chapter" || kind === "chapter_revision"
 }
 
 function isProtected(message: ModelContextMessage, currentTurnId: string | undefined): boolean {

@@ -67,9 +67,21 @@ export type AIModelInfo = Readonly<{
   detail?: string
 }>
 
+export type ContextCompressionInput = Readonly<{
+  texts: readonly string[]
+  signal?: AbortSignal
+}>
+
+export type ContextCompressionResult = Readonly<{
+  summary: string
+  usage: PhaseModelUsage
+}>
+
 export interface AIModelPort {
   readonly info?: AIModelInfo
   execute(request: PhaseRequestEnvelope, options?: ModelExecutionOptions): Promise<PhaseModelExecution>
+  /** Fold old context texts into a shorter continuity summary. Not a phase envelope call. */
+  compressContext?(input: ContextCompressionInput): Promise<ContextCompressionResult>
 }
 
 export type PromptResource = Readonly<{

@@ -20,6 +20,8 @@ import {
 
 import type {
   AIModelPort,
+  ContextCompressionInput,
+  ContextCompressionResult,
   ModelExecutionOptions,
   PhaseModelExecution,
   PromptResourcePort,
@@ -105,6 +107,53 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       contextWindowTokens: config.contextWindowTokens,
     } as const
     this.clientPromise = client === undefined ? this.createClient() : Promise.resolve(client)
+  }
+
+  public async compressContext(input: ContextCompressionInput): Promise<ContextCompressionResult> {
+    input.signal?.throwIfAborted()
+    const client = await this.clientPromise
+    const body = input.texts.map((text, index) => `### 片段 ${String(index + 1)}\n${text}`).join("\n\n")
+    const messages: DeepSeekMessage[] = [
+      {
+        role: "system",
+        content: [
+          "你是小说创作上下文压缩器。将给定历史上下文折叠为更短的连续性摘要。",
+          "必须保留：剧情事实、人物关系、未决任务、用户硬约束、已确认设定要点。",
+          "丢弃：重复 schema、目录噪声、工具协议样板、可从工作区正文再读的大段原文。",
+          "只输出摘要正文，不要 Markdown 围栏，不要解释压缩过程。",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: `请压缩以下上下文片段：\n\n${body}`,
+      },
+    ]
+    const startedAt = Date.now()
+    const response = await this.completeWithRetry(client, {
+      model: this.config.model,
+      messages,
+      thinking: { type: "disabled" },
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      maxTokens: 4_096,
+    })
+    const summary = (response.content ?? "").trim()
+    if (summary.length === 0) {
+      throw new DeepSeekModelError("response", "Context compression returned empty content", response.content ?? undefined)
+    }
+    const usage = readUsage(response.usage)
+    return {
+      summary,
+      usage: {
+        inputTokens: usage.inputTokens,
+        lastRequestInputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        ...(usage.cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens: usage.cacheHitInputTokens }),
+        ...(usage.cacheMissInputTokens === undefined ? {} : { cacheMissInputTokens: usage.cacheMissInputTokens }),
+        provider: this.info.provider,
+        model: this.info.model,
+      },
+    }
   }
 
   public async execute(request: PhaseRequestEnvelope, options?: ModelExecutionOptions): Promise<PhaseModelExecution> {

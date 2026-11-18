@@ -163,7 +163,7 @@ export const DESCRIBE_REQUIRED_MESSAGE = "请先 describe 获取参数格式与�
 const descriptions = {
   character_update: {
     parameters: { relativePath: "设定集/人物/人物名.json", mode: "create | update",
-      operations: 'Array<{op:"set",field:string,value:JSON值}|{op:"delete",field:string}>', expectedContent: "可选，读取到的原文，用于防止覆盖并发更新" },
+      operations: 'Array<{op:"set",field:string,value:JSON值}|{op:"delete",field:string}>', expectedContent: "可选，读取到的原文作基线；若已有并发写入，服务端会重读最新内容后按顺序叠加本次操作" },
     writingGuide: "先读取世界推演规则/人物设定.md及已有人物 JSON。一人一档；可以新增、删除、更改 fields 字段，不能直接编辑 JSON 文本或 schemaVersion。创建用 create，已存在用 update，不能替换整个文档。用户确认与正文事实优先。",
   },
   chapter_workflow: {

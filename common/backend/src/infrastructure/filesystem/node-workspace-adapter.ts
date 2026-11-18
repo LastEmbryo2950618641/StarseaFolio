@@ -306,7 +306,11 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     await writeFile(path, content, { encoding: "utf8" })
   }
 
-  /** Serialized field operations and atomic replacement prevent malformed or lost JSON writes. */
+  /**
+   * Field updates share a project write lock and always apply against the latest on-disk
+   * profile. A stale expectedContent only means "rebase onto newer writes"; it must not fail
+   * graph-governance / extraction pipelines that queue multiple updates for the same file.
+   */
   public async updateCharacter(workspaceRootRef: string, rawUpdate: CharacterUpdate): Promise<string> {
     const update = characterUpdateSchema.parse(rawUpdate)
     const root = await realpath(resolve(workspaceRootRef))
@@ -319,7 +323,8 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
       try { previous = await readFile(path, "utf8") } catch (error) { if (!isNotFoundError(error)) throw error }
       if (update.mode === "create" && previous !== undefined) throw new Error("人物已存在，请使用字段更新，不能覆盖创建")
       if (update.mode === "update" && previous === undefined) throw new Error("人物不存在，请先创建")
-      if (update.expectedContent !== undefined && previous !== update.expectedContent) throw new Error("人物资料已被其他操作更新，请重新打开后再保存")
+      // Ignore stale expectedContent: earlier writers already held the lock and landed first.
+      // Rebase this writer's operations onto the newest content so concurrent updates serialize.
       const profile = previous === undefined ? emptyCharacterProfile(basename(path, ".json")) : parseCharacterProfile(previous)
       const content = formatCharacterProfile(applyCharacterFieldOperations(profile, update.operations))
       if (content.length > 1_000_000) throw new Error("人物资料过大")

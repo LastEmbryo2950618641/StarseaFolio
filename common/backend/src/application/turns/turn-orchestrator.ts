@@ -113,12 +113,14 @@ import { buildSourceUnitExactKeys } from "../retrieval/index.js"
 import { createRetrievalGaps, mergeRetrievalGaps } from "./retrieval-gap.js"
 import { VerificationProbeCoordinator, type ReadExecutionRecord } from "./verification-probe-coordinator.js"
 import {
+  buildContextBudgetContent,
   collectReadableEvidenceIds,
-  ContextWindowManager,
+  CONTEXT_FOLD_SUMMARY_PROTOCOL,
   executeWithContextCompaction,
   estimateModelMessageTokens,
   filterNovelContextExchangeMessages,
   findExactDuplicateStaticMessageIds,
+  foldContextMessages,
   mergeEvidenceVersions,
 } from "../context/index.js"
 import {
@@ -507,7 +509,6 @@ export class QueryDraftAuditExceededError extends Error {
 
 export class TurnOrchestrator {
   private readonly verificationProbes = new VerificationProbeCoordinator()
-  private readonly contextWindow = new ContextWindowManager()
   private readonly chapterContext: ChapterContextResolver
 
   public constructor(private readonly dependencies: TurnOrchestratorDependencies) {
@@ -1029,48 +1030,73 @@ export class TurnOrchestrator {
   ): Promise<void> {
     const messages = await this.dependencies.persistence.listModelContextMessages(chainId)
     const observedInputTokens = await this.dependencies.persistence.readLatestContextInputTokens?.(chainId)
+    const windowTokens = requireModelContextWindowTokens(this.dependencies.model)
     const triggerRatio = input.projectSettings?.execution.contextCompactionThresholdRatio
       ?? defaultProjectSettings.execution.contextCompactionThresholdRatio
-    if (observedInputTokens === undefined || observedInputTokens < requireModelContextWindowTokens(this.dependencies.model) * triggerRatio) return
+    const targetRatio = input.projectSettings?.execution.contextCompressionTargetRatio
+      ?? defaultProjectSettings.execution.contextCompressionTargetRatio
+    if (observedInputTokens === undefined || observedInputTokens < windowTokens * triggerRatio) return
     const hydrated = await this.chapterContext.hydrateNarrativeMessages(input.projectId, messages)
-    const compaction = this.contextWindow.plan({
-      messages: hydrated,
-      force: true,
-      contextWindowTokens: requireModelContextWindowTokens(this.dependencies.model),
-      triggerRatio: input.projectSettings?.execution.contextCompactionThresholdRatio
-        ?? defaultProjectSettings.execution.contextCompactionThresholdRatio,
-      targetRatio: input.projectSettings?.execution.contextCompressionTargetRatio
-        ?? defaultProjectSettings.execution.contextCompressionTargetRatio,
-      incomingTokenEstimate: estimateModelMessageTokens(input.userInput),
+    const visible = hydrated.flatMap((message) => {
+      if (message.content === undefined) return []
+      return [{
+        messageId: message.messageId,
+        sequence: message.sequence,
+        role: message.role,
+        kind: message.kind,
+        ...(message.taskId === undefined ? {} : { taskId: message.taskId }),
+        ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
+        ...(message.phase === undefined ? {} : { phase: message.phase }),
+        content: message.content,
+      }]
+    })
+    const folded = await foldContextMessages({
+      model: this.dependencies.model,
+      messages: visible,
+      currentTurnId: input.turnId ?? taskId,
+      windowTokens,
+      targetRatio,
+      observedInputTokens,
+      createMessageId: () => this.dependencies.createId(),
     })
     this.log("debug", "context.preinherit_compaction.evaluated", {
       taskId,
       chainId,
       messageCount: messages.length,
-      compactionPhase: compaction.phase,
-      estimatedTokens: compaction.estimatedTokens,
-      thresholdTokens: compaction.thresholdTokens,
-      targetTokens: compaction.targetTokens,
-      hiddenMessageCount: compaction.hiddenMessageIds.length,
-      protectedTokens: compaction.protectedTokens,
-      blocked: compaction.blocked,
+      foldsApplied: folded.foldsApplied,
+      estimatedTokens: folded.estimatedInputTokens,
+      hiddenMessageCount: folded.hiddenMessageIds.length,
+      blocked: folded.blocked,
     })
-    if (compaction.blocked) {
-      throw new Error(compaction.reason ?? "Protected model context exceeds the configured model window")
+    if (folded.blocked !== undefined) {
+      throw new Error(folded.blocked)
     }
-    if (compaction.hiddenMessageIds.length === 0) return
+    if (folded.hiddenMessageIds.length === 0) return
     await this.dependencies.persistence.hideModelContextMessages(
       chainId,
-      compaction.hiddenMessageIds,
+      folded.hiddenMessageIds,
       this.dependencies.now(),
     )
+    if (folded.foldMessages.length > 0) {
+      await this.dependencies.persistence.appendModelContextMessages({
+        chainId,
+        projectId: input.projectId,
+        createdAtMs: this.dependencies.now(),
+        messages: folded.foldMessages.map((message) => ({
+          role: message.role,
+          kind: message.kind,
+          content: message.content,
+          taskId,
+        })),
+      })
+    }
     this.log("info", "context.preinherit_compaction.applied", {
       taskId,
       chainId,
-      compactionPhase: compaction.phase,
-      hiddenMessageIds: compaction.hiddenMessageIds,
-      visibleMessageCount: compaction.visibleMessages.length,
-      estimatedTokens: compaction.estimatedTokens,
+      foldsApplied: folded.foldsApplied,
+      hiddenMessageIds: folded.hiddenMessageIds,
+      visibleMessageCount: folded.messages.length,
+      estimatedTokens: folded.estimatedInputTokens,
     })
   }
 
@@ -3008,7 +3034,12 @@ export class TurnOrchestrator {
         const hydratedContextContent = new Map(hydratedMessages.map((message) => [message.messageId, message.content]))
         const contextMessagesForCompaction = hydratedMessages
         const lastRequestInputTokens = await this.dependencies.persistence.readLatestContextInputTokens?.(input.modelContextChainId)
-        const contextMessages = contextMessagesForCompaction.map((message) => ({
+        const windowTokens = requireModelContextWindowTokens(this.dependencies.model)
+        const triggerRatio = input.input.projectSettings?.execution.contextCompactionThresholdRatio
+          ?? defaultProjectSettings.execution.contextCompactionThresholdRatio
+        const targetRatio = input.input.projectSettings?.execution.contextCompressionTargetRatio
+          ?? defaultProjectSettings.execution.contextCompressionTargetRatio
+        const mappedContext = contextMessagesForCompaction.map((message) => ({
           messageId: message.messageId,
           sequence: message.sequence,
           role: message.role,
@@ -3018,18 +3049,62 @@ export class TurnOrchestrator {
           ...(message.phase === undefined ? {} : { phase: message.phase }),
           content: hydratedContextContent.get(message.messageId) as string,
         }))
+        const foldsApplied = mappedContext.filter((message) => (
+          message.kind === "phase_instruction"
+          && message.content.includes(`"protocol":"${CONTEXT_FOLD_SUMMARY_PROTOCOL}"`)
+        )).length
+        const contextMessages = [
+          ...mappedContext,
+          {
+            messageId: this.dependencies.createId(),
+            sequence: mappedContext.length,
+            role: "user" as const,
+            kind: "phase_instruction" as const,
+            turnId: request.turnId,
+            content: buildContextBudgetContent({
+              contextTokens: lastRequestInputTokens
+                ?? mappedContext.reduce((sum, message) => sum + estimateModelMessageTokens(message.content), 0),
+              contextWindowTokens: windowTokens,
+              triggerRatio,
+              targetRatio,
+              foldsApplied,
+            }),
+          },
+        ]
         execution = await executeWithContextCompaction({
           model: this.dependencies.model,
           request,
           ...(lastRequestInputTokens === undefined ? {} : { lastRequestInputTokens }),
-          triggerRatio: input.input.projectSettings?.execution.contextCompactionThresholdRatio
-            ?? defaultProjectSettings.execution.contextCompactionThresholdRatio,
-          targetRatio: input.input.projectSettings?.execution.contextCompressionTargetRatio
-            ?? defaultProjectSettings.execution.contextCompressionTargetRatio,
+          triggerRatio,
+          targetRatio,
           onCompacted: async (event) => {
             await this.dependencies.persistence.hideModelContextMessages(input.modelContextChainId, event.hiddenMessageIds, this.dependencies.now())
-            this.log("info", "context.compaction.applied", { taskId: currentContext.taskId, phase: input.phase, ...event })
+            if (event.foldMessages.length > 0) {
+              await this.dependencies.persistence.appendModelContextMessages({
+                chainId: input.modelContextChainId,
+                projectId: input.input.projectId,
+                createdAtMs: this.dependencies.now(),
+                messages: event.foldMessages.map((message) => ({
+                  role: message.role,
+                  kind: message.kind,
+                  content: message.content,
+                  taskId: currentContext.taskId,
+                  turnId: request.turnId,
+                  phase: input.phase,
+                })),
+              })
+            }
+            this.log("info", "context.compaction.applied", {
+              taskId: currentContext.taskId,
+              phase: input.phase,
+              reason: event.reason,
+              hiddenMessageCount: event.hiddenMessageIds.length,
+              foldMessageCount: event.foldMessages.length,
+              estimatedInputTokens: event.estimatedInputTokens,
+              remainingMessageCount: event.remainingMessageCount,
+            })
           },
+          createMessageId: () => this.dependencies.createId(),
           options: {
             contextChainId: input.modelContextChainId,
             contextMessages,

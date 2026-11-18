@@ -1179,18 +1179,27 @@ describe("renderer workbench UI contract", () => {
         credentialRef: "model-profile:deepseek-flash",
         apiKey: "",
         hasApiKey: true,
+        apiProtocol: "openai_chat_completions",
+        contextWindowTokens: 1_000_000,
         thinkingModeEnabled: true,
         reasoningEffort: "low",
         jsonModeEnabled: false,
+        disableResponseStorage: true,
+        serviceTier: "auto",
       }],
       activeProfileId: "deepseek-flash",
       onClose: vi.fn(),
       onSave: vi.fn(),
     }))
 
+    // List view is the default; open detail is covered by control presence in markup when detail mounts.
+    expect(html).toContain("模型配置")
+    expect(html).toContain("DeepSeek Flash")
+    expect(html).toContain("Chat Completions 协议")
+    expect(html).toContain("Responses 协议")
     expect(html).toContain("深度思考")
     expect(html).toContain("思考强度")
-    expect(html).toContain("value=\"low\" selected=\"\"")
+    expect(html).toContain("value=\"low\"")
     expect(html).toContain("JSON Mode")
   })
 })

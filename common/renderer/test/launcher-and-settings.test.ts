@@ -14,6 +14,26 @@ import {
   normalizeProfile,
   type ModelProfile,
 } from "../src/features/settings/ModelConfigurationDialog.js"
+import {
+  API_PROTOCOL_OPTIONS,
+  createProfileFromPreset,
+  MODEL_PROVIDER_PRESETS,
+} from "../src/features/settings/model-provider-presets.js"
+
+function completeProfile(partial: Partial<ModelProfile> & Pick<ModelProfile, "id" | "name" | "baseUrl" | "model" | "credentialRef">): ModelProfile {
+  return {
+    apiKey: "",
+    hasApiKey: false,
+    apiProtocol: "openai_chat_completions",
+    contextWindowTokens: 1_000_000,
+    thinkingModeEnabled: true,
+    reasoningEffort: "high",
+    jsonModeEnabled: false,
+    disableResponseStorage: true,
+    serviceTier: "auto",
+    ...partial,
+  }
+}
 
 describe("ProjectLauncher", () => {
   it("renders book library grid with add card", () => {
@@ -68,27 +88,23 @@ describe("Work directory settings", () => {
 
 describe("ModelConfigurationDialog", () => {
   const profiles: readonly ModelProfile[] = [
-    {
+    completeProfile({
       id: "deepseek-chat",
       name: "DeepSeek Chat",
       baseUrl: "https://api.deepseek.com",
       model: "deepseek-chat",
       credentialRef: "model-profile:deepseek-chat",
-      apiKey: "",
-      hasApiKey: false,
-    },
-    {
+    }),
+    completeProfile({
       id: "deepseek-reasoner",
       name: "DeepSeek Reasoner",
       baseUrl: "https://api.deepseek.com",
       model: "deepseek-reasoner",
       credentialRef: "model-profile:deepseek-reasoner",
-      apiKey: "",
-      hasApiKey: false,
-    },
+    }),
   ]
 
-  it("renders the model list and DeepSeek-specific selector hints", () => {
+  it("renders the model list with add-entry for provider sheet", () => {
     const html = renderToStaticMarkup(React.createElement(ModelConfigurationDialog, {
       profiles,
       activeProfileId: "deepseek-chat",
@@ -97,15 +113,49 @@ describe("ModelConfigurationDialog", () => {
     }))
 
     expect(html).toContain("模型配置")
-    expect(html).toContain("模型列表")
+    expect(html).toContain("model-configuration-list")
+    expect(html).toContain("添加配置")
+    expect(html).toContain("选择厂商或自定义服务")
     expect(html).toContain("DeepSeek Chat")
     expect(html).toContain("DeepSeek Reasoner")
-    expect(html).toContain("输入密钥后自动读取 DeepSeek 模型列表")
-    expect(html).toContain("API Key")
+    expect(html).toContain("model-add-profile")
+  })
+
+  it("exposes both API protocols and vendor presets with differentiated defaults", () => {
+    expect(API_PROTOCOL_OPTIONS.map((item) => item.value)).toEqual([
+      "openai_chat_completions",
+      "openai_responses",
+    ])
+    expect(MODEL_PROVIDER_PRESETS.map((item) => item.id)).toEqual([
+      "deepseek",
+      "zhipu",
+      "openai",
+      "custom",
+    ])
+    expect(createProfileFromPreset("deepseek")).toMatchObject({
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiProtocol: "openai_chat_completions",
+      thinkingModeEnabled: true,
+      jsonModeEnabled: false,
+    })
+    expect(createProfileFromPreset("zhipu")).toMatchObject({
+      name: "智谱",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      apiProtocol: "openai_chat_completions",
+      thinkingModeEnabled: false,
+      jsonModeEnabled: false,
+    })
+    expect(createProfileFromPreset("custom")).toMatchObject({
+      name: "自定义服务",
+      apiProtocol: "openai_chat_completions",
+      jsonModeEnabled: false,
+      thinkingModeEnabled: false,
+    })
   })
 
   it("normalizes profile data and validates DeepSeek endpoints", () => {
-    expect(normalizeProfile({
+    expect(normalizeProfile(completeProfile({
       id: "profile",
       name: "  主账号  ",
       baseUrl: " https://api.deepseek.com ",
@@ -113,7 +163,7 @@ describe("ModelConfigurationDialog", () => {
       credentialRef: "model-profile:profile",
       apiKey: " secret ",
       hasApiKey: true,
-    })).toMatchObject({
+    }))).toMatchObject({
       name: "主账号",
       baseUrl: "https://api.deepseek.com",
       model: "deepseek-chat",
@@ -124,6 +174,6 @@ describe("ModelConfigurationDialog", () => {
     expect(isOfficialDeepSeekEndpoint("https://example.com")).toBe(false)
     expect(hasValidBaseUrl("https://api.deepseek.com")).toBe(true)
     expect(hasValidBaseUrl("http://api.deepseek.com")).toBe(false)
-    expect(catalogSignature(profiles[0])).toBe("https://api.deepseek.com\u0000model-profile:deepseek-chat")
+    expect(catalogSignature(profiles[0]!)).toBe("https://api.deepseek.com\u0000model-profile:deepseek-chat")
   })
 })
