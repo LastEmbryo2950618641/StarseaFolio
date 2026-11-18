@@ -22,8 +22,8 @@ export const DISCUSS_TODO_NO_PROGRESS_HINT = [
 ].join("")
 
 export const DISCUSS_TOOL_EXCLUSIVE_GATE_HINT = [
-  "门禁：toolRequest 已与写入类字段同回，系统已自动只保留工具调用，写入/choices/focusChange 延后到工具结果之后。",
-  "请按更新后的 Todo 继续：先完成当前工具，再交付写入。",
+  "门禁：toolRequest 与写入类字段同回，系统只保留了工具调用。同回的写入、choices、focusChange 没有落盘。",
+  "不要声称这些字段已经保存。先完成当前工具，再重新交付被去掉的字段。",
 ].join("")
 
 /** Sequential chapter-index gate: cannot open draft N+2 before N is published. */
@@ -36,7 +36,7 @@ export function discussChapterSequenceGateHint(
     : deferredSequences.map((sequence) => `第${String(sequence)}章`).join("、")
   return [
     `门禁：正文新章草稿只能开到第${String(nextSequence)}章（chapter_index 下一序号）。`,
-    `${deferred} 的 chapterDraftProposal(s) 已自动延后，不要再跳号开草稿。`,
+    `${deferred} 的 chapterDraftProposal(s) 没有落盘。不要再跳号开草稿，也不要声称已经生成或保存。`,
     `请更新 Todo：先完成第${String(nextSequence)}章草稿并走图修订发布为正文，再写下一章。`,
   ].join("")
 }

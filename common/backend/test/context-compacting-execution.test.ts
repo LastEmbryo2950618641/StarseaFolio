@@ -64,7 +64,7 @@ describe("provider-measured context compaction", () => {
     expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId))
       .toEqual(["system", "history-summary", "current"])
   })
-  it.each(["discuss-step-failures-v1", "discuss-progress-v1"])("keeps %s counters across context compaction", async (protocol) => {
+  it.each(["discuss-step-failures-v1", "discuss-progress-v1", "discuss-gate-v1"])("keeps %s counters across context compaction", async (protocol) => {
     const { input, execute } = setup(900_000)
     const retryState = { ...message("retry-state", "phase_instruction", "old", 1),
       role: "system" as const, content: JSON.stringify({ protocol, failures: { "chapter:1:tool:memory_write:invoke": 2 }, consecutiveNoProgressTurns: 2 }) }

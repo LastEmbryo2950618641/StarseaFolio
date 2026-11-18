@@ -33,6 +33,8 @@ export type PhaseModelUsage = Readonly<{
 export type PhaseModelExecution = Readonly<{
   result: PhaseResultEnvelope
   usage: PhaseModelUsage
+  /** Validation failures already shown to the model during this call. Persist them for later turns. */
+  schemaRepairs?: readonly string[]
   contextExchange?: Readonly<{
     requestMessages: readonly ModelContextMessageDraft[]
     responseMessage: ModelContextMessageDraft

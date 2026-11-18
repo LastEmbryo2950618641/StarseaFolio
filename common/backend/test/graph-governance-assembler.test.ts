@@ -5,6 +5,7 @@ import {
   assembleGraphGovernanceArtifact,
   invalidatedGraphGovernancePhases,
   replayGraphCapacityRewrites,
+  stagedSettlementSupersedesRoutingGovernance,
 } from "../src/application/turns/graph-governance-assembler.js"
 
 const structure = {
@@ -333,5 +334,142 @@ describe("staged graph governance", () => {
 
     expect(restored.proposals).toHaveLength(2)
     expect(restored.proposals[0]?.mutation).toMatchObject({ operation: "edit_node" })
+  })
+})
+
+describe("staged settlement supersedes a stale routing candidate", () => {
+  const scene = {
+    sceneIndex: 0,
+    sceneDescription: "Chapter opening continues from the previous dwelling",
+    predecessorSceneIndexes: [],
+    predecessorSceneRefs: [],
+    predecessorRequired: true,
+    predecessorReason: "The opening continues a scene outside this turn",
+    correspondenceRequired: false,
+    correspondenceReason: "No correspondence structure is required",
+    timeContinuity: "pass" as const,
+    locationContinuity: "pass" as const,
+    crossReferenceContinuity: "pass" as const,
+    reason: "Scene 0 must connect to the prior state",
+  }
+  const dependencyAudit = {
+    missingDependencies: [],
+    unplannedContent: [],
+    sceneContinuity: [scene],
+    temporalClaims: [],
+    informationBoundary: "pass" as const,
+  }
+  const structurePlan = {
+    proposals: [{
+      proposalRef: "proposal:link:prior",
+      mutation: {
+        operation: "create_link" as const,
+        ref: "local:l_prior_dwelling",
+        fromRef: "node_62",
+        toRef: "local:scene",
+        content: "prior dwelling transition",
+      },
+      reason: "Connect the opening to the previous dwelling",
+      selfReview: "The transition is the prior path",
+    }],
+    affectedFrontierRefs: [],
+    archiveOutletRefs: [],
+    decisionRecords: [{
+      decisionKind: "initial_structure",
+      proposalRefs: ["proposal:link:prior"],
+      reason: "Record the transition",
+      payload: {},
+      selfReview: "One local link is enough",
+    }],
+  }
+  const binding = {
+    sceneIndex: 0,
+    sceneAnchorRef: "local:scene",
+    sourceUnitIndexes: [],
+    temporalReferenceRefs: ["local:time"],
+    timeAnchorRefs: ["local:time"],
+    spatialReferenceRefs: ["local:scene"],
+    locationAnchorRefs: ["local:scene"],
+    predecessorSceneIndexes: [],
+    predecessorSceneAnchorRefs: ["node_62"],
+    correspondenceRefs: [],
+    explanation: "Scene 0 continues from the prior dwelling",
+    selfReview: "The predecessor is outside this turn",
+  }
+  const proposalSettlement = {
+    proposalRefs: ["proposal:link:prior"],
+    effectDisposition: "world_effect" as const,
+    effectiveSceneBindingIndexes: [0],
+    effectiveExistingSceneAnchorRefs: [],
+    currentEntryRefs: ["local:scene"],
+    predecessorRevisionRequired: false,
+    predecessorRevisionReadRefs: [],
+    historicalReturnRefs: ["local:scene"],
+    reason: "The transition becomes effective in scene 0",
+    selfReview: "The path is discoverable",
+  }
+  const routingGovernance = {
+    executionMode: "full_governance" as const,
+    mutations: [structurePlan.proposals[0]?.mutation],
+    retrievalProjections: [],
+    settlementRecords: [],
+    mutationSpacetimeSettlements: [{
+      ...proposalSettlement,
+      proposalRefs: undefined,
+      mutationIndexes: [0],
+    }],
+    sceneSpacetimeBindings: [{ ...binding, transitionPathRefs: [] }],
+    affectedFrontierRefs: [],
+    archiveOutletRefs: [],
+    decisionRecords: [{
+      decisionKind: "initial_structure",
+      mutationIndexes: [0],
+      mutationSpacetimeSettlementIndexes: [0],
+      reason: "Record the transition",
+      payload: {},
+      selfReview: "One local link is enough",
+    }],
+  }
+
+  it("replaces a routing candidate that omitted the required transition path", () => {
+    expect(stagedSettlementSupersedesRoutingGovernance({
+      dependencyAudit,
+      governance: routingGovernance,
+      structure: structurePlan,
+      spacetime: {
+        sceneSpacetimeBindings: [{ ...binding, transitionPathRefs: ["local:l_prior_dwelling"] }],
+        proposalSettlements: [proposalSettlement],
+      },
+      sourceUnitCount: 0,
+    })).toBe("Scene 0 requires a transition path")
+  })
+
+  it("keeps a routing candidate that already carries the transition path", () => {
+    expect(stagedSettlementSupersedesRoutingGovernance({
+      dependencyAudit,
+      governance: {
+        ...routingGovernance,
+        sceneSpacetimeBindings: [{ ...binding, transitionPathRefs: ["local:l_prior_dwelling"] }],
+      },
+      structure: structurePlan,
+      spacetime: {
+        sceneSpacetimeBindings: [{ ...binding, transitionPathRefs: ["local:l_prior_dwelling"] }],
+        proposalSettlements: [proposalSettlement],
+      },
+      sourceUnitCount: 0,
+    })).toBeUndefined()
+  })
+
+  it("does not replace the candidate when the spacetime settlement fails the same coverage check", () => {
+    expect(stagedSettlementSupersedesRoutingGovernance({
+      dependencyAudit,
+      governance: routingGovernance,
+      structure: structurePlan,
+      spacetime: {
+        sceneSpacetimeBindings: [{ ...binding, transitionPathRefs: [] }],
+        proposalSettlements: [proposalSettlement],
+      },
+      sourceUnitCount: 0,
+    })).toBeUndefined()
   })
 })
