@@ -9,6 +9,7 @@ import { digest } from "../../core/index.js"
 import type { TurnReadEvidence } from "../turns/ports/ai-model-port.js"
 import type { DocumentRepository } from "../turns/ports/document-repository.js"
 import type { InternalStorePort } from "../workspace/index.js"
+import type { WorkspacePort } from "../workspace/ports/workspace-port.js"
 import type { SettingsLineageService } from "../settings/settings-lineage-service.js"
 import type { SqliteChapterIndexRepository } from "../../infrastructure/sqlite/repositories/sqlite-chapter-index-repository.js"
 import { ChapterTemporalSourceResolver } from "./chapter-temporal-source-resolver.js"
@@ -63,6 +64,8 @@ function clampText(text: string, maxChars: number): string {
 export async function executeSynopsisTemporalReads(input: Readonly<{
   projectId: ProjectId
   sessionChapterSequence: number
+  workspaceRootRef: string
+  workspace: WorkspacePort
   catalog: WorkspaceCatalogSnapshot
   requests: readonly PhaseResultEnvelope["requestedReads"][number][]
   existingEvidence: readonly TurnReadEvidence[]
@@ -132,35 +135,33 @@ export async function executeSynopsisTemporalReads(input: Readonly<{
     }
 
     if (purpose === "past_chapter_text") {
-      const resolved = await input.chapterTemporal.resolve({
+      const archived = await readPastChapterFromArchive({
         projectId: input.projectId,
-        targetSequence: asOfN,
-        cursorSequence: input.sessionChapterSequence,
+        asOfN,
+        sessionChapterSequence: input.sessionChapterSequence,
+        chapterTemporal: input.chapterTemporal,
+        documents: input.documents,
+        internalStore: input.internalStore,
       })
-      if (resolved === undefined) continue
-      const version = await input.documents.findStoredVersion(input.projectId, resolved.sourceId)
-      if (version === undefined) continue
-      let content = ""
-      try {
-        content = await input.internalStore.readDocument(version.contentRef)
-      } catch {
-        continue
-      }
-
-      const pinNote = resolved.pinned
-        ? `（ lineage 钉住 · 写第 ${String(resolved.pinnedFromChapterSequence ?? input.sessionChapterSequence)} 章时的正文）`
-        : "（当前定稿 head）"
+      const loaded = archived ?? await readPastChapterFromWorkspace({
+        projectId: input.projectId,
+        asOfN,
+        chapterIndex: input.chapterIndex,
+        workspace: input.workspace,
+        workspaceRootRef: input.workspaceRootRef,
+      })
+      if (loaded === undefined) continue
 
       const evidenceItems = buildTemporalChapterEvidence({
         request,
         chapterSequence: asOfN,
-        publishPath: resolved.publishPath,
-        sourceId: resolved.sourceId,
-        markdown: content,
+        publishPath: loaded.publishPath,
+        sourceId: loaded.sourceId,
+        markdown: loaded.content,
         mode,
         maxChars,
         createId: input.createId,
-        pinNote,
+        pinNote: loaded.pinNote,
       })
       for (const item of evidenceItems) {
         const key = `${item.ownerId}:${item.digest}`
@@ -172,6 +173,71 @@ export async function executeSynopsisTemporalReads(input: Readonly<{
   }
 
   return collected
+}
+
+async function readPastChapterFromArchive(input: Readonly<{
+  projectId: ProjectId
+  asOfN: number
+  sessionChapterSequence: number
+  chapterTemporal: ChapterTemporalSourceResolver
+  documents: DocumentRepository
+  internalStore: InternalStorePort
+}>): Promise<Readonly<{
+  publishPath: string
+  sourceId: string
+  content: string
+  pinNote: string
+}> | undefined> {
+  const resolved = await input.chapterTemporal.resolve({
+    projectId: input.projectId,
+    targetSequence: input.asOfN,
+    cursorSequence: input.sessionChapterSequence,
+  })
+  if (resolved === undefined) return undefined
+  const version = await input.documents.findStoredVersion(input.projectId, resolved.sourceId)
+  if (version === undefined) return undefined
+  try {
+    const content = await input.internalStore.readDocument(version.contentRef)
+    if (content.trim().length === 0) return undefined
+    return {
+      publishPath: resolved.publishPath,
+      sourceId: resolved.sourceId,
+      content,
+      pinNote: resolved.pinned
+        ? `（ lineage 钉住 · 写第 ${String(resolved.pinnedFromChapterSequence ?? input.sessionChapterSequence)} 章时的正文）`
+        : "（当前定稿 head）",
+    }
+  } catch {
+    return undefined
+  }
+}
+
+async function readPastChapterFromWorkspace(input: Readonly<{
+  projectId: ProjectId
+  asOfN: number
+  chapterIndex: SqliteChapterIndexRepository
+  workspace: WorkspacePort
+  workspaceRootRef: string
+}>): Promise<Readonly<{
+  publishPath: string
+  sourceId: string
+  content: string
+  pinNote: string
+}> | undefined> {
+  const indexed = await input.chapterIndex.findBySequence(input.projectId, input.asOfN)
+  if (indexed === undefined || indexed.currentPublishPath.trim().length === 0) return undefined
+  try {
+    const content = await input.workspace.readMarkdown(input.workspaceRootRef, indexed.currentPublishPath)
+    if (content.trim().length === 0) return undefined
+    return {
+      publishPath: indexed.currentPublishPath,
+      sourceId: indexed.currentSourceId,
+      content,
+      pinNote: "（工作区已发布定稿回退）",
+    }
+  } catch {
+    return undefined
+  }
 }
 
 function buildTemporalSettingsEvidence(input: Readonly<{

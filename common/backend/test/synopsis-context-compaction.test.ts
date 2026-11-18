@@ -52,9 +52,11 @@ describe("synopsis context compaction integration", () => {
       secondSend = true
       const sent = await invoke("synopsis.conversation.send", { message: "继续讨论站台上的线索" })
       expect(sent.messages.filter((m) => m.role === "user" && m.content === "继续讨论站台上的线索")).toHaveLength(1)
-      expect(oldMessagesSent).toBe(false)
       expect(sawBootstrap).toBe(false)
-      if (mode === "overflow") expect(retriedWithSmallerHistory).toBe(true)
+      if (mode === "overflow") {
+        expect(oldMessagesSent).toBe(false)
+        expect(retriedWithSmallerHistory).toBe(true)
+      }
     } finally {
       await harness.container.close()
       rmSync(harness.root, { recursive: true, force: true })

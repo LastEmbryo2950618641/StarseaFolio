@@ -46,7 +46,7 @@ export const readRequestSchema = z.object({
      * Temporal read intent for settings/chapter recall (P1).
      * - current (default): read workspace head / catalog as today
      * - as_of_chapter: settings markdown as known at or before asOfChapterSequence
-     * - past_chapter_text: committed chapter prose by chapter sequence (not workspace 章节正文)
+     * - past_chapter_text: committed chapter prose by chapter sequence (falls back to workspace publish path when no archive)
      */
     purpose: z.enum(["current", "as_of_chapter", "past_chapter_text"]).optional(),
     asOfChapterSequence: z.number().int().positive().optional(),

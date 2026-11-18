@@ -3914,6 +3914,8 @@ export class TurnOrchestrator {
           const temporalItems = await executeSynopsisTemporalReads({
             projectId,
             sessionChapterSequence: chapterSequence,
+            workspaceRootRef,
+            workspace: this.dependencies.workspace,
             catalog: catalogSnapshot,
             requests: [request],
             existingEvidence: [...existingEvidence, ...evidence],

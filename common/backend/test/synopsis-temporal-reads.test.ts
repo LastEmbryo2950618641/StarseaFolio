@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import type { ProjectId, WorkspaceCatalogSnapshot } from "@starseafolio/contracts"
 
 import {
+  executeSynopsisTemporalReads,
   formatTemporalSearchLabel,
   validateTemporalChapterSequence,
 } from "../src/application/chapters/synopsis-temporal-reads.js"
@@ -41,5 +43,56 @@ describe("synopsis temporal reads", () => {
       sessionChapterSequence: 1,
       purpose: "as_of_chapter",
     })).toBe(false)
+  })
+
+  it("falls back to the workspace publish path when no archive exists", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111" as ProjectId
+    const publishPath = "章节正文/第一卷/第一章 开篇.md"
+    const body = "# 第一章\n\n雨夜站台上只剩一盏无人认领的灯。"
+    const evidence = await executeSynopsisTemporalReads({
+      projectId,
+      sessionChapterSequence: 9,
+      workspaceRootRef: "ws-ref",
+      workspace: {
+        readMarkdown: vi.fn().mockResolvedValue(body),
+      } as never,
+      catalog: { entries: [] } as WorkspaceCatalogSnapshot,
+      requests: [{
+        requestId: "22222222-2222-4222-8222-222222222222",
+        reason: "continuity",
+        expectedEvidence: "chapter 1 body",
+        query: {
+          exactKeys: [],
+          semanticTexts: [],
+          anchorIds: [],
+          directions: ["both"],
+          maxCandidates: 1,
+          maxDepth: 0,
+          sourceKinds: ["source"],
+          purpose: "past_chapter_text",
+          asOfChapterSequence: 1,
+        },
+      }],
+      existingEvidence: [],
+      settingsLineage: {} as never,
+      chapterIndex: {
+        findBySequence: vi.fn().mockResolvedValue({
+          currentSourceId: "source-1",
+          currentPublishPath: publishPath,
+        }),
+      } as never,
+      documents: {
+        findStoredVersion: vi.fn().mockResolvedValue(undefined),
+      } as never,
+      internalStore: {} as never,
+      chapterTemporal: {
+        resolve: vi.fn().mockResolvedValue(undefined),
+      } as never,
+      createId: () => "33333333-3333-4333-8333-333333333333",
+    })
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0]?.semanticText).toContain("工作区已发布定稿回退")
+    expect(evidence[0]?.semanticText).toContain("无人认领的灯")
+    expect(evidence[0]?.exactKeys).toContain(publishPath)
   })
 })

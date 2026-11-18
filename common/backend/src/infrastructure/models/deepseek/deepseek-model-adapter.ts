@@ -680,7 +680,7 @@ function buildModelResultRules(request: PhaseRequestEnvelope, referenceView: Mod
     "- For an existing graph identity, copy only the exact reference present in this request's readable evidence. Never invent an existing graph reference.",
     `- Read-evidence to graph-owner alias map: ${referenceView.graphReferencePairs.join(", ") || "none"}.`,
     "- Read requests contain semantic query intent only. Omit query fields that are not useful; infrastructure supplies bounded defaults.",
-    "- sourceKinds source means the internal committed immutable source-unit projection. It is not a request to read Markdown from the workspace chapter directory, so a workspace chapter-read prohibition does not exclude source projections.",
+    "- sourceKinds source covers the internal committed immutable source-unit projection, and on discuss also workspace chapter Markdown under 章节正文/ via request_read exactKeys. past_chapter_text remains the committed-archive channel (with workspace publish-path fallback when no archive exists).",
     "- sourceKinds web runs sandboxed public-internet search/fetch. Put search phrases in semanticTexts (or non-URL exactKeys) and page URLs in exactKeys. Web evidence is external reference only and must not override committed graph state or invent in-world facts.",
     "- For an exact quotation, title, or other exact persisted wording, provide exactKeys. When the same request searches graph or revision evidence, include source as well; summaries and semanticTexts must not impersonate exact source wording.",
     "- Source evidence may expose relatedOwnerRefs with bounded graph projection summaries: these are the graph owners mechanically linked to that exact immutable source unit by settlement. Use those summaries first when reconstructing the source unit's time, place, state, or causal context; do not replace them with an unrelated graph candidate that merely has similar wording, and do not request every related owner again unless the summary is insufficient.",
@@ -728,6 +728,7 @@ function buildCrossPhaseChecklist(request: PhaseRequestEnvelope): string {
       evidenceCount > 0
         ? `- ${String(evidenceCount)} readEvidence item(s) are already visible. Prefer finishing with outcome=continue and a complete artifact; request_read only for missing files.`
         : "- No readEvidence yet. If world/settings context is needed, start with outcome=request_read for 设定集/readme.md (sourceKinds reference).",
+      "- Prior published chapter bodies may be read with request_read (章节正文 exactKeys, sourceKinds source) and/or past_chapter_text; focus locks writes, not these reads.",
     ].join("\n")
   }
   const artifacts = Object.keys(asRecord(input.validationArtifacts)).length === 0

@@ -35,6 +35,7 @@ import { defaultProjectSettings } from "@starseafolio/config"
 
 import {
   buildContextUsageBreakdown,
+  contextTokensAfterProviderUsage,
   executeWithContextCompaction,
   filterNovelContextExchangeMessages,
   findEphemeralDiscussContextMessageIds,
@@ -3165,6 +3166,7 @@ export class SynopsisConversationService {
       let streamedReasoning = ""
       let streamedContent = ""
       const thinkingRound = attempt + 1
+      let compactedEstimate: number | undefined
       let execution
       try {
         execution = await executeWithContextCompaction({
@@ -3182,6 +3184,7 @@ export class SynopsisConversationService {
             if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
             await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, event.hiddenMessageIds, this.dependencies.now())
             if (event.estimatedInputTokens !== undefined) {
+              compactedEstimate = event.estimatedInputTokens
               lastRequestInputTokens = event.estimatedInputTokens
               synopsisConversationStreamHub.addUsage(input.projectId, {
                 lastRequestInputTokens: event.estimatedInputTokens,
@@ -3293,7 +3296,11 @@ export class SynopsisConversationService {
         )
         throw error
       }
-      lastRequestInputTokens = execution.usage.lastRequestInputTokens
+      const measuredContextTokens = contextTokensAfterProviderUsage(
+        compactedEstimate,
+        execution.usage.lastRequestInputTokens,
+      )
+      if (measuredContextTokens !== undefined) lastRequestInputTokens = measuredContextTokens
       if (execution.contextExchange !== undefined) {
         const duplicateStaticIds = [
           ...findEphemeralDiscussContextMessageIds(storedContext),
@@ -3373,9 +3380,9 @@ export class SynopsisConversationService {
         ...(execution.usage.cacheMissInputTokens === undefined
           ? {}
           : { cacheMissInputTokens: execution.usage.cacheMissInputTokens }),
-        ...(execution.usage.lastRequestInputTokens === undefined
+        ...(measuredContextTokens === undefined
           ? {}
-          : { lastRequestInputTokens: execution.usage.lastRequestInputTokens }),
+          : { lastRequestInputTokens: measuredContextTokens }),
       }, this.dependencies.now())
       const cumulativeUsage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
       if (cumulativeUsage !== undefined) {
@@ -4464,6 +4471,8 @@ export class SynopsisConversationService {
       const temporalEvidence = await executeSynopsisTemporalReads({
         projectId: input.projectId,
         sessionChapterSequence: input.chapterSequence,
+        workspaceRootRef: input.workspaceRootRef,
+        workspace: this.dependencies.workspace,
         catalog,
         requests: temporalReads,
         existingEvidence: readEvidence,

@@ -2364,7 +2364,8 @@ describe("DeepSeekAiModelAdapter", () => {
 
     expect(execution.result.requestedReads[0]?.query.sourceKinds).toEqual(["graph", "revision", "source"])
     expect(finalMessage).toContain("internal committed immutable source-unit projection")
-    expect(finalMessage).toContain("workspace chapter-read prohibition does not exclude source projections")
+    expect(finalMessage).toContain("workspace chapter Markdown under 章节正文/")
+    expect(finalMessage).toContain("past_chapter_text remains the committed-archive channel")
   })
 
   it("does not add source projections to exact rule and reference reads", async () => {

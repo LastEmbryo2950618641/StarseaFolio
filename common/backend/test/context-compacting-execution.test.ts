@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@starseafolio/contracts"
 import type { AIModelPort, PhaseModelExecution } from "../src/application/turns/ports/ai-model-port.js"
-import { executeWithContextCompaction, readContextLengthError } from "../src/application/context/context-compacting-execution.js"
+import { contextTokensAfterProviderUsage, executeWithContextCompaction, readContextLengthError } from "../src/application/context/context-compacting-execution.js"
+import { ModelContextAppender } from "../src/application/context/model-context-appender.js"
 
 const request = { turnId: "current" } as PhaseRequestEnvelope
 const result = { usage: { inputTokens: 123, lastRequestInputTokens: 123 } } as PhaseModelExecution
@@ -54,14 +55,22 @@ describe("provider-measured context compaction", () => {
     const { input, execute, onCompacted } = setup(1_000_000)
     const catalog = { entries: ["章节正文/第一章.md", "设定集/readme.md"] }
     const evidence = [{ ownerId: "设定集/readme.md", semanticText: "旧资料不应在压缩后再次装回本次请求里。" }]
+    const outline = "旧细纲不应再装回"
+    const synopsis = "旧简介不应再装回"
     const removedChapter = `第一章正文${"章".repeat(80)}`
     input.request = {
       ...request,
-      input: { workspaceCatalog: catalog, readEvidence: evidence, synopsisDiscuss: { chapterBodyMarkdown: "当前章仍保留" } },
+      phase: "synopsis_discuss",
+      protocolVersion: "1",
+      input: {
+        workspaceCatalog: catalog,
+        readEvidence: evidence,
+        synopsisDiscuss: { synopsisMarkdown: synopsis, outlineMarkdown: outline, chapterBodyMarkdown: "当前章仍保留" },
+      },
     } as PhaseRequestEnvelope
     input.options.contextMessages = [
       message("system", "system_rules", "old", 0),
-      { ...message("old-delta", "phase_request", "old", 1), content: `旧请求 ${JSON.stringify({ workspaceCatalog: catalog, readEvidence: evidence })}` },
+      { ...message("old-delta", "phase_request", "old", 1), content: `旧请求 ${JSON.stringify({ workspaceCatalog: catalog, readEvidence: evidence, synopsisDiscuss: { synopsisMarkdown: synopsis, outlineMarkdown: outline } })}` },
       { ...message("old-chapter", "phase_request", "old", 2), content: JSON.stringify({ chapterBodyMarkdown: removedChapter }) },
       { ...message("newer-chapter", "phase_request", "old", 3), content: JSON.stringify({ chapterBodyMarkdown: "较新的一章" }) },
       message("current", "phase_request", "current", 4),
@@ -78,10 +87,27 @@ describe("provider-measured context compaction", () => {
     expect(sent.map((item) => item.messageId)).not.toContain("old-delta")
     expect(sent.some((item) => item.content.includes(removedChapter))).toBe(false)
     expect(sent.map((item) => item.messageId)).toContain("current")
-    const sentInput = execute.mock.calls[0]?.[0]?.input as { workspaceCatalog?: unknown, readEvidence?: unknown, synopsisDiscuss?: { chapterBodyMarkdown?: string } }
+    const sentInput = execute.mock.calls[0]?.[0]?.input as {
+      workspaceCatalog?: unknown
+      readEvidence?: unknown
+      synopsisDiscuss?: { synopsisMarkdown?: string, outlineMarkdown?: string, chapterBodyMarkdown?: string }
+    }
     expect(sentInput.workspaceCatalog).toBeUndefined()
     expect(sentInput.readEvidence).toBeUndefined()
+    expect(sentInput.synopsisDiscuss?.synopsisMarkdown).toBeUndefined()
+    expect(sentInput.synopsisDiscuss?.outlineMarkdown).toBeUndefined()
     expect(sentInput.synopsisDiscuss?.chapterBodyMarkdown).toBe("当前章仍保留")
+    const assembled = new ModelContextAppender().formatDelta(
+      new ModelContextAppender().createDelta(
+        execute.mock.calls[0]?.[0] as PhaseRequestEnvelope,
+        execute.mock.calls[0]?.[0],
+        sent.filter((item) => item.turnId !== "current"),
+      ),
+    )
+    expect(assembled).not.toContain("设定集/readme.md")
+    expect(assembled).not.toContain(outline)
+    expect(assembled).not.toContain(removedChapter)
+    expect(assembled).toContain("当前章仍保留")
     expect(onCompacted.mock.calls[0]?.[0]?.estimatedInputTokens).toBeLessThanOrEqual(500_000)
     expect(order).toEqual(["compact", "think", "model"])
     expect(execute).toHaveBeenCalledTimes(1)
@@ -190,6 +216,11 @@ describe("provider-measured context compaction", () => {
     onCompacted.mockImplementation(() => { controller.abort(); return Promise.resolve() })
     await expect(executeWithContextCompaction({ ...input, options: { ...input.options, signal: controller.signal } })).rejects.toThrow()
     expect(execute).toHaveBeenCalledTimes(1)
+  })
+  it("keeps the compacted estimate when the provider reports a larger prompt", () => {
+    expect(contextTokensAfterProviderUsage(150_000, 565_700)).toBe(150_000)
+    expect(contextTokensAfterProviderUsage(150_000, 140_000)).toBe(140_000)
+    expect(contextTokensAfterProviderUsage(undefined, 565_700)).toBe(565_700)
   })
   it("parses comma-separated limits without treating other 400s as overflow", () => {
     expect(readContextLengthError(new Error("maximum context length is 1,048,576 tokens; requested 1,056,215 tokens"))).toEqual({ inputTokens: 1056215, limitTokens: 1048576 })

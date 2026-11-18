@@ -41,7 +41,19 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {}
 }
 
-/** Catalog and evidence already stored in removed history must not be weighed or sent again. */
+const REPLAYED_DISCUSS_KEYS = ["synopsisMarkdown", "outlineMarkdown", "latestDraftMarkdown"] as const
+
+function valueAppearsIn(value: unknown, haystack: string): boolean {
+  if (typeof value === "string") return value.length > 0 && haystack.includes(value)
+  try {
+    const serialized = JSON.stringify(value)
+    return serialized !== undefined && serialized.length > 2 && serialized !== "{}" && haystack.includes(serialized)
+  } catch {
+    return false
+  }
+}
+
+/** Catalog, evidence, and old planning text already stored in removed history must not be weighed or sent again. The current chapter body stays once. */
 function stripReplayedPayload(requestInput: unknown, hiddenContents: readonly string[]): unknown {
   if (requestInput === undefined || hiddenContents.length === 0) return requestInput
   const input = asRecord(requestInput)
@@ -64,7 +76,33 @@ function stripReplayedPayload(requestInput: unknown, hiddenContents: readonly st
       else next.readEvidence = kept
     }
   }
+  const discuss = asRecord(next.synopsisDiscuss)
+  if (Object.keys(discuss).length > 0) {
+    const nextDiscuss: Record<string, unknown> = { ...discuss }
+    let discussChanged = false
+    for (const key of REPLAYED_DISCUSS_KEYS) {
+      if (valueAppearsIn(nextDiscuss[key], hiddenText)) {
+        delete nextDiscuss[key]
+        discussChanged = true
+      }
+    }
+    if (discussChanged) {
+      changed = true
+      if (Object.keys(nextDiscuss).length === 0) delete next.synopsisDiscuss
+      else next.synopsisDiscuss = nextDiscuss
+    }
+  }
   return changed ? next : requestInput
+}
+
+/** Keep the footer on the compacted estimate when the provider still reports the pre-compaction prompt. */
+export function contextTokensAfterProviderUsage(
+  estimate: number | undefined,
+  measured: number | undefined,
+): number | undefined {
+  if (measured === undefined) return estimate
+  if (estimate !== undefined && measured > estimate) return estimate
+  return measured
 }
 
 function payloadWeight(

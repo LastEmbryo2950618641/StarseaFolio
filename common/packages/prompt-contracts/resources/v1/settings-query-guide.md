@@ -67,8 +67,8 @@
 当**当前设定**会剧透、或需要核对「写到第 N 章时怎么说」时，可在 `query` 上使用时态字段（创作台已支持）：
 
 - `purpose: "as_of_chapter"` + `asOfChapterSequence: N` — 读取**第 N 章及以前**视角下的设定片段（来自设定沿革，**非当前真相**）；`N` 必须 **小于** 当前焦点章序；
-- `purpose: "past_chapter_text"` + `asOfChapterSequence: N` — 读取**第 N 章定稿正文**（来自正式存档，**不是**工作区 `章节正文/` 正在改的文件）；`1 ≤ N ≤ 当前焦点章序`；
-- 当前焦点章若已注入 `chapterBodyMarkdown`，优先用该字段核对正文，不要因此去读工作区章节文件；每轮时态读次数有限，单次可用 `maxChars`（约 3000 内）控制体量；
+- `purpose: "past_chapter_text"` + `asOfChapterSequence: N` — 读取**第 N 章定稿正文**（优先正式存档；无存档时系统可回退工作区已发布定稿）；`1 ≤ N ≤ 当前焦点章序`；
+- 两条通道并存：`request_read`（`exactKeys` 指向 `章节正文/...`）读工作区 Markdown；`past_chapter_text` 读正式存档（可回退工作区）。当前焦点章若已注入 `chapterBodyMarkdown`，优先用该字段核对正文；每轮时态读次数有限，单次可用 `maxChars`（约 3000 内）控制体量；
 - 仍用 `sourceKinds: ["reference"]`（设定）或 `["source"]`（旧章正文），配合 `grep` / 行段 / `exactKeys`；
 - 返回证据会标注「第 N 章视角」；**不得**把 as-of 片段当作当前世界真相写入梗概或设定。
 
