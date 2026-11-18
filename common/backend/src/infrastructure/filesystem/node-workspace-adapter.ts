@@ -791,7 +791,16 @@ async function scanWorkspace(root: string, omitSharedPresentation = false): Prom
       const path = join(directory, entry.name)
       const relativePath = relative(root, path).replaceAll("\\", "/")
       if (omitSharedPresentation && isSharedPresentationPath(relativePath)) continue
-      const stats = await lstat(path)
+      // Folio writers leave short-lived ui-state.*.tmp files; never inventory them.
+      if (relativePath.startsWith(".folio/") && relativePath.endsWith(".tmp")) continue
+      let stats
+      try {
+        stats = await lstat(path)
+      } catch (error) {
+        // A concurrent writer may rename/delete the entry between readdir and lstat.
+        if (isNotFoundError(error)) continue
+        throw error
+      }
       if (stats.isSymbolicLink()) {
         issues.push({ code: "invalid_path", path: relativePath, message: "Symbolic links and directory junctions are not allowed" })
         continue

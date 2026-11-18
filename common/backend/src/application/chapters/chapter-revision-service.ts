@@ -791,6 +791,13 @@ export class ChapterRevisionService {
       input.signal?.throwIfAborted()
       const task = await this.dependencies.taskScopes.findTask(graphSyncTaskId)
       if (task?.status !== "completed") throw new RevisionInvalidStateError("图同步尚未完成，请在图修订任务中重试")
+      // Keep publish inside this try: a gate/catalog race after graph commit must
+      // leave the revision retryable instead of stuck in graph_sync_running.
+      const published = await this.completeGraphSync(graphSyncTaskId, input.workspaceRootRef)
+      if (published === undefined) {
+        throw new RevisionInvalidStateError("图同步已完成，但章节发布未能结束，请重试")
+      }
+      return published
     } catch (error) {
       const task = await this.dependencies.taskScopes.findTask(graphSyncTaskId)
       await this.dependencies.revisions.updateState({
@@ -803,7 +810,6 @@ export class ChapterRevisionService {
       })
       throw error
     }
-    return (await this.completeGraphSync(graphSyncTaskId, input.workspaceRootRef))!
   }
 
   public async retire(revisionTaskId: string): Promise<ChapterRevision> {

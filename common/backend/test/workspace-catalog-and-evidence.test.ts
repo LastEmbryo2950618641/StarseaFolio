@@ -125,9 +125,11 @@ describe("workspace catalog", () => {
     mkdirSync(join(workspaceRoot, ".folio", "actions"), { recursive: true })
     writeFileSync(join(workspaceRoot, ".folio", "host.json"), "{\"protocol\":\"starsea-writing\"}\n")
     writeFileSync(join(workspaceRoot, ".folio", "actions", "pending.json"), "{}\n")
+    writeFileSync(join(workspaceRoot, ".folio", "ui-state.json.32876.tmp"), "{\"schemaVersion\":1}\n")
     const withFolio = await workspace.validate(workspaceRoot)
     expect(withFolio.issues).toEqual([])
     expect(withFolio.inventory.some((entry) => entry.path === ".folio" || entry.path.startsWith(".folio/"))).toBe(false)
+    expect(withFolio.inventory.some((entry) => entry.path.endsWith(".tmp"))).toBe(false)
     const folioCatalog = await catalog.createSnapshot({
       snapshotId: ids.snapshot2, projectId: ids.project, workspaceRootRef: workspaceRoot, generatedAtMs: 350,
     })

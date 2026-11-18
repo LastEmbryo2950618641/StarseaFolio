@@ -511,7 +511,36 @@ export class ProjectRuntime {
       const repository = new SqliteChapterRevisionRepository(this.database)
       const failed = await repository.find(input.revisionTaskId)
       if (failed !== undefined && failed.status !== "completed" && failed.status !== "retired") {
-        await repository.updateState({ revisionTaskId: failed.revisionTaskId, status: failed.status, graphSyncStatus: "failed", updatedAtMs: Date.now() })
+        const graphTask = failed.graphSyncTaskId === undefined
+          ? undefined
+          : await this.taskScopes.findTask(failed.graphSyncTaskId)
+        // Publish can fail after the graph task already completed; keep a retryable
+        // status instead of freezing graph_sync_running with blocksTurn forever.
+        const nextStatus = graphTask?.status === "completed"
+          ? "committing_content"
+          : failed.status === "graph_sync_running"
+            ? "awaiting_user_decision"
+            : failed.status
+        await repository.updateState({
+          revisionTaskId: failed.revisionTaskId,
+          status: nextStatus,
+          graphSyncStatus: graphTask?.status === "completed" ? "running" : "failed",
+          updatedAtMs: Date.now(),
+        })
+        if (
+          nextStatus === "committing_content"
+          || (nextStatus === "awaiting_user_decision" && failed.status === "graph_sync_running")
+        ) {
+          try {
+            await repository.updateFinalization({
+              revisionTaskId: failed.revisionTaskId,
+              status: "graph_sync_pending",
+              updatedAtMs: Date.now(),
+            })
+          } catch {
+            // Submission may fail before finalization exists.
+          }
+        }
       }
       await this.database.updateTable("tasks").set({ error_json: JSON.stringify({ message: error instanceof Error ? error.message : String(error) }) })
         .where("id", "=", input.revisionTaskId).execute()

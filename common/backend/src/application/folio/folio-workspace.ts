@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
@@ -59,10 +60,16 @@ export class FolioWorkspace {
     await this.ensureLayout()
     const next = folioUiStateSchema.parse({ ...state, updatedAtMs: Date.now() })
     const target = join(folioDir(this.workspaceRoot), "ui-state.json")
-    const temp = `${target}.${process.pid}.tmp`
+    // Unique temp name so concurrent writers never fight over the same pid.tmp path.
+    const temp = `${target}.${process.pid}.${randomUUID()}.tmp`
     await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, "utf8")
-    await rm(target, { force: true })
-    await rename(temp, target)
+    try {
+      await rm(target, { force: true })
+      await rename(temp, target)
+    } catch (error) {
+      await rm(temp, { force: true }).catch(() => undefined)
+      throw error
+    }
     return next
   }
 

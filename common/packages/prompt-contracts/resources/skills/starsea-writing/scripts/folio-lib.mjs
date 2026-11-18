@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, readdirSync, existsSync } from "node:fs"
 import { join } from "node:path"
 
@@ -40,10 +41,15 @@ export function writeUiState(workspaceRoot, state) {
   mkdirSync(root, { recursive: true })
   const next = { ...state, updatedAtMs: Date.now() }
   const target = join(root, "ui-state.json")
-  const temp = `${target}.${process.pid}.tmp`
+  const temp = `${target}.${process.pid}.${randomUUID()}.tmp`
   writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, "utf8")
-  if (existsSync(target)) unlinkSync(target)
-  renameSync(temp, target)
+  try {
+    if (existsSync(target)) unlinkSync(target)
+    renameSync(temp, target)
+  } catch (error) {
+    try { unlinkSync(temp) } catch { /* temp already gone */ }
+    throw error
+  }
   return next
 }
 

@@ -23,9 +23,19 @@ describe("folio protocol", () => {
       await folio.writeHost({ host: "starseafolio", workspaceRoot: root, skillId: "starsea-writing" })
       const state = emptyFolioUiState()
       await folio.writeUiState(state)
+      await folio.writeUiState({
+        ...state,
+        panels: {
+          ...state.panels,
+          creationDesk: { ...state.panels.creationDesk, status: "running" },
+        },
+      })
       const loaded = await folio.readUiState()
       expect(loaded.schemaVersion).toBe(1)
-      expect(loaded.panels.creationDesk.status).toBe("idle")
+      expect(loaded.panels.creationDesk.status).toBe("running")
+      const { readdir } = await import("node:fs/promises")
+      const leftover = (await readdir(join(root, ".folio"))).filter((name) => name.endsWith(".tmp"))
+      expect(leftover).toEqual([])
 
       const action = folioActionSchema.parse({
         actionId: randomUUID(),
