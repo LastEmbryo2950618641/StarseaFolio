@@ -122,6 +122,17 @@ describe("workspace catalog", () => {
     expect(withCover.entries).toEqual(second.entries)
     expect(withCover.digest).toBe(second.digest)
     expect(await history.capture(workspaceRoot)).toEqual(beforeCover)
+    mkdirSync(join(workspaceRoot, ".folio", "actions"), { recursive: true })
+    writeFileSync(join(workspaceRoot, ".folio", "host.json"), "{\"protocol\":\"starsea-writing\"}\n")
+    writeFileSync(join(workspaceRoot, ".folio", "actions", "pending.json"), "{}\n")
+    const withFolio = await workspace.validate(workspaceRoot)
+    expect(withFolio.issues).toEqual([])
+    expect(withFolio.inventory.some((entry) => entry.path === ".folio" || entry.path.startsWith(".folio/"))).toBe(false)
+    const folioCatalog = await catalog.createSnapshot({
+      snapshotId: ids.snapshot2, projectId: ids.project, workspaceRootRef: workspaceRoot, generatedAtMs: 350,
+    })
+    expect(folioCatalog.entries).toEqual(second.entries)
+    expect(folioCatalog.digest).toBe(second.digest)
     await history.restore(workspaceRoot, beforeCover)
     expect(readFileSync(coverPath)).toEqual(coverBytes)
 
