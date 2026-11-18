@@ -225,6 +225,20 @@ export function discussTurnHasTodos(todos: readonly SynopsisConversationTodo[]):
   return todos.length > 0
 }
 
+/** Last assistant list the desk already showed. The in-memory hub is empty after a restart. */
+export function latestSavedDiscussTodos(
+  messages: readonly { role: string; todos?: readonly SynopsisConversationTodo[] | undefined }[],
+): readonly SynopsisConversationTodo[] {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.role !== "assistant") continue
+    if (message.todos !== undefined && message.todos.length > 0) {
+      return message.todos.map((item) => ({ ...item }))
+    }
+  }
+  return []
+}
+
 /** True when every todo is completed or cancelled (or the list is empty). */
 export function discussTodosAreSettled(todos: readonly SynopsisConversationTodo[]): boolean {
   if (todos.length === 0) return true

@@ -50,6 +50,63 @@ describe("provider-measured context compaction", () => {
     await executeWithContextCompaction(input)
     expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["system", "c5", "current"])
   })
+  it("drops replayed catalog and evidence, and old phase-request chapters, before the model call", async () => {
+    const { input, execute, onCompacted } = setup(1_000_000)
+    const catalog = { entries: ["章节正文/第一章.md", "设定集/readme.md"] }
+    const evidence = [{ ownerId: "设定集/readme.md", semanticText: "旧资料不应在压缩后再次装回本次请求里。" }]
+    const removedChapter = `第一章正文${"章".repeat(80)}`
+    input.request = {
+      ...request,
+      input: { workspaceCatalog: catalog, readEvidence: evidence, synopsisDiscuss: { chapterBodyMarkdown: "当前章仍保留" } },
+    } as PhaseRequestEnvelope
+    input.options.contextMessages = [
+      message("system", "system_rules", "old", 0),
+      { ...message("old-delta", "phase_request", "old", 1), content: `旧请求 ${JSON.stringify({ workspaceCatalog: catalog, readEvidence: evidence })}` },
+      { ...message("old-chapter", "phase_request", "old", 2), content: JSON.stringify({ chapterBodyMarkdown: removedChapter }) },
+      { ...message("newer-chapter", "phase_request", "old", 3), content: JSON.stringify({ chapterBodyMarkdown: "较新的一章" }) },
+      message("current", "phase_request", "current", 4),
+    ]
+    const order: string[] = []
+    onCompacted.mockImplementation(async () => { order.push("compact") })
+    input.onReadyToCall = () => { order.push("think") }
+    execute.mockImplementation(async () => {
+      order.push("model")
+      return result
+    })
+    await executeWithContextCompaction(input)
+    const sent = execute.mock.calls[0]?.[1]?.contextMessages ?? []
+    expect(sent.map((item) => item.messageId)).not.toContain("old-delta")
+    expect(sent.some((item) => item.content.includes(removedChapter))).toBe(false)
+    expect(sent.map((item) => item.messageId)).toContain("current")
+    const sentInput = execute.mock.calls[0]?.[0]?.input as { workspaceCatalog?: unknown, readEvidence?: unknown, synopsisDiscuss?: { chapterBodyMarkdown?: string } }
+    expect(sentInput.workspaceCatalog).toBeUndefined()
+    expect(sentInput.readEvidence).toBeUndefined()
+    expect(sentInput.synopsisDiscuss?.chapterBodyMarkdown).toBe("当前章仍保留")
+    expect(onCompacted.mock.calls[0]?.[0]?.estimatedInputTokens).toBeLessThanOrEqual(500_000)
+    expect(order).toEqual(["compact", "think", "model"])
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+  it("drops older copies of the same system rules", async () => {
+    const { input, execute } = setup(1_000_000)
+    input.options.contextMessages = [
+      { ...message("rules-old", "system_rules", "old", 0), content: "相同规则" },
+      { ...message("rules-new", "system_rules", "old", 1), content: "相同规则" },
+      message("old", "phase_response", "old", 2),
+      message("current", "phase_request", "current", 3),
+    ]
+    await executeWithContextCompaction(input)
+    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["rules-new", "current"])
+  })
+  it("calls the model once when only the current turn remains above the target", async () => {
+    const { input, execute } = setup(1_000_000)
+    input.options.contextMessages = [
+      message("old", "phase_response", "old", 1),
+      { ...message("current", "phase_request", "current", 2), content: "章".repeat(100_000) },
+    ]
+    await executeWithContextCompaction(input)
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["current"])
+  })
   it("keeps removing old chapters when the request body still holds the input above half the window", async () => {
     const { input, execute } = setup(1_000_000)
     input.request = { ...request, input: { synopsis: "设定".repeat(20) } } as PhaseRequestEnvelope

@@ -25,15 +25,65 @@ export function readContextLengthError(error: unknown): { inputTokens?: number; 
   }
 }
 
-function protectedRequestWeight(phasePrompt: string | undefined, requestInput: unknown): number {
-  const promptWeight = phasePrompt === undefined || phasePrompt.length === 0 ? 0 : estimateModelMessageTokens(phasePrompt)
-  if (requestInput === undefined) return promptWeight
+function textWeight(value: unknown): number {
+  if (typeof value === "string") return value.length === 0 ? 0 : estimateModelMessageTokens(value)
   try {
-    const serialized = JSON.stringify(requestInput)
-    return promptWeight + (serialized.length === 0 ? 0 : estimateModelMessageTokens(serialized))
+    const serialized = JSON.stringify(value)
+    return serialized === undefined || serialized.length === 0 || serialized === "{}" ? 0 : estimateModelMessageTokens(serialized)
   } catch {
-    return promptWeight
+    return 0
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+/** Catalog and evidence already stored in removed history must not be weighed or sent again. */
+function stripReplayedPayload(requestInput: unknown, hiddenContents: readonly string[]): unknown {
+  if (requestInput === undefined || hiddenContents.length === 0) return requestInput
+  const input = asRecord(requestInput)
+  if (Object.keys(input).length === 0) return requestInput
+  const hiddenText = hiddenContents.join("\n")
+  let changed = false
+  const next: Record<string, unknown> = { ...input }
+  if (next.workspaceCatalog !== undefined && hiddenText.includes('"workspaceCatalog"')) {
+    delete next.workspaceCatalog
+    changed = true
+  }
+  if (Array.isArray(next.readEvidence)) {
+    const kept = next.readEvidence.filter((item) => {
+      const ownerId = asRecord(item).ownerId
+      return typeof ownerId !== "string" || ownerId.length === 0 || !hiddenText.includes(ownerId)
+    })
+    if (kept.length !== next.readEvidence.length) {
+      changed = true
+      if (kept.length === 0) delete next.readEvidence
+      else next.readEvidence = kept
+    }
+  }
+  return changed ? next : requestInput
+}
+
+function payloadWeight(
+  requestInput: unknown,
+  hiddenContents: readonly string[],
+  visibleContents: readonly string[],
+): number {
+  const stripped = stripReplayedPayload(stripReplayedPayload(requestInput, hiddenContents), visibleContents)
+  const input = asRecord(stripped)
+  const discuss = asRecord(input.synopsisDiscuss)
+  if (Object.keys(discuss).length === 0) return textWeight(stripped)
+  const nextDiscuss = { ...discuss }
+  for (const key of ["chapterBodyMarkdown", "synopsisMarkdown", "outlineMarkdown", "latestDraftMarkdown"] as const) {
+    const value = nextDiscuss[key]
+    if (typeof value === "string" && value.length > 0 && visibleContents.some((content) => content.includes(value))) {
+      delete nextDiscuss[key]
+    }
+  }
+  return textWeight({ ...input, ...(Object.keys(nextDiscuss).length === 0 ? {} : { synopsisDiscuss: nextDiscuss }) })
 }
 
 function latestToolDescriptionIds(messages: readonly VisibleModelContextMessage[]): Set<string> {
@@ -50,6 +100,27 @@ function latestToolDescriptionIds(messages: readonly VisibleModelContextMessage[
     }
   }
   return new Set([...latest.values()].map((message) => message.messageId))
+}
+
+function isChapterBodyMessage(message: VisibleModelContextMessage): boolean {
+  return message.kind === "canonical_chapter"
+    || message.kind === "chapter_revision"
+    || (message.kind === "phase_request" && message.content.includes('"chapterBodyMarkdown"'))
+}
+
+function duplicateSystemRulesIds(messages: readonly VisibleModelContextMessage[], currentTurnId: string): Set<string> {
+  const latestByContent = new Map<string, string>()
+  for (const message of [...messages].sort((left, right) => left.sequence - right.sequence)) {
+    if (message.kind !== "system_rules" || message.turnId === currentTurnId) continue
+    latestByContent.set(message.content, message.messageId)
+  }
+  const kept = new Set(latestByContent.values())
+  const duplicates = new Set<string>()
+  for (const message of messages) {
+    if (message.kind !== "system_rules" || message.turnId === currentTurnId) continue
+    if (!kept.has(message.messageId)) duplicates.add(message.messageId)
+  }
+  return duplicates
 }
 
 function isProtectedDiscussState(message: VisibleModelContextMessage): boolean {
@@ -78,42 +149,47 @@ export async function executeWithContextCompaction(input: {
   lastRequestInputTokens?: number
   triggerRatio: number
   targetRatio: number
+  onReadyToCall?(): void
   onCompacted(event: ContextCompactionEvent): Promise<void>
 }): Promise<PhaseModelExecution> {
   let messages = [...(input.options.contextMessages ?? [])]
   let windowTokens = input.model.info?.contextWindowTokens ?? 64_000
   const compact = async (reason: ContextCompactionEvent["reason"], observedInputTokens?: number): Promise<boolean> => {
     const keptDescriptions = latestToolDescriptionIds(messages)
+    const duplicateRules = duplicateSystemRulesIds(messages, input.request.turnId)
     const removable = messages.filter((message) => (
-      message.kind !== "system_rules"
+      message.turnId !== input.request.turnId
       && !isProtectedDiscussState(message)
       && !keptDescriptions.has(message.messageId)
-      && message.turnId !== input.request.turnId
+      && (message.kind !== "system_rules" || duplicateRules.has(message.messageId))
     ))
-    const narrative = (message: VisibleModelContextMessage): boolean => message.kind === "canonical_chapter" || message.kind === "chapter_revision"
     const weights = new Map(messages.map((message) => [message.messageId, estimateModelMessageTokens(message.content)]))
-    const messageWeight = [...weights.values()].reduce((sum, weight) => sum + weight, 0)
-    const fixedWeight = protectedRequestWeight(input.options.phasePrompt?.text, input.request.input)
-    const baselineWeight = messageWeight + fixedWeight
+    const hidden = new Set<string>()
+    const outgoingWeight = (): number => {
+      const visible = messages.filter((message) => !hidden.has(message.messageId))
+      const hiddenContents = messages.filter((message) => hidden.has(message.messageId)).map((message) => message.content)
+      const messageWeight = visible.reduce((sum, message) => sum + (weights.get(message.messageId) ?? 0), 0)
+      return messageWeight + textWeight(input.options.phasePrompt?.text) + payloadWeight(input.request.input, hiddenContents, visible.map((message) => message.content))
+    }
+    const baselineWeight = outgoingWeight()
     const targetFraction = observedInputTokens === undefined || observedInputTokens <= 0 || baselineWeight <= 0
       ? 0
       : Math.min(1, windowTokens * input.targetRatio / observedInputTokens)
     const targetWeight = baselineWeight * targetFraction
-    const hidden = new Set<string>()
-    let remainingWeight = baselineWeight
-    const hide = (messageId: string): void => {
-      if (hidden.has(messageId)) return
-      hidden.add(messageId)
-      remainingWeight -= weights.get(messageId) ?? 0
-    }
     for (const message of removable) {
-      if (!narrative(message)) hide(message.messageId)
+      if (!isChapterBodyMessage(message)) hidden.add(message.messageId)
     }
-    for (const message of removable.filter(narrative).sort((left, right) => left.sequence - right.sequence)) {
-      if (remainingWeight <= targetWeight) break
-      hide(message.messageId)
+    for (const message of removable.filter(isChapterBodyMessage).sort((left, right) => left.sequence - right.sequence)) {
+      if (outgoingWeight() <= targetWeight) break
+      hidden.add(message.messageId)
     }
     if (hidden.size === 0) return false
+    const hiddenContents = messages.filter((message) => hidden.has(message.messageId)).map((message) => message.content)
+    const stripped = stripReplayedPayload(input.request.input, hiddenContents)
+    if (stripped !== input.request.input) {
+      (input.request as { input?: unknown }).input = stripped
+    }
+    const remainingWeight = outgoingWeight()
     messages = messages.filter((message) => !hidden.has(message.messageId))
     const estimatedInputTokens = observedInputTokens === undefined || observedInputTokens <= 0 || baselineWeight <= 0
       ? undefined
@@ -133,6 +209,7 @@ export async function executeWithContextCompaction(input: {
   }
   for (let retry = 0; ; retry += 1) {
     input.options.signal?.throwIfAborted()
+    input.onReadyToCall?.()
     try {
       return await input.model.execute(input.request, { ...input.options, contextMessages: messages })
     } catch (error) {

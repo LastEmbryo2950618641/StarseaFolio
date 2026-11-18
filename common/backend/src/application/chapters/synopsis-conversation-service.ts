@@ -149,6 +149,7 @@ import {
   discussArtifactRequiresTodos,
   discussTodosAreSettled,
   discussTurnHasTodos,
+  latestSavedDiscussTodos,
   isDiscussTodoBootstrapTool,
   isPrecedingChapterPublishGateError,
   partitionChapterDraftSequences,
@@ -655,6 +656,12 @@ export class SynopsisConversationService {
     // resurface the previous turn's completed thinking/content.
     const streamStartedAtMs = this.dependencies.now()
     synopsisConversationStreamHub.begin(input.projectId, session.sessionId, streamStartedAtMs)
+    synopsisConversationStreamHub.restoreCarriedTodos(
+      input.projectId,
+      session.sessionId,
+      latestSavedDiscussTodos(priorMessages),
+      streamStartedAtMs,
+    )
     try {
       const confirmedDraft = await this.publishConfirmedDraftIfRequested({
         projectId: input.projectId,
@@ -2764,6 +2771,7 @@ export class SynopsisConversationService {
     let consecutiveTodoWrites = 0
     let todoNoProgressStreak = 0
     let todoLoopRepairIssued = false
+    let todoRequiredRepairs = 0
     let autoContinueBlocked = false
     const recordStepOutcome = async (step: string, failure?: string): Promise<void> => {
       const saved = readDiscussStepFailures(
@@ -2800,6 +2808,8 @@ export class SynopsisConversationService {
     }
     const describeRetryStep = describeRequiredRetryStep(storedContext, DESCRIBE_REQUIRED_MESSAGE)
     if (describeRetryStep !== undefined) await recordStepOutcome(describeRetryStep)
+    const stuckTodoStep = describeRequiredRetryStep(storedContext, DISCUSS_TODO_REQUIRED_HINT)
+    if (stuckTodoStep !== undefined) await recordStepOutcome(stuckTodoStep)
     let accumulatedReasoning = ""
     let attempt = 0
     let missingArtifactRetries = 0
@@ -3155,7 +3165,6 @@ export class SynopsisConversationService {
       let streamedReasoning = ""
       let streamedContent = ""
       const thinkingRound = attempt + 1
-      synopsisConversationStreamHub.beginThinkingRound(input.projectId, thinkingRound, this.dependencies.now())
       let execution
       try {
         execution = await executeWithContextCompaction({
@@ -3166,18 +3175,18 @@ export class SynopsisConversationService {
             ?? defaultProjectSettings.execution.contextCompactionThresholdRatio,
           targetRatio: settings?.execution.contextCompressionTargetRatio
             ?? defaultProjectSettings.execution.contextCompressionTargetRatio,
+          onReadyToCall: () => {
+            synopsisConversationStreamHub.beginThinkingRound(input.projectId, thinkingRound, this.dependencies.now())
+          },
           onCompacted: async (event) => {
             if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
             await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, event.hiddenMessageIds, this.dependencies.now())
-            if (event.estimatedInputTokens !== undefined) lastRequestInputTokens = event.estimatedInputTokens
-            // Bootstrap files may have existed only in the removed history.
-            const bootstrapEvidence = await this.bootstrapSynopsisEvidence({
-              projectId: input.projectId, workspaceRootRef: input.workspaceRootRef, catalog,
-              ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
-            })
-            readEvidence = [...bootstrapEvidence, ...readEvidence.filter((item) => !bootstrapEvidence.some((entry) => entry.ownerId === item.ownerId))]
-            request.input = { ...request.input as object, readEvidence }
-            request.committedReadIds = readEvidence.map((item) => item.readId)
+            if (event.estimatedInputTokens !== undefined) {
+              lastRequestInputTokens = event.estimatedInputTokens
+              synopsisConversationStreamHub.addUsage(input.projectId, {
+                lastRequestInputTokens: event.estimatedInputTokens,
+              }, this.dependencies.now())
+            }
             runtimeLog("info", "synopsis-conversation", "context.compaction.applied", { projectId: input.projectId, sessionId: input.sessionId, ...event })
           },
           options: {
@@ -3567,8 +3576,10 @@ export class SynopsisConversationService {
         if (
           !isDiscussTodoBootstrapTool(toolRequest.name)
           && !discussTurnHasTodos(synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos)
+          && todoRequiredRepairs < 2
+          && remainingCalls > 0
         ) {
-          await recordStepOutcome("todo_required", DISCUSS_TODO_REQUIRED_HINT)
+          todoRequiredRepairs += 1
           await noteDiscussBlock("todo_required", DISCUSS_TODO_REQUIRED_HINT, { source: toolArtifact.data })
           attempt += 1
           continue
@@ -3896,8 +3907,10 @@ export class SynopsisConversationService {
         const turnTodos = synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos
         if (input.workStyleGate === undefined
           && discussArtifactRequiresTodos(artifact.data)
-          && !discussTurnHasTodos(turnTodos)) {
-          await recordStepOutcome("todo_required", DISCUSS_TODO_REQUIRED_HINT)
+          && !discussTurnHasTodos(turnTodos)
+          && todoRequiredRepairs < 2
+          && remainingCalls > 0) {
+          todoRequiredRepairs += 1
           pendingWrites = retainDiscussWrites(artifact.data)
           await noteDiscussBlock("todo_required", DISCUSS_TODO_REQUIRED_HINT, { source: artifact.data, held: true })
           attempt += 1
@@ -4398,8 +4411,10 @@ export class SynopsisConversationService {
       }
 
       if (input.workStyleGate === undefined
-        && !discussTurnHasTodos(synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos)) {
-        await recordStepOutcome("todo_required", DISCUSS_TODO_REQUIRED_HINT)
+        && !discussTurnHasTodos(synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos)
+        && todoRequiredRepairs < 2
+        && remainingCalls > 0) {
+        todoRequiredRepairs += 1
         await noteDiscussBlock("todo_required", DISCUSS_TODO_REQUIRED_HINT)
         attempt += 1
         continue

@@ -18,6 +18,19 @@ describe("synopsis stream hub todo carry-over", () => {
     expect(hub.carriedTodos("p1").map((item) => item.id)).toEqual(["b", "c"])
   })
 
+  it("restores the saved panel after the in-memory hub is gone", () => {
+    const hub = new SynopsisConversationStreamHub()
+    hub.begin("p1", "s1", 1)
+    expect(hub.peek("p1", "s1").todos).toEqual([])
+    hub.restoreCarriedTodos("p1", "s1", [
+      { id: "done", content: "已写完", status: "completed" },
+      { id: "open", content: "继续第九章", status: "in_progress" },
+      { id: "next", content: "核对设定", status: "pending" },
+    ], 2)
+    expect(hub.peek("p1", "s1").todos.map((item) => item.id)).toEqual(["done", "open", "next"])
+    expect(hub.carriedTodos("p1").map((item) => item.id)).toEqual(["open", "next"])
+  })
+
   it("does not carry todos across sessions", () => {
     const hub = new SynopsisConversationStreamHub()
     hub.begin("p1", "s1", 1)

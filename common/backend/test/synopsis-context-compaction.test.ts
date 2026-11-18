@@ -8,7 +8,7 @@ import { synopsisConversationStreamHub } from "../src/application/chapters/synop
 import { openChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 describe("synopsis context compaction integration", () => {
-  it.each(["usage", "overflow"] as const)("recovers through %s without duplicating the user message or losing bootstrap files", async (mode) => {
+  it.each(["usage", "overflow"] as const)("recovers through %s without duplicating the user message or reattaching removed bootstrap files", async (mode) => {
     const fake = new FakeAiModelAdapter(randomUUID)
     let secondSend = false
     let rejected = false
@@ -53,7 +53,7 @@ describe("synopsis context compaction integration", () => {
       const sent = await invoke("synopsis.conversation.send", { message: "继续讨论站台上的线索" })
       expect(sent.messages.filter((m) => m.role === "user" && m.content === "继续讨论站台上的线索")).toHaveLength(1)
       expect(oldMessagesSent).toBe(false)
-      expect(sawBootstrap).toBe(true)
+      expect(sawBootstrap).toBe(false)
       if (mode === "overflow") expect(retriedWithSmallerHistory).toBe(true)
     } finally {
       await harness.container.close()

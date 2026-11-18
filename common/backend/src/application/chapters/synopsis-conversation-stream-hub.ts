@@ -179,6 +179,26 @@ export class SynopsisConversationStreamHub {
     })
   }
 
+  /**
+   * Put the last saved panel back after a process restart.
+   * begin() only carries todos that are still in this process.
+   */
+  public restoreCarriedTodos(
+    projectId: string,
+    sessionId: string,
+    todos: readonly SynopsisConversationTodo[],
+    nowMs: number,
+  ): void {
+    const current = this.byProject.get(projectId)
+    if (current === undefined || current.status !== "running" || current.sessionId !== sessionId) return
+    if (current.todos.length > 0 || todos.length === 0) return
+    current.todos = todos.map((item) => ({ ...item }))
+    for (const item of current.todos) {
+      if (item.status === "pending" || item.status === "in_progress") current.carriedTodoIds.add(item.id)
+    }
+    current.updatedAtMs = nowMs
+  }
+
   /** Open todos carried into the current send from the previous one (same session). */
   public carriedTodos(projectId: string): readonly SynopsisConversationTodo[] {
     const current = this.byProject.get(projectId)

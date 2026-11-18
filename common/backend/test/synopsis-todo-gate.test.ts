@@ -9,6 +9,7 @@ import {
   discussArtifactRequiresTodos,
   discussTodosAreSettled,
   discussTurnHasTodos,
+  latestSavedDiscussTodos,
   isDiscussTodoBootstrapTool,
   isPrecedingChapterPublishGateError,
   partitionChapterDraftSequences,
@@ -25,6 +26,12 @@ describe("synopsis todo gate", () => {
     expect(isDiscussTodoBootstrapTool("bash")).toBe(false)
     expect(discussTurnHasTodos([])).toBe(false)
     expect(discussTurnHasTodos([{ id: "1", content: "读本机目录", status: "in_progress" }])).toBe(true)
+    expect(latestSavedDiscussTodos([
+      { role: "assistant", todos: [{ id: "old", content: "旧清单", status: "completed" }] },
+      { role: "assistant" },
+      { role: "user" },
+      { role: "assistant", todos: [{ id: "kept", content: "继续写第九章", status: "in_progress" }] },
+    ]).map((item) => item.id)).toEqual(["kept"])
     expect(DISCUSS_TODO_REQUIRED_HINT).toContain("todo_write")
   })
 
