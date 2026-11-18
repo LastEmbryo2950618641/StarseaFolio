@@ -437,7 +437,7 @@ describe("cold-start style gate flow", () => {
       payload: { ...base, userInput: "开始正式推演", chapterSequence: 1 },
     })
     expect(turn.ok).toBe(false)
-    if (!turn.ok) expect(turn.error.message).toContain("作品风格门禁尚未通过")
+    if (!turn.ok) expect(turn.error.message).toMatch(/尚未选择文风|作品风格文档尚未合格/)
 
     const requestsBeforeSelection = modelRequests.length
     const selected = await invoke<{
@@ -539,6 +539,6 @@ describe("cold-start style gate flow", () => {
     }
     const runtime = harness.container.getCurrentRuntime()
     expect(runtime).toBeDefined()
-    await expect(runtime!.assertWorkStyleGateReady()).rejects.toThrow("作品风格门禁尚未通过")
+    await expect(runtime!.assertWorkStyleGateReady()).rejects.toThrow("尚未选择文风")
   })
 })

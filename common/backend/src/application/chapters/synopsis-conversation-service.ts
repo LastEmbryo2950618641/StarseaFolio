@@ -612,7 +612,11 @@ export class SynopsisConversationService {
     if (styleGateState.status === "ready" && digest(styleMarkdown ?? "") !== styleGateState.styleDigest) {
       styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
         projectId: input.projectId,
-        event: { type: "style_document_changed", currentDigest: digest(styleMarkdown ?? "") },
+        event: {
+          type: "style_document_changed",
+          currentDigest: digest(styleMarkdown ?? ""),
+          ...(styleMarkdown === undefined ? {} : { markdown: styleMarkdown }),
+        },
         updatedAtMs: this.dependencies.now(),
       })
     }
@@ -1087,7 +1091,11 @@ export class SynopsisConversationService {
       if (styleGateState.status === "ready" && digest(styleDiskMarkdown ?? "") !== styleGateState.styleDigest) {
         styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
           projectId: input.projectId,
-          event: { type: "style_document_changed", currentDigest: digest(styleDiskMarkdown ?? "") },
+          event: {
+            type: "style_document_changed",
+            currentDigest: digest(styleDiskMarkdown ?? ""),
+            ...(styleDiskMarkdown === undefined ? {} : { markdown: styleDiskMarkdown }),
+          },
           updatedAtMs: this.dependencies.now(),
         })
       }
@@ -1750,7 +1758,11 @@ export class SynopsisConversationService {
           } else if (styleGateState.status === "ready") {
             styleGateState = await this.dependencies.conversation.transitionWorkStyleGate({
               projectId: input.projectId,
-              event: { type: "style_document_changed", currentDigest: digest(savedStyle) },
+              event: {
+                type: "style_document_changed",
+                currentDigest: digest(savedStyle),
+                markdown: savedStyle,
+              },
               updatedAtMs: this.dependencies.now(),
             })
           }
@@ -5924,9 +5936,10 @@ function buildWorkStyleGatePromptAppendix(input: Readonly<{
   ]
   if (input.status === "awaiting_choice") {
     return [
-      "【风格门禁阶段：AI评估并推荐，等待用户选择】",
+      "【风格门禁阶段：尚未选择文风，引导用户选择】",
       ...sharedRules,
-      "先比较大类、次大类与笔风候选规则正文和用户构思的兼容程度，挑出最合适的 2–3 个组合供用户选择。assistantMessage 必须简要呈现你的评估依据、推荐顺序以及规则是否需要适配。",
+      "本轮优先告诉用户：当前还没有选择文风，需要先选定小说大类、次大类和笔风，不能直接写梗概/大纲/正文。不要报系统门禁错误，也不要假装已选好。",
+      "先比较大类、次大类与笔风候选规则正文和用户构思的兼容程度，挑出最合适的 2–3 个组合供用户选择。assistantMessage 必须先点明「尚未选择文风」，再简要呈现评估依据、推荐顺序以及规则是否需要适配。",
       "choices 必须有 2–3 个 continue_discuss 选项；每个选项的 workStyleSelection 必须结构化给出 novelMajorCategoryRulePath、novelSubcategoryRulePath、proseStyleRulePath 三条精确路径，label 显示三份规则文件名并写明推荐理由。路径必须逐项匹配真实 readEvidence。不要写入作品风格文件或章节内容；用户选择后再进入下一阶段。",
     ].join("\n")
   }

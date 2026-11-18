@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   canProceedPastWorkStyleGate,
+  extractWorkStyleSelectionFromMarkdown,
   initialWorkStyleGateState,
   transitionWorkStyleGateState,
 } from "../src/core/workspace/work-style-gate-state.js"
@@ -113,7 +114,28 @@ describe("work style gate state machine", () => {
     expect(missingPlatformRule).toEqual(selected)
   })
 
-  it("invalidates readiness when the approved style document changes", () => {
+  it("keeps readiness when the approved style document is adjusted but still complete", () => {
+    const ready = {
+      status: "ready" as const,
+      selectedProseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+      styleDigest: "approved-digest",
+    }
+    const adjusted = transitionWorkStyleGateState(ready, {
+      type: "style_document_changed",
+      currentDigest: "modified-digest",
+      markdown: `${completeStyle}\n\n- 追加：允许后续微调。`,
+    })
+
+    expect(adjusted).toEqual({
+      ...ready,
+      styleDigest: "modified-digest",
+    })
+    expect(canProceedPastWorkStyleGate(adjusted)).toBe(true)
+  })
+
+  it("demotes readiness only when the adjusted style document becomes incomplete", () => {
     const ready = {
       status: "ready" as const,
       selectedProseStylePath: "表现输出/笔风规则/仙侠.md",
@@ -123,7 +145,8 @@ describe("work style gate state machine", () => {
     }
     const invalidated = transitionWorkStyleGateState(ready, {
       type: "style_document_changed",
-      currentDigest: "modified-digest",
+      currentDigest: "broken-digest",
+      markdown: "# 作品风格\n\n## 1. 语体笔风\n待定",
     })
 
     expect(invalidated).toEqual({
@@ -133,6 +156,14 @@ describe("work style gate state machine", () => {
       novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
     })
     expect(canProceedPastWorkStyleGate(invalidated)).toBe(false)
+  })
+
+  it("recovers selection paths from a complete style document", () => {
+    expect(extractWorkStyleSelectionFromMarkdown(completeStyle)).toEqual({
+      proseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+    })
   })
 
   it("rejects paths outside the preset prose-style directory", () => {

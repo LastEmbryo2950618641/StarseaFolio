@@ -149,7 +149,7 @@ describe("work style gate", () => {
     expect(assist.arcPlanMarkdown).toBeUndefined()
     expect(assist.presentationWrites).toBeUndefined()
     expect(assist.choices).toEqual([])
-    expect(assist.content).toContain("AI尚未给出有效的风格评估")
+    expect(assist.content).toContain("当前尚未选择文风")
     expect(notices).toEqual([])
   })
 

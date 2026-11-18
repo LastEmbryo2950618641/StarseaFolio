@@ -86,7 +86,7 @@ describe("chapter harness creative setup fixtures", () => {
       expect(volumePlanningGateReady(plan)).toBe(false)
       const runtime = harness.container.getCurrentRuntime()
       if (runtime === undefined) throw new Error("Fixture runtime was not opened")
-      await expect(runtime.assertWorkStyleGateReady()).rejects.toThrow("作品风格门禁尚未通过")
+      await expect(runtime.assertWorkStyleGateReady()).rejects.toThrow("尚未选择文风")
     } finally {
       await harness.container.close()
       rmSync(harness.root, { recursive: true, force: true })

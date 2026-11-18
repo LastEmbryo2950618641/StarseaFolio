@@ -155,7 +155,11 @@ export function applyColdStartStyleGate<T extends ColdStartAssistSlice>(input: R
       choices: completeStyleChoices,
       ...(typeof rest.content === "string" && rest.content.length > 0
         ? {}
-        : { content: "AI尚未给出有效的风格评估，请重试本轮讨论。" }),
+        : {
+          content: input.styleChoicePending === true
+            ? "当前尚未选择文风。请先从下面的推荐组合中选择小说大类、次大类和笔风，选好后再继续写梗概或正文。"
+            : "AI尚未给出有效的风格评估，请重试本轮讨论。",
+        }),
     } as unknown as T,
     assessment,
     notices: [],

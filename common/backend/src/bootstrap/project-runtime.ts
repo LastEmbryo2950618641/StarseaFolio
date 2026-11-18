@@ -43,7 +43,12 @@ import {
 } from "../application/index.js"
 import type { InternalProjectStore, WorkspacePort, InternalStorePort } from "../application/workspace/index.js"
 import { PROJECT_MANIFEST_VERSION, DEFAULT_VOLUME_FOLDER_NAME, collectUserRequirementText, digest, parseChapterSequenceFromLabel, WORK_STYLE_RULE_PATH } from "../core/index.js"
-import { canProceedPastWorkStyleGate } from "../core/workspace/work-style-gate-state.js"
+import {
+  WORK_STYLE_SELECTION_PENDING_MESSAGE,
+  canProceedPastWorkStyleGate,
+  extractWorkStyleSelectionFromMarkdown,
+} from "../core/workspace/work-style-gate-state.js"
+import { isWorkStyleComplete } from "../core/workspace/work-style-gate.js"
 import {
   incrementVolumePlanningWriteCount,
   parseVolumePlanningState,
@@ -105,24 +110,48 @@ export class ProjectRuntime {
   public async assertWorkStyleGateReady(): Promise<void> {
     const conversation = new SqliteSynopsisConversationRepository(this.database)
     let state = await conversation.findWorkStyleGateState(this.projectId)
-    if (state.status === "ready") {
-      let markdown: string | undefined
-      try {
-        markdown = await this.workspace.readMarkdown(this.workspaceRootRef, WORK_STYLE_RULE_PATH)
-      } catch {
-        markdown = undefined
-      }
-      const currentDigest = digest(markdown ?? "")
-      if (currentDigest !== state.styleDigest) {
+    let markdown: string | undefined
+    try {
+      markdown = await this.workspace.readMarkdown(this.workspaceRootRef, WORK_STYLE_RULE_PATH)
+    } catch {
+      markdown = undefined
+    }
+    const currentDigest = digest(markdown ?? "")
+    if (state.status === "ready" && currentDigest !== state.styleDigest) {
+      state = await conversation.transitionWorkStyleGate({
+        projectId: this.projectId,
+        event: {
+          type: "style_document_changed",
+          currentDigest,
+          ...(markdown === undefined ? {} : { markdown }),
+        },
+        updatedAtMs: Date.now(),
+      })
+    }
+    // Complete on-disk style recovers selection without forcing a hard gate error.
+    if (state.status === "awaiting_choice" && markdown !== undefined && isWorkStyleComplete(markdown)) {
+      const recovered = extractWorkStyleSelectionFromMarkdown(markdown)
+      if (recovered !== undefined) {
         state = await conversation.transitionWorkStyleGate({
           projectId: this.projectId,
-          event: { type: "style_document_changed", currentDigest },
+          event: { type: "select_style", ...recovered },
           updatedAtMs: Date.now(),
         })
       }
     }
+    // Style may be adjusted after first approval. A still-complete document reopens the gate.
+    if (state.status === "style_selected" && markdown !== undefined) {
+      state = await conversation.transitionWorkStyleGate({
+        projectId: this.projectId,
+        event: { type: "style_document_saved", markdown, digest: currentDigest },
+        updatedAtMs: Date.now(),
+      })
+    }
     if (!canProceedPastWorkStyleGate(state)) {
-      throw new Error("作品风格门禁尚未通过：请先选择笔风规则，并完成风格文档审核后再生成梗概、大纲或正文")
+      if (state.status === "awaiting_choice") {
+        throw new Error(WORK_STYLE_SELECTION_PENDING_MESSAGE)
+      }
+      throw new Error("作品风格文档尚未合格：请先在创作台讨论中把作品风格写完整，再继续生成梗概、大纲或正文")
     }
   }
 
