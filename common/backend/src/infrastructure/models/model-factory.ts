@@ -8,6 +8,7 @@ import {
 } from "@starseafolio/config"
 
 import type { AIModelPort } from "../../application/index.js"
+import { AnthropicMessagesModelAdapter } from "./anthropic/anthropic-model-adapter.js"
 import { EnvironmentSecretProvider, DeepSeekAiModelAdapter } from "./deepseek/deepseek-model-adapter.js"
 import { FakeAiModelAdapter } from "./fake-ai-model-adapter.js"
 import { UnavailableAiModelAdapter } from "./unavailable-ai-model-adapter.js"
@@ -17,7 +18,7 @@ export type DeepSeekModelSelection = Readonly<{
   baseUrl: string
   model: string
   apiKey: string
-  apiProtocol?: "openai_chat_completions" | "openai_responses"
+  apiProtocol?: "openai_chat_completions" | "openai_responses" | "anthropic_messages"
   contextWindowTokens: number
   thinkingModeEnabled?: boolean
   reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
@@ -36,11 +37,12 @@ export function createModelFromEnvironment(
   const config = deepSeekRuntimeConfigFromEnvironment(values)
   if (config === undefined) return new UnavailableAiModelAdapter()
 
-  return new DeepSeekAiModelAdapter(
-    config,
-    new EnvironmentSecretProvider(values),
-    new NodePromptResourceAdapter(resolve(promptPackageRoot)),
-  )
+  const secrets = new EnvironmentSecretProvider(values)
+  const prompts = new NodePromptResourceAdapter(resolve(promptPackageRoot))
+  if (config.apiProtocol === "anthropic_messages") {
+    return new AnthropicMessagesModelAdapter(config, secrets, prompts)
+  }
+  return new DeepSeekAiModelAdapter(config, secrets, prompts)
 }
 
 export function createModelFromSelection(
@@ -62,9 +64,10 @@ export function createModelFromSelection(
     disableResponseStorage: selection.disableResponseStorage ?? defaultDeepSeekRuntimeConfig.disableResponseStorage,
     serviceTier: selection.serviceTier ?? defaultDeepSeekRuntimeConfig.serviceTier,
   })
-  return new DeepSeekAiModelAdapter(
-    config,
-    { getSecret: (reference) => Promise.resolve(reference === "turn-api-key" ? apiKey : "") },
-    new NodePromptResourceAdapter(resolve(promptPackageRoot)),
-  )
+  const secrets = { getSecret: (reference: string) => Promise.resolve(reference === "turn-api-key" ? apiKey : "") }
+  const prompts = new NodePromptResourceAdapter(resolve(promptPackageRoot))
+  if (config.apiProtocol === "anthropic_messages") {
+    return new AnthropicMessagesModelAdapter(config, secrets, prompts)
+  }
+  return new DeepSeekAiModelAdapter(config, secrets, prompts)
 }

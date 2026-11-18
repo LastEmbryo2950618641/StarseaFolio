@@ -148,7 +148,7 @@ export function assembleModelPhaseResult(
     contextId: request.contextId,
     phase: request.phase,
     outcome: semantic.outcome,
-    artifact,
+    ...(artifact === undefined ? {} : { artifact }),
     requestedReads,
     citedReadIds,
     producedArtifactIds: [],

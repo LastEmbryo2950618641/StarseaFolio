@@ -36,7 +36,11 @@ function normalize(value: unknown, path: string): CanonicalJsonValue {
 
   const normalized: Record<string, CanonicalJsonValue> = {}
   for (const key of Object.keys(value).sort()) {
-    normalized[key] = normalize((value as Record<string, unknown>)[key], `${path}.${key}`)
+    const entry = (value as Record<string, unknown>)[key]
+    // Match JSON.stringify object rules: omit undefined fields instead of failing
+    // persistence when optional envelope keys like artifact are explicitly unset.
+    if (entry === undefined) continue
+    normalized[key] = normalize(entry, `${path}.${key}`)
   }
 
   return normalized

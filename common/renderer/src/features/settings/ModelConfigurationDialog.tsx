@@ -7,11 +7,17 @@ import { listModelCatalog } from "../../api/client.js"
 import { MobileBottomSheet } from "../../components/MobileBottomSheet.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
 import {
-  API_PROTOCOL_OPTIONS,
+  OPENAI_WIRE_STYLE_OPTIONS,
+  PROTOCOL_FAMILY_OPTIONS,
+  apiProtocolFromFamily,
   createProfileFromPreset,
+  openAIWireStyleOf,
+  protocolFamilyOf,
   MODEL_PROVIDER_PRESETS,
   type ModelProfile,
+  type ModelProtocolFamily,
   type ModelProviderPresetId,
+  type OpenAIWireStyle,
 } from "./model-provider-presets.js"
 
 export type { ModelProfile } from "./model-provider-presets.js"
@@ -215,7 +221,7 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   return <section className="model-dialog model-dialog-wide settings-drilldown" data-view={showList ? "list" : "detail"} data-testid="model-configuration-dialog" role="region" aria-labelledby="model-dialog-title">
       <header className="model-dialog-header">
         <button type="button" className="settings-back" autoFocus aria-label={showList ? "返回创作界面" : "返回模型配置列表"} onClick={() => { if (showList) onClose(); else setShowList(true) }}><ArrowLeft size={18} /></button>
-        <div><strong id="model-dialog-title">{showList ? "模型配置" : selectedProfile?.name || "添加模型配置"}</strong><span>{showList ? "选择配置进行编辑，或添加新的模型服务" : "两种 API 协议均可选；厂商预设会自动填充差异项"}</span></div>
+        <div><strong id="model-dialog-title">{showList ? "模型配置" : selectedProfile?.name || "添加模型配置"}</strong><span>{showList ? "选择配置进行编辑，或添加新的模型服务" : "先选厂商协议族；OpenAI 可再选接口形态"}</span></div>
       </header>
       <div className="settings-options-page" hidden={!showList} data-testid="model-configuration-list">
         <button type="button" className="settings-option-row settings-option-add" data-testid="model-add-profile" onClick={openProviderSheet} disabled={saving}><Plus size={20} /><span><strong>添加配置</strong><small>选择厂商或自定义服务</small></span><ChevronRight size={18} /></button>
@@ -261,14 +267,44 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
               <input value={selectedProfile.name} onChange={(event) => { updateSelected({ name: event.target.value }); }} placeholder="例如：DeepSeek 主账号" spellCheck={false} />
             </label>
             <label className="model-field">
-              <span>API 协议<small>两种协议均支持，按服务能力选择，不绑定单一品牌</small></span>
-              <select className="model-enum-select" data-testid="model-api-protocol" value={selectedProfile.apiProtocol} onChange={(event) => { updateSelected({ apiProtocol: event.target.value as ModelProfile["apiProtocol"] }); }}>
-                {API_PROTOCOL_OPTIONS.map((option) => (
+              <span>API 协议<small>先选厂商协议族</small></span>
+              <select
+                className="model-enum-select"
+                data-testid="model-protocol-family"
+                value={protocolFamilyOf(selectedProfile.apiProtocol)}
+                onChange={(event) => {
+                  const family = event.target.value as ModelProtocolFamily
+                  const wireStyle = openAIWireStyleOf(selectedProfile.apiProtocol)
+                  updateSelected({ apiProtocol: apiProtocolFromFamily(family, wireStyle) })
+                }}
+              >
+                {PROTOCOL_FAMILY_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
-              <small className="model-field-hint">{API_PROTOCOL_OPTIONS.find((option) => option.value === selectedProfile.apiProtocol)?.hint}</small>
+              <small className="model-field-hint">{PROTOCOL_FAMILY_OPTIONS.find((option) => option.value === protocolFamilyOf(selectedProfile.apiProtocol))?.hint}</small>
             </label>
+            {protocolFamilyOf(selectedProfile.apiProtocol) === "openai" ? (
+              <label className="model-field">
+                <span>OpenAI 接口形态<small>仅 OpenAI 协议族需要选择</small></span>
+                <select
+                  className="model-enum-select"
+                  data-testid="model-openai-wire-style"
+                  value={openAIWireStyleOf(selectedProfile.apiProtocol)}
+                  onChange={(event) => {
+                    const wireStyle = event.target.value as OpenAIWireStyle
+                    updateSelected({ apiProtocol: apiProtocolFromFamily("openai", wireStyle) })
+                  }}
+                >
+                  {OPENAI_WIRE_STYLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <small className="model-field-hint">{OPENAI_WIRE_STYLE_OPTIONS.find((option) => option.value === openAIWireStyleOf(selectedProfile.apiProtocol))?.hint}</small>
+              </label>
+            ) : (
+              <p className="model-field-hint" data-testid="model-anthropic-wire-note">Anthropic 固定使用 Messages API</p>
+            )}
             <label className="model-field">
               <span>Base URL<small>模型服务的 API 根地址</small></span>
               <input value={selectedProfile.baseUrl} onChange={(event) => { updateSelected({ baseUrl: event.target.value }); }} placeholder="https://api.deepseek.com" spellCheck={false} />

@@ -25,7 +25,7 @@ type DesktopModelProfile = Readonly<{
   baseUrl: string
   model: string
   credentialRef: string
-  apiProtocol: "openai_chat_completions" | "openai_responses"
+  apiProtocol: "openai_chat_completions" | "openai_responses" | "anthropic_messages"
   contextWindowTokens: number
   apiKey: string
   hasApiKey: boolean
@@ -88,7 +88,11 @@ async function asDesktopProfiles(raw: Readonly<{
       baseUrl: typeof profile.baseUrl === "string" ? profile.baseUrl : "https://api.deepseek.com",
       model: typeof profile.model === "string" ? profile.model : "deepseek-chat",
       credentialRef,
-      apiProtocol: profile.apiProtocol === "openai_responses" ? "openai_responses" as const : "openai_chat_completions" as const,
+      apiProtocol: profile.apiProtocol === "openai_responses"
+        ? "openai_responses" as const
+        : profile.apiProtocol === "anthropic_messages"
+          ? "anthropic_messages" as const
+          : "openai_chat_completions" as const,
       contextWindowTokens: typeof profile.contextWindowTokens === "number" ? profile.contextWindowTokens : 1_000_000,
       apiKey: "",
       hasApiKey: Boolean((await credentials.get(credentialRef))?.trim()),

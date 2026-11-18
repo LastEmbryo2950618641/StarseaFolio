@@ -92,7 +92,11 @@ function mapProfile(row: RegistryDatabase["model_profiles"]): ModelProfile {
     baseUrl: row.base_url,
     model: row.model,
     credentialRef: row.credential_ref,
-    apiProtocol: row.api_protocol === "openai_responses" ? "openai_responses" : "openai_chat_completions",
+    apiProtocol: row.api_protocol === "openai_responses"
+      ? "openai_responses"
+      : row.api_protocol === "anthropic_messages"
+        ? "anthropic_messages"
+        : "openai_chat_completions",
     contextWindowTokens: row.context_window_tokens,
     thinkingModeEnabled: row.thinking_mode_enabled === 1,
     reasoningEffort: readReasoningEffort(row.reasoning_effort),

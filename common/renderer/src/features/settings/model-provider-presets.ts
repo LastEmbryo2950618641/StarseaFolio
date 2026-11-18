@@ -4,7 +4,7 @@ export type ModelProfile = Readonly<{
   baseUrl: string
   model: string
   credentialRef: string
-  apiProtocol: "openai_chat_completions" | "openai_responses"
+  apiProtocol: "openai_chat_completions" | "openai_responses" | "anthropic_messages"
   contextWindowTokens: number
   apiKey: string
   hasApiKey: boolean
@@ -16,8 +16,10 @@ export type ModelProfile = Readonly<{
 }>
 
 export type ModelApiProtocol = ModelProfile["apiProtocol"]
+export type ModelProtocolFamily = "openai" | "anthropic"
+export type OpenAIWireStyle = "chat_completions" | "responses"
 
-export type ModelProviderPresetId = "deepseek" | "zhipu" | "openai" | "custom"
+export type ModelProviderPresetId = "deepseek" | "zhipu" | "openai" | "anthropic" | "custom"
 
 export type ModelProviderPreset = Readonly<{
   id: ModelProviderPresetId
@@ -55,7 +57,7 @@ export const MODEL_PROVIDER_PRESETS: readonly ModelProviderPreset[] = [
       disableResponseStorage: true,
       serviceTier: "auto",
     },
-    highlights: ["Chat Completions 协议", "深度思考", "JSON Mode 可选"],
+    highlights: ["OpenAI 协议族 · Chat Completions", "深度思考", "JSON Mode 可选"],
   },
   {
     id: "zhipu",
@@ -73,12 +75,12 @@ export const MODEL_PROVIDER_PRESETS: readonly ModelProviderPreset[] = [
       disableResponseStorage: true,
       serviceTier: "auto",
     },
-    highlights: ["Chat Completions 协议", "默认关闭深度思考", "JSON Mode 可选"],
+    highlights: ["OpenAI 协议族 · Chat Completions", "默认关闭深度思考", "JSON Mode 可选"],
   },
   {
     id: "openai",
     name: "OpenAI",
-    description: "官方 Responses / Chat Completions 双协议",
+    description: "官方 OpenAI；默认 Responses，可改 Chat Completions",
     defaults: {
       name: "OpenAI",
       baseUrl: "https://api.openai.com/v1",
@@ -91,12 +93,30 @@ export const MODEL_PROVIDER_PRESETS: readonly ModelProviderPreset[] = [
       disableResponseStorage: true,
       serviceTier: "auto",
     },
-    highlights: ["Responses 协议（可改 Chat Completions）", "深度思考", "JSON Mode 可选"],
+    highlights: ["OpenAI 协议族 · Responses（可改）", "深度思考", "JSON Mode 可选"],
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    description: "官方 Claude Messages API",
+    defaults: {
+      name: "Anthropic",
+      baseUrl: "https://api.anthropic.com",
+      model: "claude-sonnet-4-5",
+      apiProtocol: "anthropic_messages",
+      contextWindowTokens: 200_000,
+      thinkingModeEnabled: true,
+      reasoningEffort: "high",
+      jsonModeEnabled: false,
+      disableResponseStorage: true,
+      serviceTier: "auto",
+    },
+    highlights: ["Anthropic Messages", "Extended Thinking 可选", "JSON Mode 默认关闭"],
   },
   {
     id: "custom",
     name: "自定义",
-    description: "任意兼容服务；填好 Key 与地址即可，不强制 JSON Mode",
+    description: "任意兼容服务；填好 Key 与地址即可，可改 OpenAI / Anthropic",
     defaults: {
       name: "自定义服务",
       baseUrl: "",
@@ -109,12 +129,12 @@ export const MODEL_PROVIDER_PRESETS: readonly ModelProviderPreset[] = [
       disableResponseStorage: true,
       serviceTier: "auto",
     },
-    highlights: ["两种协议任选", "仅需 API Key 即可保存有效配置", "JSON Mode 默认关闭"],
+    highlights: ["先选厂商协议族", "仅需 API Key 即可保存有效配置", "JSON Mode 默认关闭"],
   },
 ]
 
 export function createProfileFromPreset(presetId: ModelProviderPresetId): ModelProfile {
-  const preset = MODEL_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? MODEL_PROVIDER_PRESETS[3]!
+  const preset = MODEL_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? MODEL_PROVIDER_PRESETS[4]!
   return {
     id: crypto.randomUUID(),
     credentialRef: `model-profile:${crypto.randomUUID()}`,
@@ -124,15 +144,63 @@ export function createProfileFromPreset(presetId: ModelProviderPresetId): ModelP
   }
 }
 
+export function protocolFamilyOf(protocol: ModelApiProtocol): ModelProtocolFamily {
+  return protocol === "anthropic_messages" ? "anthropic" : "openai"
+}
+
+export function openAIWireStyleOf(protocol: ModelApiProtocol): OpenAIWireStyle {
+  return protocol === "openai_responses" ? "responses" : "chat_completions"
+}
+
+export function apiProtocolFromFamily(
+  family: ModelProtocolFamily,
+  wireStyle: OpenAIWireStyle = "chat_completions",
+): ModelApiProtocol {
+  if (family === "anthropic") return "anthropic_messages"
+  return wireStyle === "responses" ? "openai_responses" : "openai_chat_completions"
+}
+
+export const PROTOCOL_FAMILY_OPTIONS = [
+  {
+    value: "openai" as const,
+    label: "OpenAI",
+    hint: "OpenAI 及兼容服务（DeepSeek / 智谱等）",
+  },
+  {
+    value: "anthropic" as const,
+    label: "Anthropic",
+    hint: "Claude Messages API",
+  },
+] as const
+
+export const OPENAI_WIRE_STYLE_OPTIONS = [
+  {
+    value: "chat_completions" as const,
+    label: "Chat Completions",
+    hint: "广泛兼容 DeepSeek / 智谱 / 多数中转",
+  },
+  {
+    value: "responses" as const,
+    label: "Responses",
+    hint: "OpenAI Responses 及同能力兼容服务",
+  },
+] as const
+
+/** @deprecated Prefer PROTOCOL_FAMILY_OPTIONS + OPENAI_WIRE_STYLE_OPTIONS */
 export const API_PROTOCOL_OPTIONS = [
   {
     value: "openai_chat_completions" as const,
-    label: "Chat Completions 协议",
+    label: "Chat Completions",
     hint: "广泛兼容 DeepSeek / 智谱 / 多数中转",
   },
   {
     value: "openai_responses" as const,
-    label: "Responses 协议",
+    label: "Responses",
     hint: "OpenAI Responses 及同能力兼容服务",
+  },
+  {
+    value: "anthropic_messages" as const,
+    label: "Anthropic Messages",
+    hint: "Claude Messages API",
   },
 ] as const

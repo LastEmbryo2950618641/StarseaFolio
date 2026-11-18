@@ -14,7 +14,11 @@ import { idSchema } from "./ids.js"
 import { graphObjectIdSchema } from "./persistent-id.js"
 import { resettableRuntimeMetricIdSchema } from "./runtime-metrics.js"
 
-export const modelApiProtocolSchema = z.enum(["openai_chat_completions", "openai_responses"])
+export const modelApiProtocolSchema = z.enum([
+  "openai_chat_completions",
+  "openai_responses",
+  "anthropic_messages",
+])
 export const modelReasoningEffortSchema = z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
 export const deepSeekReasoningEffortSchema = modelReasoningEffortSchema
 export const modelServiceTierSchema = z.enum(["auto", "default", "flex", "priority", "fast"])

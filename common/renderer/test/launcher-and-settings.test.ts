@@ -121,15 +121,17 @@ describe("ModelConfigurationDialog", () => {
     expect(html).toContain("model-add-profile")
   })
 
-  it("exposes both API protocols and vendor presets with differentiated defaults", () => {
+  it("exposes OpenAI/Anthropic families and vendor presets with differentiated defaults", () => {
     expect(API_PROTOCOL_OPTIONS.map((item) => item.value)).toEqual([
       "openai_chat_completions",
       "openai_responses",
+      "anthropic_messages",
     ])
     expect(MODEL_PROVIDER_PRESETS.map((item) => item.id)).toEqual([
       "deepseek",
       "zhipu",
       "openai",
+      "anthropic",
       "custom",
     ])
     expect(createProfileFromPreset("deepseek")).toMatchObject({
@@ -144,6 +146,12 @@ describe("ModelConfigurationDialog", () => {
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
       apiProtocol: "openai_chat_completions",
       thinkingModeEnabled: false,
+      jsonModeEnabled: false,
+    })
+    expect(createProfileFromPreset("anthropic")).toMatchObject({
+      name: "Anthropic",
+      baseUrl: "https://api.anthropic.com",
+      apiProtocol: "anthropic_messages",
       jsonModeEnabled: false,
     })
     expect(createProfileFromPreset("custom")).toMatchObject({

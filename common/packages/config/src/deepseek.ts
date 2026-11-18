@@ -13,7 +13,7 @@ export const deepSeekRuntimeConfigSchema = z.object({
     message: "baseUrl must use HTTPS unless it targets localhost",
   }),
   model: z.string().trim().min(1),
-  apiProtocol: z.enum(["openai_chat_completions", "openai_responses"]),
+  apiProtocol: z.enum(["openai_chat_completions", "openai_responses", "anthropic_messages"]),
   apiKeyRef: z.string().min(1),
   contextWindowTokens: z.number().int().positive(),
   proxyUrl: z.url().refine((url) => url.startsWith("http://") || url.startsWith("https://"), {
