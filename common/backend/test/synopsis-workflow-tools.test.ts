@@ -218,6 +218,27 @@ describe("synopsis workflow progressive disclosure", () => {
     })
   })
 
+  it("invokes todo_write without a prior describe", async () => {
+    const { execute, callbacks } = setup()
+    const todos = [{ id: "1", content: "读设定", status: "in_progress" as const }]
+    expect(await execute({
+      name: "todo_write",
+      action: "invoke",
+      arguments: JSON.stringify({ todos, merge: false }),
+    })).toMatchObject({ status: "todos_updated", result: { todos, merge: false } })
+    expect(callbacks.writeTodos).toHaveBeenCalledWith({ ...context, todos, merge: false })
+  })
+
+  it("returns a todo_write argument error instead of blocking on describe", async () => {
+    const { execute, callbacks } = setup()
+    expect(await execute({
+      name: "todo_write",
+      action: "invoke",
+      arguments: JSON.stringify({ todos: [] }),
+    })).toMatchObject({ status: "error", message: "todos 必须为非空数组" })
+    expect(callbacks.writeTodos).not.toHaveBeenCalled()
+  })
+
   it("describes and invokes todo_write", async () => {
     const { execute, callbacks, describeTool } = setup()
     await describeTool("todo_write")

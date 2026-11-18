@@ -159,6 +159,7 @@ export type SynopsisDraftReference = Readonly<{
 }>
 
 const protocol = "synopsis-tools-v1"
+export const DESCRIBE_REQUIRED_MESSAGE = "请先 describe 获取参数格式与撰写说明，再 invoke"
 const descriptions = {
   character_update: {
     parameters: { relativePath: "设定集/人物/人物名.json", mode: "create | update",
@@ -365,7 +366,7 @@ export function synopsisToolCatalog(callbacks: SynopsisWorkflowToolCallbacks): s
 }
 
 // Only a currently visible, system-authored description grants invocation access.
-// This survives turns and process restarts, but expires when evidence is compacted away.
+// The latest grant for each tool stays visible through context compaction.
 export function hasVisibleToolDescription(messages: readonly VisibleModelContextMessage[], name: SynopsisToolName): boolean {
   return messages.some((message) => {
     if (message.role !== "system" || message.kind !== "phase_instruction") return false
@@ -479,8 +480,10 @@ export async function executeSynopsisTool(input: Readonly<{
       return { ...envelope, status: "described", ...descriptions[request.name],
         ...(request.name === "publish_draft" ? { drafts: await input.listDrafts() } : {}) }
     }
-    if (!hasVisibleToolDescription(input.visibleMessages, request.name)) {
-      return { ...envelope, status: "error", code: "describe_required", message: "请先 describe 获取参数格式与撰写说明，再 invoke" }
+    // The prompt may ask for describe first. todo_write arguments are validated
+    // directly; a missing describe must not block the invocation.
+    if (request.name !== "todo_write" && !hasVisibleToolDescription(input.visibleMessages, request.name)) {
+      return { ...envelope, status: "error", code: "describe_required", message: DESCRIBE_REQUIRED_MESSAGE }
     }
     if (request.name === "character_update") {
       const update = characterUpdateSchema.parse(JSON.parse(request.arguments ?? "{}"))

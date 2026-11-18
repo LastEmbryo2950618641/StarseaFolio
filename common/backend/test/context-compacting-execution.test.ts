@@ -21,6 +21,24 @@ function setup(tokens?: number) {
 }
 
 describe("provider-measured context compaction", () => {
+  it("keeps the latest tool description while compacting older history", async () => {
+    const { input, execute } = setup(1_000_000)
+    const described = (id: string, sequence: number) => ({
+      ...message(id, "phase_instruction", "old", sequence),
+      role: "system" as const,
+      content: JSON.stringify({ protocol: "synopsis-tools-v1", name: "todo_write", action: "describe", status: "described" }),
+    })
+    input.options.contextMessages = [
+      message("system", "system_rules", "old", 0),
+      described("old-describe", 1),
+      message("old", "phase_response", "old", 2),
+      described("new-describe", 3),
+      message("current", "phase_request", "current", 4),
+    ]
+    await executeWithContextCompaction(input)
+    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId))
+      .toEqual(["system", "new-describe", "current"])
+  })
   it("keeps removing old chapters until the scaled input is within half the window", async () => {
     const { input, execute } = setup(1_000_000)
     const chapter = (id: string, sequence: number) => message(id, "canonical_chapter", "old", sequence)

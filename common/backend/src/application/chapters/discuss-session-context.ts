@@ -37,6 +37,24 @@ export function readDiscussStepFailures(messages: readonly ModelContextMessage[]
   return { obsoleteMessageIds, failures }
 }
 
+export function describeRequiredRetryStep(messages: readonly ModelContextMessage[], reason: string): string | undefined {
+  let latest: { step: string, reason: string, sequence: number } | undefined
+  for (const message of messages) {
+    if (message.kind !== "phase_instruction" || message.content === undefined) continue
+    try {
+      const parsed = JSON.parse(message.content) as Record<string, unknown>
+      if (parsed.protocol !== DISCUSS_STEP_FAILURE_PROTOCOL) continue
+      if (typeof parsed.step !== "string" || typeof parsed.reason !== "string") continue
+      if (latest === undefined || message.sequence >= latest.sequence) {
+        latest = { step: parsed.step, reason: parsed.reason, sequence: message.sequence }
+      }
+    } catch {
+      // Non-JSON instructions are not failure records.
+    }
+  }
+  return latest?.reason === reason ? latest.step : undefined
+}
+
 export function findInvalidDiscussGateMessageIds(messages: readonly ModelContextMessage[]): string[] {
   return messages.flatMap((message) => {
     if (message.kind !== "phase_instruction" || message.content === undefined) return []

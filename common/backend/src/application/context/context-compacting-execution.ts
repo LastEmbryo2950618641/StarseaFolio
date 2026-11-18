@@ -36,6 +36,22 @@ function protectedRequestWeight(phasePrompt: string | undefined, requestInput: u
   }
 }
 
+function latestToolDescriptionIds(messages: readonly VisibleModelContextMessage[]): Set<string> {
+  const latest = new Map<string, VisibleModelContextMessage>()
+  for (const message of [...messages].sort((left, right) => left.sequence - right.sequence)) {
+    if (message.role !== "system" || message.kind !== "phase_instruction") continue
+    try {
+      const value = JSON.parse(message.content) as Record<string, unknown>
+      if (value.protocol !== "synopsis-tools-v1" || value.action !== "describe" || value.status !== "described") continue
+      if (typeof value.name !== "string" || value.name.length === 0) continue
+      latest.set(value.name, message)
+    } catch {
+      // Non-JSON instructions are ordinary history.
+    }
+  }
+  return new Set([...latest.values()].map((message) => message.messageId))
+}
+
 function isProtectedDiscussState(message: VisibleModelContextMessage): boolean {
   if (message.kind !== "phase_instruction") return false
   try {
@@ -67,9 +83,11 @@ export async function executeWithContextCompaction(input: {
   let messages = [...(input.options.contextMessages ?? [])]
   let windowTokens = input.model.info?.contextWindowTokens ?? 64_000
   const compact = async (reason: ContextCompactionEvent["reason"], observedInputTokens?: number): Promise<boolean> => {
+    const keptDescriptions = latestToolDescriptionIds(messages)
     const removable = messages.filter((message) => (
       message.kind !== "system_rules"
       && !isProtectedDiscussState(message)
+      && !keptDescriptions.has(message.messageId)
       && message.turnId !== input.request.turnId
     ))
     const narrative = (message: VisibleModelContextMessage): boolean => message.kind === "canonical_chapter" || message.kind === "chapter_revision"

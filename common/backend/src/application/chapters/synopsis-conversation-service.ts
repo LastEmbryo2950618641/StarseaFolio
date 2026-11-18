@@ -114,6 +114,7 @@ import {
   collectDiscussReadEvidenceFromContext,
   compactDiscussContextHistory,
   computeDiscussBootstrapDigest,
+  describeRequiredRetryStep,
   DISCUSS_PROGRESS_PROTOCOL,
   DISCUSS_STEP_FAILURE_LIMIT,
   DISCUSS_STEP_FAILURE_PROTOCOL,
@@ -164,6 +165,7 @@ import { normalizeThinkingDisplayText } from "./synopsis-thinking-text.js"
 import { applySearchReplace } from "./markdown-search-replace.js"
 import {
   executeSynopsisTool,
+  DESCRIBE_REQUIRED_MESSAGE,
   synopsisToolCatalog,
   type SynopsisToolContext,
   type SynopsisWorkflowToolCallbacks,
@@ -2796,6 +2798,8 @@ export class SynopsisConversationService {
       }
       storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
     }
+    const describeRetryStep = describeRequiredRetryStep(storedContext, DESCRIBE_REQUIRED_MESSAGE)
+    if (describeRetryStep !== undefined) await recordStepOutcome(describeRetryStep)
     let accumulatedReasoning = ""
     let attempt = 0
     let missingArtifactRetries = 0
