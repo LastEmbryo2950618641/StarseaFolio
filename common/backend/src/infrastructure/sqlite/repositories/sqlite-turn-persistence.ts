@@ -232,7 +232,6 @@ export class SqliteTurnPersistence implements TurnPersistencePort {
       .innerJoin("phase_runs", "phase_runs.id", "model_context_messages.origin_phase_run_id")
       .select("phase_runs.usage_json")
       .where("model_context_messages.chain_id", "=", chainId)
-      .where("model_context_messages.hidden_at", "is", null)
       .where("model_context_messages.kind", "=", "phase_response")
       .orderBy("model_context_messages.sequence_no", "desc").executeTakeFirst()
     if (row === undefined) return undefined

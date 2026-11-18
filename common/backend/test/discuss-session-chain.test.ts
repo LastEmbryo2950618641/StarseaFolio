@@ -337,6 +337,25 @@ describe("discuss session chain store", () => {
     await fixture.database.destroy()
   })
 
+  it("keeps the measured input after compaction hides the response that recorded it", async () => {
+    const fixture = await createDiscussStoreFixture()
+    await fixture.conversation.appendDiscussContextMessages({
+      sessionId: fixture.sessionId,
+      projectId: fixture.projectId,
+      createdAtMs: 10,
+      messages: [{ role: "assistant", kind: "phase_response", content: "上一轮回复" }],
+    })
+    await fixture.conversation.saveDiscussUsage({
+      projectId: fixture.projectId,
+      usage: { inputTokens: 589_800, outputTokens: 100, lastRequestInputTokens: 589_800 },
+      updatedAtMs: 11,
+    })
+    const visible = await fixture.conversation.listDiscussContextMessages(fixture.sessionId)
+    await fixture.conversation.hideDiscussContextMessages(fixture.sessionId, visible.map((message) => message.messageId), 12)
+    await expect(fixture.conversation.loadDiscussContextInputTokens(fixture.projectId, fixture.sessionId)).resolves.toBe(589_800)
+    await fixture.database.destroy()
+  })
+
   it("lets the active session reuse a completed chapter sequence", async () => {
     const fixture = await createDiscussStoreFixture()
     await fixture.conversation.updateSession({

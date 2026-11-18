@@ -3110,7 +3110,7 @@ export class SynopsisConversationService {
           onCompacted: async (event) => {
             if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
             await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, event.hiddenMessageIds, this.dependencies.now())
-            lastRequestInputTokens = undefined
+            if (event.estimatedInputTokens !== undefined) lastRequestInputTokens = event.estimatedInputTokens
             // Bootstrap files may have existed only in the removed history.
             const bootstrapEvidence = await this.bootstrapSynopsisEvidence({
               projectId: input.projectId, workspaceRootRef: input.workspaceRootRef, catalog,

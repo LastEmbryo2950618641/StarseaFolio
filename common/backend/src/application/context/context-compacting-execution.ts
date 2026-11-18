@@ -5,6 +5,7 @@ import { estimateModelMessageTokens } from "./context-window-manager.js"
 export type ContextCompactionEvent = Readonly<{
   reason: "usage_threshold" | "context_length_error"
   observedInputTokens?: number
+  estimatedInputTokens?: number
   thresholdTokens: number
   hiddenMessageIds: readonly string[]
   remainingMessageCount: number
@@ -21,6 +22,17 @@ export function readContextLengthError(error: unknown): { inputTokens?: number; 
   return {
     ...(inputTokens === undefined || !Number.isFinite(inputTokens) ? {} : { inputTokens }),
     ...(limitTokens === undefined || !Number.isFinite(limitTokens) ? {} : { limitTokens }),
+  }
+}
+
+function protectedRequestWeight(phasePrompt: string | undefined, requestInput: unknown): number {
+  const promptWeight = phasePrompt === undefined || phasePrompt.length === 0 ? 0 : estimateModelMessageTokens(phasePrompt)
+  if (requestInput === undefined) return promptWeight
+  try {
+    const serialized = JSON.stringify(requestInput)
+    return promptWeight + (serialized.length === 0 ? 0 : estimateModelMessageTokens(serialized))
+  } catch {
+    return promptWeight
   }
 }
 
@@ -57,23 +69,37 @@ export async function executeWithContextCompaction(input: {
       && message.turnId !== input.request.turnId
     ))
     const narrative = (message: VisibleModelContextMessage): boolean => message.kind === "canonical_chapter" || message.kind === "chapter_revision"
-    const hidden = new Set(removable.filter((message) => !narrative(message)).map((message) => message.messageId))
     const weights = new Map(messages.map((message) => [message.messageId, estimateModelMessageTokens(message.content)]))
-    const totalWeight = [...weights.values()].reduce((sum, weight) => sum + weight, 0)
-    const targetWeight = observedInputTokens === undefined || observedInputTokens <= 0
+    const messageWeight = [...weights.values()].reduce((sum, weight) => sum + weight, 0)
+    const fixedWeight = protectedRequestWeight(input.options.phasePrompt?.text, input.request.input)
+    const baselineWeight = messageWeight + fixedWeight
+    const targetFraction = observedInputTokens === undefined || observedInputTokens <= 0 || baselineWeight <= 0
       ? 0
-      : totalWeight * Math.min(1, windowTokens * input.targetRatio / observedInputTokens)
-    let remainingWeight = totalWeight - [...hidden].reduce((sum, id) => sum + (weights.get(id) ?? 0), 0)
-    for (const message of removable.filter(narrative).sort((a, b) => a.sequence - b.sequence)) {
+      : Math.min(1, windowTokens * input.targetRatio / observedInputTokens)
+    const targetWeight = baselineWeight * targetFraction
+    const hidden = new Set<string>()
+    let remainingWeight = baselineWeight
+    const hide = (messageId: string): void => {
+      if (hidden.has(messageId)) return
+      hidden.add(messageId)
+      remainingWeight -= weights.get(messageId) ?? 0
+    }
+    for (const message of removable) {
+      if (!narrative(message)) hide(message.messageId)
+    }
+    for (const message of removable.filter(narrative).sort((left, right) => left.sequence - right.sequence)) {
       if (remainingWeight <= targetWeight) break
-      hidden.add(message.messageId)
-      remainingWeight -= weights.get(message.messageId) ?? 0
+      hide(message.messageId)
     }
     if (hidden.size === 0) return false
     messages = messages.filter((message) => !hidden.has(message.messageId))
+    const estimatedInputTokens = observedInputTokens === undefined || observedInputTokens <= 0 || baselineWeight <= 0
+      ? undefined
+      : Math.max(0, Math.ceil(observedInputTokens * (remainingWeight / baselineWeight)))
     await input.onCompacted({
       reason,
       ...(observedInputTokens === undefined ? {} : { observedInputTokens }),
+      ...(estimatedInputTokens === undefined ? {} : { estimatedInputTokens }),
       thresholdTokens: Math.floor(windowTokens * input.triggerRatio),
       hiddenMessageIds: [...hidden],
       remainingMessageCount: messages.length,

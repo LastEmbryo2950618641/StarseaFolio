@@ -21,6 +21,29 @@ function setup(tokens?: number) {
 }
 
 describe("provider-measured context compaction", () => {
+  it("keeps removing old chapters until the scaled input is within half the window", async () => {
+    const { input, execute } = setup(1_000_000)
+    const chapter = (id: string, sequence: number) => message(id, "canonical_chapter", "old", sequence)
+    input.options.contextMessages = [
+      message("system", "system_rules", "old", 0),
+      chapter("c1", 1), chapter("c2", 2), chapter("c3", 3), chapter("c4", 4), chapter("c5", 5),
+      message("current", "phase_request", "current", 6),
+    ]
+    await executeWithContextCompaction(input)
+    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["system", "c5", "current"])
+  })
+  it("keeps removing old chapters when the request body still holds the input above half the window", async () => {
+    const { input, execute } = setup(1_000_000)
+    input.request = { ...request, input: { synopsis: "设定".repeat(20) } } as PhaseRequestEnvelope
+    const chapter = (id: string, sequence: number) => message(id, "canonical_chapter", "old", sequence)
+    input.options.contextMessages = [
+      message("system", "system_rules", "old", 0),
+      chapter("c1", 1), chapter("c2", 2), chapter("c3", 3), chapter("c4", 4), chapter("c5", 5),
+      message("current", "phase_request", "current", 6),
+    ]
+    await executeWithContextCompaction(input)
+    expect(execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId)).toEqual(["system", "current"])
+  })
   it("triggers at 90% even when local text estimates are tiny", async () => {
     const { input, execute, onCompacted } = setup(900_000)
     await executeWithContextCompaction(input)
