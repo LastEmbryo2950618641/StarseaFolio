@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CHARACTER_DIRECTORY, isCharacterProfilePath, emptyCharacterProfile, parseCharacterProfile, type CharacterUpdate } from "@starseafolio/contracts"
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels"
 import { ArrowLeft, BookOpen, ChevronDown, Cloud, Cpu, FolderOpen, PanelLeftClose, PanelRightClose, Save, Settings2, X } from "lucide-react"
@@ -489,6 +489,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     if (project === undefined || synopsisConversation.session === undefined) return
     let active = true
     let timer: ReturnType<typeof setTimeout> | undefined
+    let lastKnownBusy = false
     const chapterSequence = synopsisConversation.session.chapterSequence
     const poll = async (): Promise<void> => {
       try {
@@ -498,37 +499,44 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         const latest = await invokeBackend<TaskSnapshot | null>("turn.latest.get", {
           projectId: project.projectId, workspaceRootRef: project.workspaceRootRef, chapterSequence,
         })
+        lastKnownBusy = latest !== null && isBusyTaskStatus(latest.status)
         if (active) {
-          setTask((previous) => {
-            if (latest === null) return undefined
-            if (previous === undefined) return latest
-            if (
-              previous.handle?.taskId === latest.handle?.taskId
-              && previous.status === latest.status
-              && previous.lastPhase === latest.lastPhase
-              && previous.error?.message === latest.error?.message
-              && (previous.phaseRuns?.length ?? 0) === (latest.phaseRuns?.length ?? 0)
-              && (previous.phaseRuns?.at(-1)?.finishedAtMs ?? previous.phaseRuns?.at(-1)?.startedAtMs)
-                === (latest.phaseRuns?.at(-1)?.finishedAtMs ?? latest.phaseRuns?.at(-1)?.startedAtMs)
-            ) {
-              return previous
-            }
-            return latest
+          // Non-urgent: keep pointer hover/click ahead of monitor refresh.
+          startTransition(() => {
+            setTask((previous) => {
+              if (latest === null) return undefined
+              if (previous === undefined) return latest
+              if (
+                previous.handle?.taskId === latest.handle?.taskId
+                && previous.status === latest.status
+                && previous.lastPhase === latest.lastPhase
+                && previous.error?.message === latest.error?.message
+                && (previous.phaseRuns?.length ?? 0) === (latest.phaseRuns?.length ?? 0)
+                && (previous.phaseRuns?.at(-1)?.finishedAtMs ?? previous.phaseRuns?.at(-1)?.startedAtMs)
+                  === (latest.phaseRuns?.at(-1)?.finishedAtMs ?? latest.phaseRuns?.at(-1)?.startedAtMs)
+              ) {
+                return previous
+              }
+              return latest
+            })
           })
         }
       } catch {
         // Keep the current monitor during a transient backend failure.
       } finally {
         if (active) {
-          const delay = typeof document !== "undefined" && document.visibilityState === "hidden"
-            ? 4000
-            : 1500
+          const hidden = typeof document !== "undefined" && document.visibilityState === "hidden"
+          // Idle/terminal tasks: back off hard so hover stays responsive.
+          const delay = hidden ? 12_000 : lastKnownBusy ? 1_500 : 8_000
           timer = setTimeout(() => { void poll() }, delay)
         }
       }
     }
     const onVisibility = (): void => {
-      if (document.visibilityState === "visible") void poll()
+      if (document.visibilityState === "visible") {
+        clearTimeout(timer)
+        void poll()
+      }
     }
     document.addEventListener("visibilitychange", onVisibility)
     void poll()
@@ -3626,6 +3634,17 @@ function modelSelection(profile: ModelProfile) {
     disableResponseStorage: profile.disableResponseStorage,
     serviceTier: profile.serviceTier,
   }
+}
+
+function isBusyTaskStatus(status: string | undefined): boolean {
+  if (status === undefined) return false
+  return status === "running"
+    || status === "pending"
+    || status === "waiting"
+    || status === "waiting_user"
+    || status === "committing"
+    || status === "interrupted"
+    || status.startsWith("waiting_")
 }
 
 function synopsisStreamPeekUnchanged(

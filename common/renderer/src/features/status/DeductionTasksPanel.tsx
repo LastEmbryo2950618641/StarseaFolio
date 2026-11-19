@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { startTransition, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, CheckCircle2, Circle, Loader2, RefreshCw, RotateCcw, X } from "lucide-react"
 import type { DeductionTask, ResettableRuntimeMetricId } from "@starseafolio/contracts"
 import { invokeBackend, type OpenProject, type TaskSnapshot } from "../../api/client.js"
@@ -51,6 +51,33 @@ function formatPanelError(message: string): string {
   return "正文推演任务列表接口尚未加载（turn.list）。请重启应用后再试。"
 }
 
+function deductionTasksEqual(
+  left: readonly DeductionTask[],
+  right: readonly DeductionTask[],
+): boolean {
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]
+    const b = right[index]
+    if (a === undefined || b === undefined) return false
+    if (
+      a.taskId !== b.taskId
+      || a.status !== b.status
+      || a.updatedAtMs !== b.updatedAtMs
+      || a.error !== b.error
+      || a.canCancel !== b.canCancel
+      || a.canRetry !== b.canRetry
+      || a.heading !== b.heading
+      || a.progress.completed !== b.progress.completed
+      || a.progress.phase !== b.progress.phase
+      || a.progress.phases.length !== b.progress.phases.length
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
 type PhaseVisualKind = "done" | "failed" | "running" | "idle"
 
 function phaseVisual(status: string): { kind: PhaseVisualKind; css: string } {
@@ -87,11 +114,26 @@ function DeductionStageRecord({
     const poll = async (): Promise<void> => {
       try {
         const next = await invokeBackend<TaskSnapshot>("turn.status", { taskId: task.taskId })
-        if (!disposed) setSnapshot(next)
+        if (disposed) return
+        setSnapshot((previous) => {
+          if (
+            previous !== undefined
+            && previous.handle?.taskId === next.handle?.taskId
+            && previous.status === next.status
+            && previous.lastPhase === next.lastPhase
+            && (previous.phaseRuns?.length ?? 0) === (next.phaseRuns?.length ?? 0)
+            && (previous.phaseRuns?.at(-1)?.finishedAtMs ?? previous.phaseRuns?.at(-1)?.startedAtMs)
+              === (next.phaseRuns?.at(-1)?.finishedAtMs ?? next.phaseRuns?.at(-1)?.startedAtMs)
+          ) {
+            return previous
+          }
+          return next
+        })
+        if (next.status === "completed" || next.status === "failed" || next.status === "cancelled") return
+        timer = setTimeout(() => { void poll() }, 1500)
       } catch {
         if (!disposed) setSnapshot(undefined)
-      } finally {
-        if (!disposed) timer = setTimeout(() => { void poll() }, 1500)
+        if (!disposed) timer = setTimeout(() => { void poll() }, 8_000)
       }
     }
     void poll()
@@ -150,14 +192,29 @@ export function DeductionTasksPanel({
     setLoading(true)
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let lastKnownBusy = false
     const poll = async (): Promise<void> => {
       try {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          return
+        }
         const next = await invokeBackend<readonly DeductionTask[]>("turn.list", project)
-        if (!disposed && generation.current === current) { setTasks(next); setLoadError(undefined) }
+        lastKnownBusy = next.some((item) => item.status === "running" || item.status === "pending")
+        if (!disposed && generation.current === current) {
+          startTransition(() => {
+            setTasks((previous) => deductionTasksEqual(previous, next) ? previous : next)
+            setLoadError(undefined)
+          })
+        }
       } catch (cause) {
         if (!disposed) setLoadError(cause instanceof Error ? cause.message : String(cause))
       } finally {
-        if (!disposed) { setLoading(false); timer = setTimeout(() => { void poll() }, 1500) }
+        if (!disposed) {
+          setLoading(false)
+          const hidden = typeof document !== "undefined" && document.visibilityState === "hidden"
+          const delay = hidden ? 12_000 : lastKnownBusy ? 1_500 : 8_000
+          timer = setTimeout(() => { void poll() }, delay)
+        }
       }
     }
     void poll()

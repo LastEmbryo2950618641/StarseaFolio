@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { startTransition, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, CheckCircle2, Circle, Loader2, Play, RefreshCw, RotateCcw, X } from "lucide-react"
 import type { ChapterReviewRevisionPayload, GraphRevisionTask, ResettableRuntimeMetricId } from "@starseafolio/contracts"
 import { invokeBackend, type OpenProject, type PhaseRunSnapshot, type TaskSnapshot } from "../../api/client.js"
@@ -18,6 +18,20 @@ const activityLabels = { waiting: "等待模型响应", thinking: "模型思考�
 function elapsedText(startedAtMs: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000))
   return seconds < 60 ? `${String(seconds)} 秒` : `${String(Math.floor(seconds / 60))} 分 ${String(seconds % 60)} 秒`
+}
+
+function taskSnapshotEqual(
+  left: TaskSnapshot | undefined,
+  right: TaskSnapshot,
+): boolean {
+  if (left === undefined) return false
+  return left.handle?.taskId === right.handle?.taskId
+    && left.status === right.status
+    && left.lastPhase === right.lastPhase
+    && left.error?.message === right.error?.message
+    && (left.phaseRuns?.length ?? 0) === (right.phaseRuns?.length ?? 0)
+    && (left.phaseRuns?.at(-1)?.finishedAtMs ?? left.phaseRuns?.at(-1)?.startedAtMs)
+      === (right.phaseRuns?.at(-1)?.finishedAtMs ?? right.phaseRuns?.at(-1)?.startedAtMs)
 }
 
 function graphRevisionTasksEqual(
@@ -111,7 +125,7 @@ export function StageRecordPanel({
       try {
         const next = await invokeBackend<TaskSnapshot>("turn.status", { taskId: syncTaskId })
         if (disposed) return
-        setLoadedTask(next)
+        setLoadedTask((previous) => taskSnapshotEqual(previous, next) ? previous : next)
         if (next.status === "completed" || next.status === "failed" || next.status === "cancelled") return
         timer = setTimeout(() => { void poll() }, 1500)
       } catch {
@@ -174,10 +188,15 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
     setLoadError(undefined)
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let lastKnownBusy = false
     const poll = async (): Promise<void> => {
       try {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          return
+        }
         if (project === undefined) {
           if (!disposed && generation.current === current) setTasks([])
+          lastKnownBusy = false
         } else {
           // Read-only refresh. Do not call folio.host.ensure on every tick — ensure
           // rewrites .folio/ui-state.json and saturates IPC while the panel is open.
@@ -208,15 +227,24 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
               }
             })
             : listed
+          lastKnownBusy = next.some((task) => task.status === "running" || task.status === "pending")
           if (!disposed && generation.current === current) {
-            setTasks((previous) => graphRevisionTasksEqual(previous, next) ? previous : next)
-            setLoadError(undefined)
+            startTransition(() => {
+              setTasks((previous) => graphRevisionTasksEqual(previous, next) ? previous : next)
+              setLoadError(undefined)
+            })
           }
         }
       } catch (cause) {
         if (!disposed) setLoadError(cause instanceof Error ? cause.message : String(cause))
       } finally {
-        if (!disposed) { setLoading(false); timer = setTimeout(() => { void poll() }, 1500) }
+        if (!disposed) {
+          setLoading(false)
+          // Terminal-only lists can back off; active sync stays responsive.
+          const hidden = typeof document !== "undefined" && document.visibilityState === "hidden"
+          const delay = hidden ? 12_000 : lastKnownBusy ? 1_500 : 8_000
+          timer = setTimeout(() => { void poll() }, delay)
+        }
       }
     }
     void poll()

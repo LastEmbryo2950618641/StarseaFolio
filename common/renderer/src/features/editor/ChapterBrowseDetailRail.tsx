@@ -135,13 +135,19 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
         workspaceRootRef: props.workspaceRootRef,
         chapterSequence,
       }).then((gate) => {
-        if (!cancelled) setWorkflowGate(gate)
+        if (!cancelled) {
+          setWorkflowGate((previous) => (
+            previous !== undefined && JSON.stringify(previous) === JSON.stringify(gate)
+              ? previous
+              : gate
+          ))
+        }
       }).catch(() => {
         if (!cancelled) setWorkflowGate(undefined)
       })
     }
     refresh()
-    const timer = window.setInterval(refresh, 2_000)
+    const timer = window.setInterval(refresh, 8_000)
     return () => {
       cancelled = true
       window.clearInterval(timer)
@@ -161,6 +167,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
     let inFlight = false
     const refresh = (): void => {
       if (inFlight) return
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
       inFlight = true
       // Only the first load hides content. Background reads preserve the current view,
       // including when a file is temporarily unavailable during a write.
@@ -171,9 +178,9 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       ].map((path) => readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, path)
         .catch(() => undefined))).then(([synopsis, outline, plan]) => {
         if (!cancelled) {
-          if (synopsis !== undefined) setVolumeSynopsis(synopsis)
-          if (outline !== undefined) setVolumeOutline(outline)
-          if (plan !== undefined) setVolumePlanMarkdown(plan)
+          if (synopsis !== undefined) setVolumeSynopsis((previous) => previous === synopsis ? previous : synopsis)
+          if (outline !== undefined) setVolumeOutline((previous) => previous === outline ? previous : outline)
+          if (plan !== undefined) setVolumePlanMarkdown((previous) => previous === plan ? previous : plan)
         }
       }).finally(() => {
         inFlight = false
@@ -181,7 +188,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       })
     }
     refresh()
-    const timer = window.setInterval(refresh, 2_000)
+    const timer = window.setInterval(refresh, 8_000)
     return () => {
       cancelled = true
       window.clearInterval(timer)
@@ -246,7 +253,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       })
     }
     refresh()
-    const timer = window.setInterval(refresh, 2_000)
+    const timer = window.setInterval(refresh, 8_000)
     return () => {
       cancelled = true
       window.clearInterval(timer)

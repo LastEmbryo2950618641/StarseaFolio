@@ -7424,8 +7424,7 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   min-width: 0;
   margin: 0 -4px;
   padding: 4px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(6px);
+  background: var(--panel);
 }
 .chapter-panel-volume-header {
   display: flex;
@@ -7523,12 +7522,9 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   cursor: pointer;
   overflow: hidden;
   isolation: isolate;
-  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease, transform 140ms ease;
-}
-@media (prefers-reduced-motion: reduce) {
-  .chapter-panel-card {
-    transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
-  }
+  content-visibility: auto;
+  contain-intrinsic-size: 120px 96px;
+  transition: border-color 100ms ease, box-shadow 100ms ease, background-color 100ms ease;
 }
 .chapter-panel-stage-cup {
   position: absolute;
@@ -7616,12 +7612,6 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
-  transform: translateY(-1px);
-}
-@media (prefers-reduced-motion: reduce) {
-  .chapter-panel-card:hover:not(:disabled) {
-    transform: none;
-  }
 }
 .chapter-panel-card.is-active {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));

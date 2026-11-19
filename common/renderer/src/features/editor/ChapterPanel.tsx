@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react"
 import type { ChapterRevisionReadResult, ChapterSummary } from "@starseafolio/contracts"
 import { Columns2, FileText, Hash, LayoutGrid, Pause, Play, Square } from "lucide-react"
 
@@ -101,7 +101,7 @@ const CARD_SIZE_META: Readonly<Record<ChapterPanelCardSize, Readonly<{
   tile: { label: "序号方块", icon: Hash },
 }
 
-export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
+export const ChapterPanel = memo(function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
   const [cardSize, setCardSize] = useState<ChapterPanelCardSize>(() => loadCardSize())
   const [detailsBySequence, setDetailsBySequence] = useState<ReadonlyMap<number, ChapterCardDetails>>(new Map())
   const detailsCacheRef = useRef(detailsBySequence)
@@ -188,7 +188,12 @@ export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
         }] as const
       }))
       if (cancelled) return
-      setDetailsBySequence(new Map(entries))
+      const unchanged = entries.length === previous.size
+        && entries.every(([sequence, detail]) => previous.get(sequence) === detail)
+      if (unchanged) return
+      startTransition(() => {
+        setDetailsBySequence(new Map(entries))
+      })
     })()
     return () => {
       cancelled = true
@@ -370,7 +375,7 @@ export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
         })}
     </div>
   </aside>
-}
+})
 
 export async function loadChapterWordCount(input: Readonly<{
   projectId: string
