@@ -4001,6 +4001,66 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
 }
 .empty-state { margin: auto; max-width: 240px; text-align: center; font-size: 12px; line-height: 1.7; color: var(--muted); padding: 20px; }
 .evolution-panel { padding: 12px; }
+.evolution-time { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.evolution-time > div { min-width: 0; }
+.evolution-refresh {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.evolution-refresh:disabled { opacity: .5; cursor: default; }
+.evolution-card {
+  margin-top: 12px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+.evolution-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.evolution-card header strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.evolution-status {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: .02em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.evolution-card.status-reached_prose .evolution-status {
+  color: color-mix(in srgb, var(--accent, #7eb8a8) 90%, white);
+  border-color: color-mix(in srgb, var(--accent, #7eb8a8) 45%, var(--border));
+}
+.evolution-card.status-deferred .evolution-status { opacity: .85; }
+.evolution-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.evolution-card p span {
+  display: inline-block;
+  min-width: 2.2em;
+  margin-right: 6px;
+  color: var(--text-muted);
+}
 .evolution-time { display: grid; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
 .evolution-time small { color: var(--muted); font-size: 10px; }
 .evolution-time strong { font-size: 13px; }

@@ -95,7 +95,18 @@ import { graphRevisionProgress } from "../application/chapters/graph-revision-pr
 import { createGraphRevisionModel } from "../application/chapters/graph-revision-model.js"
 import { NikowenkuReferenceService } from "../infrastructure/web-research/nikowenku-reference-service.js"
 import { deductionTaskProgress } from "../application/turns/deduction-task-progress.js"
-import type { HistoryBranchSummary, HistoryCheckoutResult, HistoryEntrySummary, HistoryOverview, HistoryRetentionPreview } from "@starseafolio/contracts"
+import type {
+  HistoryBranchSummary,
+  HistoryCheckoutResult,
+  HistoryEntrySummary,
+  HistoryOverview,
+  HistoryRetentionPreview,
+  WorldEvolutionListResult,
+} from "@starseafolio/contracts"
+import {
+  buildWorldEvolutionListResult,
+  summarizeGraphNodeContent,
+} from "../application/world/world-evolution-projections.js"
 
 export class ProjectRuntime {
   private closed = false
@@ -1639,6 +1650,29 @@ export class ProjectRuntime {
     return new SqliteGraphRepository(this.database).getNeighborhood({
       scope: { projectId: this.projectId },
       ...input,
+    })
+  }
+
+  public async listEvolutionProjections(input: Readonly<{
+    limit?: number
+    relatedAnchorIds?: readonly string[]
+  }> = {}): Promise<WorldEvolutionListResult> {
+    const limit = Math.min(Math.max(input.limit ?? 32, 1), 64)
+    const persistence = new SqliteTurnPersistence(this.database, () => randomUUID())
+    const frontiers = await persistence.listSchedulableFrontiers(this.projectId, limit)
+    const graph = new SqliteGraphRepository(this.database)
+    const labelCache = new Map<string, string | undefined>()
+    const resolveLabel = async (ref: string): Promise<string | undefined> => {
+      if (labelCache.has(ref)) return labelCache.get(ref)
+      const node = await graph.getNode({ projectId: this.projectId }, ref)
+      const label = node === undefined ? undefined : summarizeGraphNodeContent(node.content)
+      labelCache.set(ref, label)
+      return label
+    }
+    return buildWorldEvolutionListResult({
+      frontiers,
+      ...(input.relatedAnchorIds === undefined ? {} : { relatedAnchorIds: input.relatedAnchorIds }),
+      resolveLabel,
     })
   }
 

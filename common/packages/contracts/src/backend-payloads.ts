@@ -161,6 +161,14 @@ export const worldEvolvePayloadSchema = worldTaskPayloadBaseSchema.extend({
 })
 export type WorldEvolvePayload = z.infer<typeof worldEvolvePayloadSchema>
 
+export const worldEvolutionListPayloadSchema = projectWorkspacePayloadSchema.extend({
+  projectId: idSchema,
+  limit: z.number().int().positive().max(64).default(32),
+  /** Optional graph/chapter anchors from the current task for “reached prose” hints. */
+  relatedAnchorIds: z.array(z.string().min(1)).max(64).optional(),
+})
+export type WorldEvolutionListPayload = z.infer<typeof worldEvolutionListPayloadSchema>
+
 export const taskPayloadSchema = z.object({
   taskId: idSchema,
 })
@@ -837,6 +845,7 @@ export const backendPayloadSchemas = {
   "turn.metrics.reset": turnMetricsResetPayloadSchema,
   "world.query": worldQueryPayloadSchema,
   "world.evolve": worldEvolvePayloadSchema,
+  "world.evolution.list": worldEvolutionListPayloadSchema,
   "history.list": historyListPayloadSchema,
   "history.branches": historyBranchesPayloadSchema,
   "history.saveManual": historySaveManualPayloadSchema,

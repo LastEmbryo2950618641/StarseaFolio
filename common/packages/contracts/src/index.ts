@@ -27,5 +27,6 @@ export * from "./runtime-metrics.js"
 export * from "./tasks.js"
 export * from "./version.js"
 export * from "./workspace.js"
+export * from "./world-evolution.js"
 
 export type * from "./platform-bridge.js"

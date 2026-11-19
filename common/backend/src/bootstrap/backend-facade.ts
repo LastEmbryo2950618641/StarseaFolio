@@ -110,6 +110,7 @@ import {
   workspaceImportFilesPayloadSchema,
   workspaceImportFolderPayloadSchema,
   worldEvolvePayloadSchema,
+  worldEvolutionListPayloadSchema,
   worldQueryPayloadSchema,
 } from "@starseafolio/contracts"
 import { DEFAULT_VOLUME_FOLDER_NAME, digest, isChapterVolumeContainerPath, pickPreferredVolumeFolderName } from "../core/index.js"
@@ -1040,6 +1041,14 @@ export class BackendFacade {
           ...(payload.maxModelCalls === undefined ? {} : { maxModelCalls: payload.maxModelCalls }),
           ...(payload.deadlineMs === undefined ? {} : { deadlineMs: payload.deadlineMs }),
           ...(payload.maxRetrievalRounds === undefined ? {} : { maxRetrievalRounds: payload.maxRetrievalRounds }),
+        })
+      }
+      case "world.evolution.list": {
+        const payload = worldEvolutionListPayloadSchema.parse(request.payload)
+        const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
+        return runtime.listEvolutionProjections({
+          limit: payload.limit,
+          ...(payload.relatedAnchorIds === undefined ? {} : { relatedAnchorIds: payload.relatedAnchorIds }),
         })
       }
       case "turn.status": {

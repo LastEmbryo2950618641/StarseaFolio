@@ -35,6 +35,7 @@ export const backendMethodValues = [
   "turn.metrics.reset",
   "world.query",
   "world.evolve",
+  "world.evolution.list",
   "history.list",
   "history.branches",
   "history.saveManual",

@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react"
-import { AlertCircle, BookOpen, Check, Circle, GitBranch, Network, Orbit, X } from "lucide-react"
-import { aiPhaseValues, type ChapterReviewRevisionPayload, type ChapterRevisionReadResult, type ChapterSummary, type ProjectSettings, type ResettableRuntimeMetricId } from "@starseafolio/contracts"
+import { AlertCircle, BookOpen, Check, Circle, GitBranch, Loader2, Network, Orbit, RefreshCw, X } from "lucide-react"
+import {
+  aiPhaseValues,
+  type ChapterReviewRevisionPayload,
+  type ChapterRevisionReadResult,
+  type ChapterSummary,
+  type EvolutionProjection,
+  type EvolutionProjectionStatus,
+  type ProjectSettings,
+  type ResettableRuntimeMetricId,
+  type WorldEvolutionListResult,
+} from "@starseafolio/contracts"
 
-import type { GraphSlice, OpenProject, PhaseRunSnapshot, TaskSnapshot } from "../../api/client.js"
+import { invokeBackend, type GraphSlice, type OpenProject, type PhaseRunSnapshot, type TaskSnapshot } from "../../api/client.js"
 import type { SynopsisConversationStreamSnapshot } from "@starseafolio/contracts"
 import { ExpandableErrorAlert } from "../../components/ExpandableErrorAlert.js"
 import { UiTooltip, uiTooltipRich } from "../../components/UiTooltip.js"
@@ -164,7 +174,10 @@ export function RightRail({
         onChanged={onRefreshWorkspace}
       /> : null}
       {visibleTab === "graph" ? <WorldGraph slice={graphSlice} settings={graphSettings} /> : null}
-      {visibleTab === "evolution" ? <EvolutionPanel /> : null}
+      {visibleTab === "evolution" ? <EvolutionPanel
+        project={project}
+        relatedAnchorIds={graphSlice?.nodes.map((node) => node.id) ?? []}
+      /> : null}
     </div>
   </aside>{checkpointOpen && task !== undefined ? <TaskCheckpointDialog
     task={task}
@@ -656,10 +669,98 @@ function PhaseStatusIcon({ state, size = "md" }: {
   return <Circle size={size === "sm" ? 9 : 10} />
 }
 
-function EvolutionPanel(): React.JSX.Element {
+const evolutionStatusLabel: Record<EvolutionProjectionStatus, string> = {
+  committed: "已提交",
+  reached_prose: "已到达正文",
+  deferred: "延后",
+  archived: "归档",
+}
+
+function EvolutionPanel(props: Readonly<{
+  project?: OpenProject | undefined
+  relatedAnchorIds?: readonly string[]
+}>): React.JSX.Element {
+  const projectId = props.project?.projectId
+  const workspaceRootRef = props.project?.workspaceRootRef
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string>()
+  const [data, setData] = useState<WorldEvolutionListResult>()
+
+  const load = async (): Promise<void> => {
+    if (projectId === undefined || workspaceRootRef === undefined) {
+      setData(undefined)
+      setError(undefined)
+      return
+    }
+    setLoading(true)
+    setError(undefined)
+    try {
+      const result = await invokeBackend<WorldEvolutionListResult>("world.evolution.list", {
+        projectId,
+        workspaceRootRef,
+        limit: 32,
+        ...(props.relatedAnchorIds !== undefined && props.relatedAnchorIds.length > 0
+          ? { relatedAnchorIds: props.relatedAnchorIds.slice(0, 64) }
+          : {}),
+      })
+      setData(result)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+    // Refresh when the open project changes; related anchors refresh separately via button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, workspaceRootRef])
+
+  const projections = data?.projections ?? []
   return <div className="evolution-panel">
-    <div className="evolution-time"><small>当前世界时间</small><strong>随已提交章节推进</strong></div>
-    <div className="evolution-entry"><GitBranch size={16} /><div><strong>当前没有可展示的演化投影</strong><p>后台不会为制造宏大感而补齐所有事实。出现与当前任务相关、可追溯的自主变化后，将在此显示影响路径和认知边界。</p></div></div>
-    <div className="evolution-entry muted"><GitBranch size={16} /><div><strong>显示逻辑</strong><p>这里不是事件列表，而是世界已到达、可追溯、可回写的自治变化投影。</p></div></div>
+    <div className="evolution-time">
+      <div>
+        <small>当前世界时间</small>
+        <strong>{data?.clock.summary ?? "随已提交章节推进"}</strong>
+      </div>
+      <button type="button" className="evolution-refresh" disabled={loading || projectId === undefined} onClick={() => { void load() }} aria-label="刷新演化投影">
+        {loading ? <Loader2 size={14} className="graph-revision-spinner" /> : <RefreshCw size={14} />}
+      </button>
+    </div>
+    {error !== undefined ? <ExpandableErrorAlert message={error} /> : null}
+    {loading && data === undefined ? <div className="evolution-entry muted"><Loader2 size={16} className="graph-revision-spinner" /><div><strong>读取演化前沿…</strong></div></div> : null}
+    {!loading && error === undefined && projections.length === 0 ? <div className="evolution-entry">
+      <GitBranch size={16} />
+      <div>
+        <strong>当前没有可展示的演化投影</strong>
+        <p>后台不会为制造宏大感而补齐所有事实。章节提交后若产生可调度前沿，将在此显示影响路径与重访条件。</p>
+      </div>
+    </div> : null}
+    {projections.map((item) => <EvolutionProjectionCard key={item.frontierId} projection={item} />)}
+    <div className="evolution-entry muted">
+      <GitBranch size={16} />
+      <div>
+        <strong>显示逻辑</strong>
+        <p>这里不是事件列表，而是世界已到达、可追溯、可回写的自治变化投影。</p>
+      </div>
+    </div>
   </div>
+}
+
+function EvolutionProjectionCard({ projection }: { projection: EvolutionProjection }): React.JSX.Element {
+  return <article className={`evolution-card status-${projection.status}`}>
+    <header>
+      <span className="evolution-status">{evolutionStatusLabel[projection.status]}</span>
+      <strong>{projection.title}</strong>
+    </header>
+    <p><span>发生</span>{projection.occurrence}</p>
+    {projection.timeLabel !== undefined || projection.locationLabel !== undefined ? <p>
+      <span>时空</span>
+      {[projection.timeLabel, projection.locationLabel].filter(Boolean).join(" / ")}
+    </p> : null}
+    {projection.basisRefs.length > 0 ? <p><span>依据</span>{projection.basisRefs.slice(0, 6).join(" · ")}</p> : null}
+    <p><span>影响</span>{projection.impact}</p>
+    {projection.revisitCondition !== undefined ? <p><span>重访</span>{projection.revisitCondition}</p> : null}
+  </article>
 }
