@@ -4000,9 +4000,34 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   overflow-wrap: anywhere;
 }
 .empty-state { margin: auto; max-width: 240px; text-align: center; font-size: 12px; line-height: 1.7; color: var(--muted); padding: 20px; }
-.evolution-panel { padding: 12px; }
-.evolution-time { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.evolution-time > div { min-width: 0; }
+.evolution-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.evolution-time {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.evolution-time-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.evolution-time small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.evolution-time strong {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
 .evolution-refresh {
   flex: 0 0 auto;
   display: inline-flex;
@@ -4016,24 +4041,78 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   color: var(--text-muted);
   cursor: pointer;
 }
-.evolution-refresh:disabled { opacity: .5; cursor: default; }
-.evolution-card {
-  margin-top: 12px;
-  padding: 10px 11px;
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
-}
-.evolution-card header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.evolution-card header strong {
+.evolution-refresh:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   color: var(--text-secondary);
-  font-size: 12px;
+}
+.evolution-refresh:disabled { opacity: .5; cursor: default; }
+.evolution-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.evolution-item {
+  position: relative;
+  border-radius: 8px;
+}
+.evolution-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 14px;
+  align-items: start;
+  gap: 8px;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.evolution-row:hover {
+  border-color: color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.evolution-item.is-expanded .evolution-row {
+  border-color: color-mix(in srgb, var(--border) 90%, transparent);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.evolution-rail {
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
+}
+.evolution-item.status-reached_prose .evolution-rail {
+  background: color-mix(in srgb, var(--accent, #7eb8a8) 80%, white);
+}
+.evolution-item.status-deferred .evolution-rail,
+.evolution-item.status-archived .evolution-rail {
+  opacity: .65;
+}
+.evolution-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.evolution-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.evolution-title {
+  min-width: 0;
+  color: var(--text);
+  font-size: 12.5px;
   font-weight: 600;
+  line-height: 1.35;
 }
 .evolution-status {
   flex: 0 0 auto;
@@ -4044,30 +4123,86 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   border: 1px solid var(--border);
   color: var(--text-muted);
 }
-.evolution-card.status-reached_prose .evolution-status {
+.evolution-item.status-reached_prose .evolution-status {
   color: color-mix(in srgb, var(--accent, #7eb8a8) 90%, white);
   border-color: color-mix(in srgb, var(--accent, #7eb8a8) 45%, var(--border));
 }
-.evolution-card.status-deferred .evolution-status { opacity: .85; }
-.evolution-card p {
-  margin: 4px 0 0;
+.evolution-item.status-deferred .evolution-status { opacity: .85; }
+.evolution-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   color: var(--muted);
   font-size: 11px;
-  line-height: 1.55;
+  line-height: 1.4;
 }
-.evolution-card p span {
-  display: inline-block;
-  min-width: 2.2em;
-  margin-right: 6px;
+.evolution-chevron {
+  margin-top: 4px;
+  color: var(--text-muted);
+  transition: transform 140ms ease;
+}
+.evolution-item.is-expanded .evolution-chevron {
+  transform: rotate(180deg);
+}
+.evolution-detail {
+  margin: 0 8px 8px 18px;
+  padding: 8px 10px 10px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  display: grid;
+  gap: 10px;
+}
+.evolution-detail-block {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.evolution-detail-block h4 {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.evolution-detail-block p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.evolution-basis-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.evolution-basis-chip,
+.evolution-basis-more {
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.evolution-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
   color: var(--text-muted);
 }
-.evolution-time { display: grid; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
-.evolution-time small { color: var(--muted); font-size: 10px; }
-.evolution-time strong { font-size: 13px; }
-.evolution-entry { margin-top: 14px; display: flex; align-items: flex-start; gap: 9px; color: var(--text-muted); }
 .evolution-entry strong { color: var(--text-secondary); font-size: 12px; }
 .evolution-entry p { color: var(--muted); font-size: 11px; line-height: 1.65; margin: 6px 0; }
 .evolution-entry.muted { opacity: .85; }
+@media (prefers-reduced-motion: reduce) {
+  .evolution-row,
+  .evolution-chevron {
+    transition: none;
+  }
+}
 
 .statusbar { display: flex; align-items: center; gap: 0; background: var(--bg-sidebar); border-top: 1px solid var(--border); color: var(--text-muted); font-size: 10.5px; overflow: hidden; }
 .statusbar > span { height: 100%; padding: 0 8px; display: flex; align-items: center; gap: 5px; border-right: 1px solid var(--border); white-space: nowrap; }
@@ -7388,17 +7523,11 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   cursor: pointer;
   overflow: hidden;
   isolation: isolate;
-  transform: scale(var(--chapter-focus-scale, 1));
-  opacity: var(--chapter-focus-opacity, 1);
-  transform-origin: center center;
-  will-change: transform, opacity;
-  transition: border-color 120ms ease, box-shadow 120ms ease, transform 140ms ease, opacity 140ms ease;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease, transform 140ms ease;
 }
 @media (prefers-reduced-motion: reduce) {
   .chapter-panel-card {
-    transform: none;
-    opacity: 1;
-    transition: border-color 120ms ease, box-shadow 120ms ease;
+    transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
   }
 }
 .chapter-panel-stage-cup {
@@ -7484,7 +7613,15 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   font-variant-numeric: tabular-nums;
 }
 .chapter-panel-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  transform: translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chapter-panel-card:hover:not(:disabled) {
+    transform: none;
+  }
 }
 .chapter-panel-card.is-active {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));

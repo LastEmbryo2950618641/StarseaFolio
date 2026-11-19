@@ -19,6 +19,34 @@ function elapsedText(startedAtMs: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000))
   return seconds < 60 ? `${String(seconds)} 秒` : `${String(Math.floor(seconds / 60))} 分 ${String(seconds % 60)} 秒`
 }
+
+function graphRevisionTasksEqual(
+  left: readonly GraphRevisionTask[],
+  right: readonly GraphRevisionTask[],
+): boolean {
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]
+    const b = right[index]
+    if (a === undefined || b === undefined) return false
+    if (
+      a.revisionTaskId !== b.revisionTaskId
+      || a.status !== b.status
+      || a.updatedAtMs !== b.updatedAtMs
+      || a.graphSyncTaskId !== b.graphSyncTaskId
+      || a.error !== b.error
+      || a.canCancel !== b.canCancel
+      || a.canRetry !== b.canRetry
+      || a.canContinue !== b.canContinue
+      || a.blocksTurn !== b.blocksTurn
+      || a.heading !== b.heading
+      || JSON.stringify(a.activity) !== JSON.stringify(b.activity)
+    ) {
+      return false
+    }
+  }
+  return true
+}
 const phaseLabels: Record<string, string> = {
   settings_extraction: "抽取并写入设定",
   work_style_revision: "风格抽取与融合",
@@ -151,15 +179,17 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
         if (project === undefined) {
           if (!disposed && generation.current === current) setTasks([])
         } else {
-          // Prefer skill ui-state; refresh host sync so Codex/app share the same graph panel JSON.
-          await invokeBackend("folio.host.ensure", { ...project, host: "starseafolio" })
-          const ui = await invokeBackend<{
-            panels: { graphRevision: { tasks: readonly GraphRevisionTask[] } }
-          }>("folio.uiState.read", project)
-          const fromFolio = ui.panels.graphRevision.tasks
-          const listed = await invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project)
+          // Read-only refresh. Do not call folio.host.ensure on every tick — ensure
+          // rewrites .folio/ui-state.json and saturates IPC while the panel is open.
+          const [ui, listed] = await Promise.all([
+            invokeBackend<{
+              panels: { graphRevision: { tasks: readonly GraphRevisionTask[] } }
+            }>("folio.uiState.read", project).catch(() => undefined),
+            invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project),
+          ])
           // Folio is the shared panel source, but stage IO needs graphSyncTaskId from the
           // authoritative list (older ui-state may have stripped it).
+          const fromFolio = ui?.panels.graphRevision.tasks ?? []
           const listedById = new Map(listed.map((task) => [task.revisionTaskId, task]))
           const next = fromFolio.length > 0
             ? fromFolio.map((task) => {
@@ -178,7 +208,10 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
               }
             })
             : listed
-          if (!disposed && generation.current === current) { setTasks(next); setLoadError(undefined) }
+          if (!disposed && generation.current === current) {
+            setTasks((previous) => graphRevisionTasksEqual(previous, next) ? previous : next)
+            setLoadError(undefined)
+          }
         }
       } catch (cause) {
         if (!disposed) setLoadError(cause instanceof Error ? cause.message : String(cause))
@@ -188,6 +221,12 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
     }
     void poll()
     return () => { disposed = true; clearTimeout(timer) }
+  }, [project?.projectId, project?.workspaceRootRef, refresh])
+
+  useEffect(() => {
+    if (project === undefined) return
+    // One-shot host sync when the panel mounts or the user forces refresh.
+    void invokeBackend("folio.host.ensure", { ...project, host: "starseafolio" }).catch(() => undefined)
   }, [project?.projectId, project?.workspaceRootRef, refresh])
 
   useEffect(() => {

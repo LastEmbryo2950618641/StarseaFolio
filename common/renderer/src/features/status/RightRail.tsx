@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { AlertCircle, BookOpen, Check, Circle, GitBranch, Loader2, Network, Orbit, RefreshCw, X } from "lucide-react"
+import { AlertCircle, BookOpen, Check, ChevronDown, Circle, GitBranch, Loader2, Network, Orbit, RefreshCw, X } from "lucide-react"
 import {
   aiPhaseValues,
   type ChapterReviewRevisionPayload,
@@ -685,6 +685,7 @@ function EvolutionPanel(props: Readonly<{
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [data, setData] = useState<WorldEvolutionListResult>()
+  const [expandedId, setExpandedId] = useState<string>()
 
   const load = async (): Promise<void> => {
     if (projectId === undefined || workspaceRootRef === undefined) {
@@ -717,10 +718,15 @@ function EvolutionPanel(props: Readonly<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, workspaceRootRef])
 
+  useEffect(() => {
+    const ids = new Set((data?.projections ?? []).map((item) => item.frontierId))
+    if (expandedId !== undefined && !ids.has(expandedId)) setExpandedId(undefined)
+  }, [data, expandedId])
+
   const projections = data?.projections ?? []
   return <div className="evolution-panel">
     <div className="evolution-time">
-      <div>
+      <div className="evolution-time-copy">
         <small>当前世界时间</small>
         <strong>{data?.clock.summary ?? "随已提交章节推进"}</strong>
       </div>
@@ -737,30 +743,71 @@ function EvolutionPanel(props: Readonly<{
         <p>后台不会为制造宏大感而补齐所有事实。章节提交后若产生可调度前沿，将在此显示影响路径与重访条件。</p>
       </div>
     </div> : null}
-    {projections.map((item) => <EvolutionProjectionCard key={item.frontierId} projection={item} />)}
-    <div className="evolution-entry muted">
-      <GitBranch size={16} />
-      <div>
-        <strong>显示逻辑</strong>
-        <p>这里不是事件列表，而是世界已到达、可追溯、可回写的自治变化投影。</p>
-      </div>
-    </div>
+    {projections.length > 0 ? <ol className="evolution-list">
+      {projections.map((item) => (
+        <EvolutionProjectionCard
+          key={item.frontierId}
+          projection={item}
+          expanded={expandedId === item.frontierId}
+          onToggle={() => {
+            setExpandedId((current) => current === item.frontierId ? undefined : item.frontierId)
+          }}
+        />
+      ))}
+    </ol> : null}
   </div>
 }
 
-function EvolutionProjectionCard({ projection }: { projection: EvolutionProjection }): React.JSX.Element {
-  return <article className={`evolution-card status-${projection.status}`}>
-    <header>
-      <span className="evolution-status">{evolutionStatusLabel[projection.status]}</span>
-      <strong>{projection.title}</strong>
-    </header>
-    <p><span>发生</span>{projection.occurrence}</p>
-    {projection.timeLabel !== undefined || projection.locationLabel !== undefined ? <p>
-      <span>时空</span>
-      {[projection.timeLabel, projection.locationLabel].filter(Boolean).join(" / ")}
-    </p> : null}
-    {projection.basisRefs.length > 0 ? <p><span>依据</span>{projection.basisRefs.slice(0, 6).join(" · ")}</p> : null}
-    <p><span>影响</span>{projection.impact}</p>
-    {projection.revisitCondition !== undefined ? <p><span>重访</span>{projection.revisitCondition}</p> : null}
-  </article>
+function EvolutionProjectionCard(props: Readonly<{
+  projection: EvolutionProjection
+  expanded: boolean
+  onToggle(): void
+}>): React.JSX.Element {
+  const { projection, expanded, onToggle } = props
+  const spacetime = [projection.timeLabel, projection.locationLabel].filter(Boolean).join(" · ")
+  const basisCount = projection.basisRefs.length
+  return <li className={`evolution-item status-${projection.status}${expanded ? " is-expanded" : ""}`}>
+    <button
+      type="button"
+      className="evolution-row"
+      aria-expanded={expanded}
+      onClick={onToggle}
+    >
+      <span className="evolution-rail" aria-hidden="true" />
+      <span className="evolution-row-main">
+        <span className="evolution-row-head">
+          <span className="evolution-status">{evolutionStatusLabel[projection.status]}</span>
+          <strong className="evolution-title">{projection.title}</strong>
+        </span>
+        {spacetime.length > 0 || basisCount > 0 ? <span className="evolution-row-meta">
+          {spacetime.length > 0 ? <span>{spacetime}</span> : null}
+          {basisCount > 0 ? <span>{basisCount} 个依据</span> : null}
+        </span> : null}
+      </span>
+      <ChevronDown size={14} className="evolution-chevron" aria-hidden="true" />
+    </button>
+    {expanded ? <div className="evolution-detail">
+      <section className="evolution-detail-block">
+        <h4>发生</h4>
+        <p>{projection.occurrence}</p>
+      </section>
+      <section className="evolution-detail-block">
+        <h4>影响</h4>
+        <p>{projection.impact}</p>
+      </section>
+      {projection.revisitCondition !== undefined ? <section className="evolution-detail-block">
+        <h4>重访</h4>
+        <p>{projection.revisitCondition}</p>
+      </section> : null}
+      {basisCount > 0 ? <section className="evolution-detail-block">
+        <h4>依据</h4>
+        <div className="evolution-basis-chips">
+          {projection.basisRefs.slice(0, 12).map((ref) => (
+            <span key={ref} className="evolution-basis-chip" title={ref}>{ref}</span>
+          ))}
+          {basisCount > 12 ? <span className="evolution-basis-more">+{basisCount - 12}</span> : null}
+        </div>
+      </section> : null}
+    </div> : null}
+  </li>
 }

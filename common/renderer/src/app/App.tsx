@@ -492,18 +492,50 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     const chapterSequence = synopsisConversation.session.chapterSequence
     const poll = async (): Promise<void> => {
       try {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          return
+        }
         const latest = await invokeBackend<TaskSnapshot | null>("turn.latest.get", {
           projectId: project.projectId, workspaceRootRef: project.workspaceRootRef, chapterSequence,
         })
-        if (active) setTask(latest ?? undefined)
+        if (active) {
+          setTask((previous) => {
+            if (latest === null) return undefined
+            if (
+              previous?.handle?.taskId === latest.handle?.taskId
+              && previous.status === latest.status
+              && previous.lastPhase === latest.lastPhase
+              && previous.error?.message === latest.error?.message
+              && (previous.phaseRuns?.length ?? 0) === (latest.phaseRuns?.length ?? 0)
+              && (previous.phaseRuns?.at(-1)?.finishedAtMs ?? previous.phaseRuns?.at(-1)?.startedAtMs)
+                === (latest.phaseRuns?.at(-1)?.finishedAtMs ?? latest.phaseRuns?.at(-1)?.startedAtMs)
+            ) {
+              return previous
+            }
+            return latest
+          })
+        }
       } catch {
         // Keep the current monitor during a transient backend failure.
       } finally {
-        if (active) timer = setTimeout(() => { void poll() }, 1000)
+        if (active) {
+          const delay = typeof document !== "undefined" && document.visibilityState === "hidden"
+            ? 4000
+            : 1500
+          timer = setTimeout(() => { void poll() }, delay)
+        }
       }
     }
+    const onVisibility = (): void => {
+      if (document.visibilityState === "visible") void poll()
+    }
+    document.addEventListener("visibilitychange", onVisibility)
     void poll()
-    return () => { active = false; clearTimeout(timer) }
+    return () => {
+      active = false
+      clearTimeout(timer)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
   }, [project, synopsisConversation.session?.chapterSequence])
 
   const readWorkspaceFile = useCallback(async (path: string): Promise<{ path: string; content: string }> => {
@@ -1598,7 +1630,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
               await new Promise((resolve) => setTimeout(resolve, 200))
               continue
             }
-            setSynopsisStream(peek)
+            setSynopsisStream((previous) => (
+              previous !== undefined && synopsisStreamPeekUnchanged(previous, peek) ? previous : peek
+            ))
             if (peek.usage !== undefined) {
               setSynopsisUsage(peek.usage)
             }
@@ -1609,7 +1643,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             // staging search updates still reach the stream bubble.
           } else {
             observedRunningStream = true
-            setSynopsisStream(peek)
+            setSynopsisStream((previous) => (
+              previous !== undefined && synopsisStreamPeekUnchanged(previous, peek) ? previous : peek
+            ))
             if (peek.usage !== undefined) {
               setSynopsisUsage(peek.usage)
             }
@@ -3587,6 +3623,22 @@ function modelSelection(profile: ModelProfile) {
     disableResponseStorage: profile.disableResponseStorage,
     serviceTier: profile.serviceTier,
   }
+}
+
+function synopsisStreamPeekUnchanged(
+  previous: SynopsisConversationStreamSnapshot,
+  next: SynopsisConversationStreamSnapshot,
+): boolean {
+  return previous.status === next.status
+    && previous.updatedAtMs === next.updatedAtMs
+    && previous.thinking === next.thinking
+    && previous.content === next.content
+    && previous.error === next.error
+    && previous.thinkingRounds.length === next.thinkingRounds.length
+    && previous.searching.length === next.searching.length
+    && previous.editing.length === next.editing.length
+    && previous.toolRuns.length === next.toolRuns.length
+    && previous.todos.length === next.todos.length
 }
 
 export function shouldMonitorChapterRevision(status: ChapterRevision["graphSyncStatus"]): boolean {
