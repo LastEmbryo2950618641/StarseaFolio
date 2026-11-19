@@ -4,6 +4,7 @@ import { isWorkStyleComplete } from "../src/core/workspace/work-style-gate.js"
 import {
   applyWorkStyleRevision,
   collectUserRequirementText,
+  hasWorkStyleBodySource,
   resolveWorkStyleRequirementSource,
 } from "../src/core/workspace/work-style-revision.js"
 
@@ -120,20 +121,108 @@ describe("work style revision", () => {
     expect(result.applied).toEqual([])
   })
 
-  it("does not mine the draft during revision publish", () => {
+  it("keeps userRequirements separate from revision body text", () => {
     expect(resolveWorkStyleRequirementSource({
       workflow: "revision",
-      userInput: "正文里出现了新的门意象。",
+      userInput: "正文里出现了新的门意象。林烬抬眼，没接话，只说「先走。」",
       userRequirements: "对话再短一点。",
     })).toBe("对话再短一点。")
     expect(resolveWorkStyleRequirementSource({
       workflow: "revision",
-      userInput: "正文里出现了新的门意象。",
+      userInput: "正文里出现了新的门意象。林烬抬眼，没接话，只说「先走。」",
     })).toBe("")
     expect(resolveWorkStyleRequirementSource({
       workflow: "turn",
       userInput: "以后对白都用短句。",
     })).toBe("以后对白都用短句。")
+  })
+
+  it("detects when revision body is long enough to distill", () => {
+    expect(hasWorkStyleBodySource("短")).toBe(false)
+    expect(hasWorkStyleBodySource([
+      "林烬抬眼，没接话。",
+      "她只说「先走。」",
+      "门缝里挤进一点冷光，谁也没再解释动机，空气里只剩脚步声。",
+    ].join(""))).toBe(true)
+  })
+
+  it("merges presentation cues distilled from chapter body", () => {
+    const current = completeStyle()
+    const body = [
+      "林烬抬眼，没接话。",
+      "她只说「先走。」",
+      "门缝里挤进一点冷光，谁也没再解释动机，空气里只剩脚步声。",
+    ].join("")
+    const result = applyWorkStyleRevision({
+      current,
+      userRequirements: "",
+      chapterBody: body,
+      updates: [{
+        heading: "## 8. 句子与对话",
+        mode: "merge",
+        content: "对白偏短句，少解释动机。",
+        userQuote: "「先走。」",
+        source: "body",
+      }],
+    })
+    expect(result.applied).toEqual(["## 8. 句子与对话"])
+    expect(result.markdown).toContain("对白偏短句，少解释动机。")
+    expect(result.markdown).toContain("句长偏短")
+    expect(isWorkStyleComplete(result.markdown)).toBe(true)
+  })
+
+  it("rejects body replace and body quotes that are not in the chapter", () => {
+    const current = completeStyle()
+    const body = [
+      "林烬抬眼，没接话。",
+      "她只说「先走。」",
+      "门缝里挤进一点冷光，谁也没再解释动机，空气里只剩脚步声。",
+    ].join("")
+    const replaced = applyWorkStyleRevision({
+      current,
+      userRequirements: "",
+      chapterBody: body,
+      updates: [{
+        heading: "## 8. 句子与对话",
+        mode: "replace",
+        content: "全新对话规则。",
+        userQuote: "「先走。」",
+        source: "body",
+      }],
+    })
+    expect(replaced.markdown).toBe(current)
+    expect(replaced.skipped.some((item) => item.includes("禁止 replace"))).toBe(true)
+
+    const badQuote = applyWorkStyleRevision({
+      current,
+      userRequirements: "",
+      chapterBody: body,
+      updates: [{
+        heading: "## 8. 句子与对话",
+        mode: "merge",
+        content: "对白偏短句。",
+        userQuote: "这段正文里没有的句子",
+        source: "body",
+      }],
+    })
+    expect(badQuote.markdown).toBe(current)
+  })
+
+  it("still rejects publish-only phrases as user quotes", () => {
+    const current = completeStyle()
+    const result = applyWorkStyleRevision({
+      current,
+      userRequirements: "草稿可以，发布正文",
+      updates: [{
+        heading: "## 8. 句子与对话",
+        mode: "merge",
+        content: "对白偏短句。",
+        userQuote: "草稿可以，发布正文",
+        source: "user",
+      }],
+    })
+    expect(result.markdown).toBe(current)
+    expect(result.applied).toEqual([])
   })
 
   it("keeps the prose-style path unless the user supplies a new one", () => {

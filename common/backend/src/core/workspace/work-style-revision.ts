@@ -3,6 +3,8 @@ import { WORK_STYLE_REQUIRED_HEADINGS, isWorkStyleComplete } from "./work-style-
 
 const USER_REQUIREMENT_MAX_CHARS = 12_000
 const MIN_QUOTE_CHARS = 4
+/** Compact chapter body must be at least this long to count as distillable prose. */
+const MIN_BODY_CHARS = 24
 const STYLE_ANCHOR_HEADING = "## 1. 语体笔风"
 const STYLE_PATH_PATTERN = /表现输出\/(?:笔风规则|小说大类规则|小说次大类规则)\/[^\s，。；;）)]+\.md/gu
 const PUBLISH_ONLY_QUOTES = new Set([
@@ -13,11 +15,14 @@ const PUBLISH_ONLY_QUOTES = new Set([
   "可以发布",
 ])
 
+export type WorkStyleSectionSource = "user" | "body"
+
 export type WorkStyleSectionUpdate = Readonly<{
   heading: string
   mode: string
   content: string
   userQuote: string
+  source?: WorkStyleSectionSource
 }>
 
 export type WorkStyleRevisionResult = Readonly<{
@@ -42,8 +47,8 @@ export function collectUserRequirementText(
 }
 
 /**
- * Revision publish stores the draft in `userInput`. Style edits must follow the
- * user's own words. Other workflows treat `userInput` itself as that request.
+ * User-spoken style requirements only.
+ * Revision publish stores the chapter body in `userInput`; that body is not returned here.
  */
 export function resolveWorkStyleRequirementSource(input: Readonly<{
   workflow?: string
@@ -56,22 +61,37 @@ export function resolveWorkStyleRequirementSource(input: Readonly<{
   return input.userInput.trim()
 }
 
+/** True when revision `userInput` has enough prose to distill presentation style. */
+export function hasWorkStyleBodySource(userInput: string | undefined): boolean {
+  if (userInput === undefined) return false
+  return compact(userInput).length >= MIN_BODY_CHARS
+}
+
 /**
- * Fold user-requested presentation constraints into 作品风格.md.
+ * Fold presentation constraints into 作品风格.md from user words and/or chapter body.
  * Merge keeps every existing sentence and adds what is new. Replace rewrites one
- * section only when the update is marked as a contradiction.
+ * section only when the update is marked as a contradiction (user source only).
  */
 export function applyWorkStyleRevision(input: Readonly<{
   current: string
   updates: readonly WorkStyleSectionUpdate[]
   userRequirements: string
+  chapterBody?: string
 }>): WorkStyleRevisionResult {
   const requirements = input.userRequirements.trim()
-  if (requirements.length === 0 || !isWorkStyleComplete(input.current)) {
+  const chapterBody = input.chapterBody?.trim() ?? ""
+  if (!isWorkStyleComplete(input.current)) {
     return {
       markdown: input.current,
       applied: [],
-      skipped: input.updates.map((update) => `${update.heading}:缺少可用的用户要求或当前风格未完成`),
+      skipped: input.updates.map((update) => `${update.heading}:当前风格未完成`),
+    }
+  }
+  if (requirements.length === 0 && !hasWorkStyleBodySource(chapterBody)) {
+    return {
+      markdown: input.current,
+      applied: [],
+      skipped: input.updates.map((update) => `${update.heading}:缺少可用的用户要求或正文`),
     }
   }
   let markdown = input.current.replaceAll("\r\n", "\n")
@@ -83,7 +103,21 @@ export function applyWorkStyleRevision(input: Readonly<{
       skipped.push(`${heading}:不是作品风格的固定小节`)
       continue
     }
-    if (!quoteIsUsable(update.userQuote, requirements)) {
+    const source: WorkStyleSectionSource = update.source === "body" ? "body" : "user"
+    if (source === "body") {
+      if (!hasWorkStyleBodySource(chapterBody)) {
+        skipped.push(`${heading}:缺少可蒸馏的正文`)
+        continue
+      }
+      if (!quoteIsUsable(update.userQuote, chapterBody)) {
+        skipped.push(`${heading}:引用对不上正文`)
+        continue
+      }
+      if (update.mode === "replace") {
+        skipped.push(`${heading}:正文蒸馏禁止 replace`)
+        continue
+      }
+    } else if (!quoteIsUsable(update.userQuote, requirements)) {
       skipped.push(`${heading}:引用对不上用户要求`)
       continue
     }
@@ -92,9 +126,11 @@ export function applyWorkStyleRevision(input: Readonly<{
       skipped.push(`${heading}:没有可写入的正文`)
       continue
     }
-    const next = update.mode === "replace"
-      ? applyReplace(markdown, heading, content, requirements)
-      : applyMerge(markdown, heading, content, requirements)
+    // Body distill never supplies new style-rule paths; pass empty requirements for anchors.
+    const anchorRequirements = source === "body" ? "" : requirements
+    const next = source === "body" || update.mode !== "replace"
+      ? applyMerge(markdown, heading, content, anchorRequirements)
+      : applyReplace(markdown, heading, content, anchorRequirements)
     if (next === undefined) {
       skipped.push(`${heading}:无法在保留原约束的前提下写入`)
       continue
@@ -125,6 +161,9 @@ function applyMerge(
   if (fused) return replaceSectionBody(markdown, heading, content)
   const addition = novelLines(oldBody, content)
   if (addition.length === 0) return undefined
+  if (!preservesStyleAnchors(heading, oldBody, `${oldBody.trim()}\n\n${addition}`, requirements)) {
+    return undefined
+  }
   return replaceSectionBody(markdown, heading, `${oldBody.trim()}\n\n${addition}`)
 }
 
@@ -144,11 +183,11 @@ function isRequiredHeading(heading: string): boolean {
   return (WORK_STYLE_REQUIRED_HEADINGS as readonly string[]).includes(heading)
 }
 
-function quoteIsUsable(quote: string, requirements: string): boolean {
+function quoteIsUsable(quote: string, sourceText: string): boolean {
   const compactQuote = compact(quote)
   if (compactQuote.length < MIN_QUOTE_CHARS) return false
   if (PUBLISH_ONLY_QUOTES.has(compactQuote)) return false
-  return compact(requirements).includes(compactQuote)
+  return compact(sourceText).includes(compactQuote)
 }
 
 function preservesStyleAnchors(

@@ -69,6 +69,11 @@ import { useDeductionGoals } from "./use-deduction-goals.js"
 import { SynopsisChoiceComposerProvider, useChoiceDraft } from "./SynopsisChoiceComposerContext.js"
 import { SynopsisChoiceGroup } from "./SynopsisChoiceGroup.js"
 import { latestSetupQuestionId } from "./synopsis-choice-state.js"
+import {
+  formatChapterIngestDetail,
+  useChapterIngestActivity,
+  type ChapterIngestActivity,
+} from "../status/chapter-ingest-activity.js"
 
 type PresentationProps = Readonly<{
   descriptionRule: string
@@ -189,6 +194,13 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const replyFinalizing = discussPhase === "finalizing"
   const showStop = discussPhase === "generating" || discussPhase === "previewing"
   const discussStatusLabel = discussBusyPhaseLabel(discussPhase)
+  const chapterIngest = useChapterIngestActivity(
+    props.projectId !== undefined && props.workspaceRootRef !== undefined
+      ? { projectId: props.projectId, workspaceRootRef: props.workspaceRootRef }
+      : undefined,
+  )
+  const compacting = props.stream?.compacting === true
+  const showBackgroundActivity = !props.busy && (compacting || chapterIngest !== undefined)
 
   const scrollThreadToLatest = (): void => {
     const thread = threadRef.current
@@ -226,7 +238,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
     const thread = threadRef.current
     if (thread === null) return
     thread.scrollTop = thread.scrollHeight
-  }, [props.messages.length, props.busy, props.stream?.thinking, props.stream?.thinkingRounds, props.stream?.content, props.stream?.searching, props.stream?.editing, props.stream?.toolRuns])
+  }, [props.messages.length, props.busy, props.stream?.thinking, props.stream?.thinkingRounds, props.stream?.content, props.stream?.searching, props.stream?.editing, props.stream?.toolRuns, props.stream?.compacting, chapterIngest?.current, chapterIngest?.phaseLabel])
 
   useEffect(() => {
     if (!advancedMenuOpen) return
@@ -432,13 +444,29 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                           segments={buildLiveTimeline(props.stream, streamPreview, discussPhase)}
                           streaming
                           discussPhase={discussPhase}
+                          compacting={compacting}
+                          chapterIngest={chapterIngest}
                           {...(props.onOpenSettingsLineage === undefined
                             ? {}
                             : { onOpenSettingsLineage: props.onOpenSettingsLineage })}
                         />
                       </div>
                     </article>
-                  : null}
+                  : showBackgroundActivity
+                    ? <article className="creation-desk-message assistant pending" aria-live="polite">
+                        <div className="creation-desk-message-avatar" aria-hidden="true"><Bot size={16} /></div>
+                        <div className="creation-desk-message-body">
+                          <header>Agent · 后台任务</header>
+                          <AgentStructuredBody
+                            segments={[]}
+                            streaming
+                            discussPhase="idle"
+                            compacting={compacting}
+                            chapterIngest={chapterIngest}
+                          />
+                        </div>
+                      </article>
+                    : null}
               </>}
         </div>
         {showJumpToLatest
@@ -1049,11 +1077,15 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
   segments,
   streaming = false,
   discussPhase = "idle",
+  compacting = false,
+  chapterIngest,
   onOpenSettingsLineage,
 }: Readonly<{
   segments: readonly AgentTimelineSegment[]
   streaming?: boolean
   discussPhase?: DiscussBusyPhase
+  compacting?: boolean
+  chapterIngest?: ChapterIngestActivity | undefined
   onOpenSettingsLineage?(): void
 }>): React.JSX.Element {
   const hasAny = segments.length > 0
@@ -1066,10 +1098,13 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
     }
     return index
   })()
-  const processSummary = summarizeAgentProcess(processSegments)
-  const processActive = processSummary.active
+  const processSummary = summarizeAgentProcess(processSegments, { compacting, chapterIngest })
+  const backgroundActive = compacting || chapterIngest !== undefined
+  const processActive = processSummary.active || backgroundActive
+  const showProcessPanel = processSegments.length > 0 || (streaming && backgroundActive)
+  const showThinkingPlaceholder = !hasAny && streaming && !backgroundActive
   return <div className="agent-structured-body">
-    {processSegments.length > 0
+    {showProcessPanel
       ? <details
           className={`agent-stream-activity${processActive && streaming ? " is-live" : ""}`}
           data-testid="agent-stream-activity"
@@ -1094,6 +1129,7 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
               lastThinkingIndex,
               ...(onOpenSettingsLineage === undefined ? {} : { onOpenSettingsLineage }),
             }))}
+            {renderBackgroundActivityBlocks({ compacting, chapterIngest })}
           </div>
         </details>
       : null}
@@ -1140,7 +1176,7 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
           : null}
       </div>
     })}
-    {!hasAny && streaming
+    {showThinkingPlaceholder
       ? <>
           <details className="agent-stream-activity is-live" data-testid="agent-stream-activity">
             <summary>
@@ -1155,6 +1191,9 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
           <p className="creation-desk-pending">正在生成正式回复…</p>
         </>
       : null}
+    {!hasAny && streaming && backgroundActive && discussPhase !== "idle" && discussPhase !== "finalizing"
+      ? <p className="creation-desk-pending">后台任务进行中；正式回复稍后给出…</p>
+      : null}
     {hasAny && streaming && !segments.some((item) => item.kind === "final") && discussPhase !== "finalizing"
       ? <p className="creation-desk-pending">
           {segments.some((item) => item.kind === "thinking") ? "正在整理正式回复…" : "正在生成正式回复…"}
@@ -1163,7 +1202,10 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
   </div>
 })
 
-function summarizeAgentProcess(segments: readonly AgentTimelineSegment[]): Readonly<{
+function summarizeAgentProcess(
+  segments: readonly AgentTimelineSegment[],
+  extras?: Readonly<{ compacting?: boolean; chapterIngest?: ChapterIngestActivity | undefined }>,
+): Readonly<{
   meta: string
   stepCount: number
   active: boolean
@@ -1198,11 +1240,49 @@ function summarizeAgentProcess(segments: readonly AgentTimelineSegment[]): Reado
   if (runs > 0) parts.push(`run ${String(runs)}`)
   if (searches > 0) parts.push(`searched ${String(searches)}`)
   if (edits > 0) parts.push(`edited ${String(edits)}`)
+  if (extras?.compacting === true) parts.push("compression")
+  if (extras?.chapterIngest !== undefined) parts.push("chapter_ingest")
   return {
     meta: parts.join(" · "),
-    stepCount: thinking + searches + runs + edits,
+    stepCount: thinking + searches + runs + edits
+      + Number(extras?.compacting === true)
+      + Number(extras?.chapterIngest !== undefined),
     active,
   }
+}
+
+function renderBackgroundActivityBlocks(input: Readonly<{
+  compacting: boolean
+  chapterIngest: ChapterIngestActivity | undefined
+}>): React.JSX.Element | null {
+  const { compacting, chapterIngest } = input
+  if (!compacting && chapterIngest === undefined) return null
+  return <>
+    {compacting
+      ? <div
+          className="agent-stream-block running is-live"
+          data-testid="agent-stream-compression"
+        >
+          <span className="agent-stream-background-label">
+            <Loader2 size={13} aria-hidden="true" className="agent-stream-spinner" />
+            compression
+          </span>
+          <p className="creation-desk-pending">上下文压缩中</p>
+        </div>
+      : null}
+    {chapterIngest === undefined
+      ? null
+      : <div
+          className="agent-stream-block running is-live"
+          data-testid="agent-stream-chapter-ingest"
+        >
+          <span className="agent-stream-background-label">
+            <Loader2 size={13} aria-hidden="true" className="agent-stream-spinner" />
+            chapter_ingest
+          </span>
+          <p className="creation-desk-pending">{formatChapterIngestDetail(chapterIngest)}</p>
+        </div>}
+  </>
 }
 
 function renderAgentProcessSegment(input: Readonly<{

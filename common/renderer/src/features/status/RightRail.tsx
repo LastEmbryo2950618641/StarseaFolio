@@ -7,7 +7,6 @@ import {
   type ChapterSummary,
   type EvolutionProjection,
   type EvolutionProjectionStatus,
-  type GraphRevisionTask,
   type ProjectSettings,
   type ResettableRuntimeMetricId,
   type SynopsisConversationStreamSnapshot,
@@ -23,6 +22,7 @@ import { GraphRevisionTasksPanel } from "./GraphRevisionTasksPanel.js"
 import { PhaseIoDetails, PhaseIoPending } from "./phase-io-details.js"
 import { RuntimeMonitor, TaskCheckpointDialog } from "./TaskCheckpointPrototype.js"
 import { ChapterListPanel } from "./ChapterListPanel.js"
+import { useChapterIngestActivity } from "./chapter-ingest-activity.js"
 import type { DiscussFocusChapterOption } from "../editor/synopsis-path.js"
 
 type Props = Readonly<{
@@ -47,17 +47,6 @@ type Props = Readonly<{
   onRefreshTask?(): Promise<void>
   onRefreshWorkspace?(): Promise<void>
 }>
-
-const ingestPhaseLabels: Record<string, string> = {
-  settings_extraction: "抽取并写入设定",
-  work_style_revision: "风格抽取与融合",
-  graph_governance: "准备修订与证据",
-  dependency_audit: "分析依赖与影响",
-  graph_structure_plan: "生成图变更",
-  graph_governance_review: "审核与查询验证",
-  frontier_settlement: "更新推演前沿",
-  commit_review: "校验并提交",
-}
 
 const labels: Record<string, string> = {
   interpret: "理解用户输入",
@@ -133,12 +122,7 @@ export function RightRail({
 }: Props): React.JSX.Element {
   const [checkpointOpen, setCheckpointOpen] = useState(false)
   const [dismissedCheckpointKey, setDismissedCheckpointKey] = useState<string>()
-  const [ingestActivity, setIngestActivity] = useState<Readonly<{
-    heading: string
-    phaseLabel: string
-    current: number
-    total: number | null
-  }>>()
+  const ingestActivity = useChapterIngestActivity(project)
   const tab = useWorkbenchStore((state) => state.rightTab)
   const setTab = useWorkbenchStore((state) => state.setRightTab)
   const visibleTab: RightTab = tab === "history" || tab === "process" ? "chapters" : tab
@@ -166,50 +150,6 @@ export function RightRail({
       setDismissedCheckpointKey(undefined)
     }
   }, [task?.status, checkpointKey, dismissedCheckpointKey])
-
-  useEffect(() => {
-    if (project === undefined) {
-      setIngestActivity(undefined)
-      return
-    }
-    let disposed = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let busy = false
-    const poll = async (): Promise<void> => {
-      try {
-        if (typeof document !== "undefined" && document.visibilityState === "hidden") return
-        const listed = await invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project)
-        if (disposed) return
-        const running = listed.find((item) => item.status === "running" || item.status === "pending")
-        busy = running !== undefined
-        if (running === undefined) {
-          setIngestActivity(undefined)
-          return
-        }
-        const { progress } = running
-        const current = progress.completed + Number(progress.phases.some((phase) => phase.status === "running"))
-        setIngestActivity({
-          heading: running.heading,
-          phaseLabel: ingestPhaseLabels[progress.phase ?? ""] ?? progress.phase ?? "章节入库",
-          current,
-          total: progress.total,
-        })
-      } catch {
-        if (!disposed) setIngestActivity(undefined)
-        busy = false
-      } finally {
-        if (!disposed) {
-          const hidden = typeof document !== "undefined" && document.visibilityState === "hidden"
-          timer = setTimeout(() => { void poll() }, hidden ? 12_000 : busy ? 1_500 : 8_000)
-        }
-      }
-    }
-    void poll()
-    return () => {
-      disposed = true
-      clearTimeout(timer)
-    }
-  }, [project?.projectId, project?.workspaceRootRef])
 
   const compacting = discussStream?.compacting === true
   const showActivityStrip = compacting || ingestActivity !== undefined

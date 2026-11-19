@@ -69,6 +69,7 @@ import {
   isAutoDescriptionSelection,
   isDescriptionRuleMarkdownPath,
   applyWorkStyleRevision,
+  hasWorkStyleBodySource,
   isWorkDescriptionRulePath,
   listWorkDescriptionRuleFiles,
   resolveDescriptionRulePaths,
@@ -830,10 +831,15 @@ export class TurnOrchestrator {
     }
     const phase: AIPhase = "work_style_revision"
     const userRequirements = resolveWorkStyleRequirementSource(input)
+    const bodyAvailable = input.workflow === "revision" && hasWorkStyleBodySource(input.userInput)
     const legacySections = settingsExtractionArtifactSchema
       .safeParse(state.artifacts.settings_extraction)
       .data?.workStyleRevision?.sections
-    if (userRequirements.length === 0 && (legacySections === undefined || legacySections.length === 0)) {
+    if (
+      userRequirements.length === 0
+      && !bodyAvailable
+      && (legacySections === undefined || legacySections.length === 0)
+    ) {
       const mechanical = await this.executeMechanicalRevisionPhase({
         input,
         state,
@@ -844,10 +850,10 @@ export class TurnOrchestrator {
         phase,
         usage: state.budgetWindowUsage,
         artifact: {
-          summary: "本轮无用户风格要求，跳过风格抽取与融合",
+          summary: "本轮无用户风格要求且无可用正文，跳过风格抽取与融合",
           sections: [],
         },
-        reason: "No user style requirements for this revision",
+        reason: "No user style requirements or chapter body for this revision",
       })
       state.context = mechanical.context
       state.readEvidence = [...mechanical.readEvidence]
@@ -935,8 +941,9 @@ export class TurnOrchestrator {
   ): Promise<void> {
     if (sections === undefined || sections.length === 0) return
     const userRequirements = resolveWorkStyleRequirementSource(input)
-    if (userRequirements.length === 0) {
-      this.log("info", "revision.work_style.skipped", { taskId, reason: "no_user_requirements" })
+    const chapterBody = input.workflow === "revision" ? input.userInput : undefined
+    if (userRequirements.length === 0 && !hasWorkStyleBodySource(chapterBody)) {
+      this.log("info", "revision.work_style.skipped", { taskId, reason: "no_user_requirements_or_body" })
       return
     }
     let current = ""
@@ -950,7 +957,12 @@ export class TurnOrchestrator {
       })
       return
     }
-    const result = applyWorkStyleRevision({ current, updates: sections, userRequirements })
+    const result = applyWorkStyleRevision({
+      current,
+      updates: sections,
+      userRequirements,
+      ...(chapterBody === undefined ? {} : { chapterBody }),
+    })
     if (result.markdown === current) {
       this.log("info", "revision.work_style.unchanged", { taskId, skipped: result.skipped })
       return
@@ -1948,18 +1960,23 @@ export class TurnOrchestrator {
         }
         if (phase === "work_style_revision") {
           const userRequirements = resolveWorkStyleRequirementSource(input)
+          const bodyAvailable = input.workflow === "revision" && hasWorkStyleBodySource(input.userInput)
           const legacySections = settingsExtractionArtifactSchema
             .safeParse(artifacts.settings_extraction)
             .data?.workStyleRevision?.sections
-          if (userRequirements.length === 0 && (legacySections === undefined || legacySections.length === 0)) {
+          if (
+            userRequirements.length === 0
+            && !bodyAvailable
+            && (legacySections === undefined || legacySections.length === 0)
+          ) {
             const mechanical = await this.executeMechanicalRevisionPhase({
               input, state, context, artifacts, readEvidence, visibleEvidence, phase,
               usage: windowUsage,
               artifact: {
-                summary: "本轮无用户风格要求，跳过风格抽取与融合",
+                summary: "本轮无用户风格要求且无可用正文，跳过风格抽取与融合",
                 sections: [],
               },
-              reason: "No user style requirements for this revision",
+              reason: "No user style requirements or chapter body for this revision",
             })
             context = mechanical.context
             readEvidence = [...mechanical.readEvidence]

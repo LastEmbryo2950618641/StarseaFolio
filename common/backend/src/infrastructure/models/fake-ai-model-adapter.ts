@@ -269,9 +269,9 @@ export class FakeAiModelAdapter implements AIModelPort {
         }
       case "work_style_revision":
         return {
-          summary: "The deterministic fixture found no work-style revision for this turn.",
+          summary: "正文无明显新文风可融",
           sections: [],
-          finalSelfReview: "No user style requirements required a work-style revision.",
+          finalSelfReview: "The deterministic fixture found no new presentation cues to merge.",
         }
       case "response_review":
         return {

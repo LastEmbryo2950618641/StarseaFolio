@@ -346,6 +346,8 @@ describe("prompt contracts", () => {
     expect(workStyle).toContain("userRequirements")
     expect(workStyle).toContain("融合")
     expect(workStyle).toContain("sections")
+    expect(workStyle).toContain("source")
+    expect(workStyle).toContain("正文")
   })
 
   it("keeps rule assembly semantic and lets the runtime own its snapshot identity", () => {

@@ -806,24 +806,23 @@ export const workNamingArtifactSchema = z.object({
   finalSelfReview: z.string().min(1),
 })
 
+const workStyleRevisionSectionSchema = z.object({
+  heading: z.string().min(1).max(40),
+  mode: z.enum(["merge", "replace"]),
+  content: z.string().max(3_500),
+  userQuote: z.string().max(500),
+  /** Evidence source for the quote; omitted means user words for back-compat. */
+  source: z.enum(["user", "body"]).default("user"),
+})
+
 export const workStyleRevisionSchema = z.object({
   summary: z.string().max(800).optional(),
-  sections: z.array(z.object({
-    heading: z.string().min(1).max(40),
-    mode: z.enum(["merge", "replace"]),
-    content: z.string().max(3_500),
-    userQuote: z.string().max(500),
-  })).max(8),
+  sections: z.array(workStyleRevisionSectionSchema).max(8),
 })
 
 export const workStyleRevisionArtifactSchema = z.object({
   summary: z.string().min(1),
-  sections: z.array(z.object({
-    heading: z.string().min(1).max(40),
-    mode: z.enum(["merge", "replace"]),
-    content: z.string().max(3_500),
-    userQuote: z.string().max(500),
-  })).max(8),
+  sections: z.array(workStyleRevisionSectionSchema).max(8),
   /** Optional in the phase prompt; keep optional so omitting it is not a hard contract failure. */
   finalSelfReview: z.string().min(1).optional(),
 })

@@ -6134,6 +6134,25 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   padding: 10px 12px;
   color: var(--text-muted);
 }
+.agent-stream-block.running.is-live:not(details) {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.agent-stream-background-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: lowercase;
+}
+.agent-stream-block.running.is-live:not(details) > .creation-desk-pending {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+}
 .agent-stream-block.thinking summary,
 .agent-stream-block.searching summary,
 .agent-stream-block.running summary,
