@@ -2146,6 +2146,223 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(calls).toBe(1)
   })
 
+  it("injects graph-owner allowlist when repairing invalid graph references", async () => {
+    const nodeId = randomUUID()
+    const evidenceId = "evidence_42"
+    const request = createRequest({
+      phase: "dependency_audit",
+      committedReadIds: [evidenceId],
+      input: {
+        workflow: "turn",
+        userInput: "继续推演。",
+        chapterSequence: 10,
+        sourceId: randomUUID(),
+        sourceUnitIds: [],
+        phaseRunIds: [],
+        readEvidence: [{
+          readId: evidenceId,
+          visibility: "committed" as const,
+          ownerKind: "node",
+          ownerId: nodeId,
+          exactKeys: ["地点"],
+          semanticText: "雅典娜教徒连走高跟鞋",
+          sourceRefs: [],
+          digest: "node-digest",
+        }],
+        retrievalGaps: [],
+        artifacts: {},
+      },
+    })
+    let calls = 0
+    let repair = ""
+    const validArtifact = {
+      missingDependencies: [],
+      unplannedContent: [],
+      sceneContinuity: [{
+        sceneIndex: 0,
+        sceneDescription: "当前场景",
+        predecessorSceneIndexes: [],
+        predecessorSceneRefs: [],
+        predecessorRequired: false,
+        predecessorReason: "开场",
+        correspondenceRequired: false,
+        correspondenceReason: "单场景",
+        timeContinuity: "pass",
+        locationContinuity: "pass",
+        crossReferenceContinuity: "pass",
+        reason: "连续",
+      }],
+      temporalClaims: [{
+        claimRef: "claim:scene:1",
+        sceneIndex: 0,
+        sourceUnitIndexes: [],
+        proseExcerpt: "此后发生的一切。",
+        referenceDescription: "场景内先后",
+        referenceRefs: [nodeId],
+        evidenceRefs: [evidenceId],
+        timelineRefs: [],
+        relationDescription: "此后",
+        verdict: "pass",
+        reason: "依据已读节点",
+        missingEvidence: [],
+      }],
+      informationBoundary: "pass",
+    }
+    const invalidArtifact = {
+      ...validArtifact,
+      temporalClaims: [{
+        ...validArtifact.temporalClaims[0],
+        referenceRefs: ["第八章·橄榄林散步", "雅典娜教徒连走高跟鞋"],
+      }],
+    }
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, maxSchemaRepairAttempts: 1 },
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot),
+      { complete: (input) => {
+        calls += 1
+        repair = input.messages.at(-1)?.content ?? ""
+        const artifact = calls === 1 ? invalidArtifact : validArtifact
+        return Promise.resolve({
+          content: JSON.stringify({
+            outcome: "continue",
+            artifact,
+            requestedReads: [],
+            citedReadIds: [],
+            unresolvedDependencies: [],
+            reason: "审计完成",
+            selfReview: "已检查",
+          }),
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        })
+      } },
+    )
+    const result = await adapter.execute(request)
+    expect(calls).toBe(2)
+    expect(result.result.artifact).toMatchObject({
+      temporalClaims: [{ referenceRefs: [nodeId] }],
+    })
+    expect(repair).toContain("Graph references must be owner IDs")
+    expect(repair).toContain("第八章·橄榄林散步")
+    expect(repair).toContain("Never put chapter titles")
+    expect(repair).toContain("Read-evidence to graph-owner alias map")
+    expect(repair).toMatch(/node-\d+|node_/)
+  })
+
+  it("reserves one bounded graph-reference repair after ordinary schema repairs are exhausted", async () => {
+    const nodeId = randomUUID()
+    const evidenceId = "evidence_77"
+    const request = createRequest({
+      phase: "dependency_audit",
+      committedReadIds: [evidenceId],
+      remainingBudget: {
+        maxCalls: 12,
+        remainingCalls: 12,
+        maxInputTokens: 1000,
+        remainingInputTokens: 1000,
+        maxOutputTokens: 1000,
+        remainingOutputTokens: 1000,
+        deadlineAtMs: Date.now() + 10_000,
+      },
+      input: {
+        workflow: "turn",
+        userInput: "继续推演。",
+        chapterSequence: 10,
+        sourceId: randomUUID(),
+        sourceUnitIds: [],
+        phaseRunIds: [],
+        readEvidence: [{
+          readId: evidenceId,
+          visibility: "committed" as const,
+          ownerKind: "node",
+          ownerId: nodeId,
+          exactKeys: ["地点"],
+          semanticText: "地点锚点",
+          sourceRefs: [],
+          digest: "node-digest",
+        }],
+        retrievalGaps: [],
+        artifacts: {},
+      },
+    })
+    let calls = 0
+    const validBody = {
+      outcome: "continue",
+      artifact: {
+        missingDependencies: [],
+        unplannedContent: [],
+        sceneContinuity: [{
+          sceneIndex: 0,
+          sceneDescription: "当前场景",
+          predecessorSceneIndexes: [],
+          predecessorSceneRefs: [],
+          predecessorRequired: false,
+          predecessorReason: "开场",
+          correspondenceRequired: false,
+          correspondenceReason: "单场景",
+          timeContinuity: "pass",
+          locationContinuity: "pass",
+          crossReferenceContinuity: "pass",
+          reason: "连续",
+        }],
+        temporalClaims: [{
+          claimRef: "claim:scene:1",
+          sceneIndex: 0,
+          sourceUnitIndexes: [],
+          proseExcerpt: "此后发生的一切。",
+          referenceDescription: "场景内先后",
+          referenceRefs: [nodeId],
+          evidenceRefs: [evidenceId],
+          timelineRefs: [],
+          relationDescription: "此后",
+          verdict: "pass",
+          reason: "依据已读节点",
+          missingEvidence: [],
+        }],
+        informationBoundary: "pass",
+      },
+      requestedReads: [],
+      citedReadIds: [],
+      unresolvedDependencies: [],
+      reason: "审计完成",
+      selfReview: "已检查",
+    }
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, maxSchemaRepairAttempts: 1 },
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot),
+      { complete: () => {
+        calls += 1
+        if (calls === 1) {
+          return Promise.resolve({ content: '{"outcome":', usage: { prompt_tokens: 10, completion_tokens: 5 } })
+        }
+        if (calls === 2) {
+          return Promise.resolve({
+            content: JSON.stringify({
+              ...validBody,
+              artifact: {
+                ...validBody.artifact,
+                temporalClaims: [{
+                  ...validBody.artifact.temporalClaims[0],
+                  referenceRefs: ["第九章午后"],
+                }],
+              },
+            }),
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+          })
+        }
+        return Promise.resolve({
+          content: JSON.stringify(validBody),
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        })
+      } },
+    )
+    const result = await adapter.execute(request)
+    expect(calls).toBe(3)
+    expect(result.usage.modelCalls).toBe(3)
+    expect(result.result.artifact).toMatchObject({
+      temporalClaims: [{ referenceRefs: [nodeId] }],
+    })
+  })
+
   it("reserves one bounded citation repair for discussion after unrelated format repairs", async () => {
     const request = createRequest({ phase: "synopsis_discuss", committedReadIds: ["evidence_42"], input: {
       ...createRequest().input as object, readEvidence: [modelEvidence("evidence_42", "Current evidence")],

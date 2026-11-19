@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, CheckCircle2, Circle, Loader2, Play, RefreshCw, RotateCcw, X } from "lucide-react"
 import type { ChapterReviewRevisionPayload, GraphRevisionTask, ResettableRuntimeMetricId } from "@starseafolio/contracts"
 import { invokeBackend, type OpenProject, type PhaseRunSnapshot, type TaskSnapshot } from "../../api/client.js"
+import { ExpandableErrorAlert } from "../../components/ExpandableErrorAlert.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
+import { GraphReferenceRepairLimitDialog } from "./GraphReferenceRepairLimitDialog.js"
+import { isGraphReferenceRepairExhaustedError } from "./graph-reference-repair.js"
 import { PhaseIoDetails, PhaseIoPending } from "./phase-io-details.js"
 import { RuntimeMonitor } from "./TaskCheckpointPrototype.js"
 
@@ -127,8 +130,13 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
   const [loadError, setLoadError] = useState<string>()
   const [pending, setPending] = useState<Record<string, string>>({})
   const [refresh, setRefresh] = useState(0)
+  const [repairPrompt, setRepairPrompt] = useState<{
+    task: GraphRevisionTask
+    key: string
+  }>()
   const generation = useRef(0)
   const operations = useRef(new Set<string>())
+  const dismissedRepairKeys = useRef(new Set<string>())
   useEffect(() => {
     const current = ++generation.current
     setTasks([])
@@ -168,6 +176,27 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
     return () => { disposed = true; clearTimeout(timer) }
   }, [project?.projectId, project?.workspaceRootRef, refresh])
 
+  useEffect(() => {
+    for (const task of tasks) {
+      if (task.status !== "running") continue
+      for (const key of [...dismissedRepairKeys.current]) {
+        if (key.startsWith(`${task.revisionTaskId}:`)) dismissedRepairKeys.current.delete(key)
+      }
+      if (repairPrompt?.task.revisionTaskId === task.revisionTaskId) setRepairPrompt(undefined)
+    }
+    if (repairPrompt !== undefined) return
+    const candidate = tasks.find((task) => (
+      task.canContinue
+      && isGraphReferenceRepairExhaustedError(task.error)
+      && !dismissedRepairKeys.current.has(`${task.revisionTaskId}:${String(task.updatedAtMs)}`)
+    ))
+    if (candidate === undefined || candidate.error === undefined) return
+    setRepairPrompt({
+      task: candidate,
+      key: `${candidate.revisionTaskId}:${String(candidate.updatedAtMs)}`,
+    })
+  }, [tasks, repairPrompt])
+
   const act = async (task: GraphRevisionTask, action: "cancel" | "rerun" | "continue"): Promise<void> => {
     if (project === undefined || operations.current.has(task.revisionTaskId)) return
     const current = generation.current
@@ -193,13 +222,20 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
       setPending((previous) => Object.fromEntries(Object.entries(previous).filter(([id]) => id !== task.revisionTaskId)))
     }
   }
-  return <section className="graph-revision-panel" aria-label="图治理任务" data-testid="graph-revision-panel">
+  const dismissRepairPrompt = (): void => {
+    if (repairPrompt === undefined) return
+    dismissedRepairKeys.current.add(repairPrompt.key)
+    setRepairPrompt(undefined)
+  }
+
+  return <>
+  <section className="graph-revision-panel" aria-label="图治理任务" data-testid="graph-revision-panel">
     <header className="graph-revision-heading">
       <strong>图治理任务 <span>{tasks.length}</span></strong>
       <UiTooltip label="刷新任务"><button type="button" aria-label="刷新图治理任务" onClick={() => { setRefresh((value) => value + 1) }}><RefreshCw size={15} /></button></UiTooltip>
     </header>
-    {error === undefined ? null : <p role="alert" className="graph-revision-error">{error}</p>}
-    {loadError === undefined ? null : <p role="alert" className="graph-revision-error">{loadError}</p>}
+    {error === undefined ? null : <ExpandableErrorAlert message={error} className="graph-revision-error" title="图治理错误" testId="graph-revision-action-error" />}
+    {loadError === undefined ? null : <ExpandableErrorAlert message={loadError} className="graph-revision-error" title="图治理读取错误" testId="graph-revision-load-error" />}
     {loading && tasks.length === 0 ? <p className="graph-revision-empty">正在读取任务…</p> : null}
     {!loading && tasks.length === 0 ? <p className="graph-revision-empty">{project === undefined ? "请先打开项目" : "暂无图治理任务"}</p> : null}
     {tasks.map((task) => {
@@ -220,7 +256,7 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
           {activity.reasoningCharacters + activity.contentCharacters === 0 ? null : <span>已接收思考 {activity.reasoningCharacters.toLocaleString("zh-CN")} 字符 · 结果 {activity.contentCharacters.toLocaleString("zh-CN")} 字符</span>}
         </div>}
         {task.blocksTurn ? <p className="graph-revision-blocker">世界图尚未同步，暂不能开始新推演</p> : null}
-        {task.error === undefined ? null : <p className="graph-revision-error">{task.error}</p>}
+        {task.error === undefined ? null : <ExpandableErrorAlert message={task.error} className="graph-revision-error" title="图治理任务错误" testId={`graph-revision-task-error-${task.revisionTaskId}`} />}
         {progress.phases.length > 0 ? <details className="graph-revision-stages">
           <summary>阶段记录</summary>
           <StageRecordPanel task={task} monitorTask={monitorTask} onResetMetrics={onResetMetrics} />
@@ -233,4 +269,15 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
       </article>
     })}
   </section>
+  {repairPrompt === undefined ? null : <GraphReferenceRepairLimitDialog
+    heading={repairPrompt.task.heading}
+    error={repairPrompt.task.error ?? ""}
+    onDismiss={dismissRepairPrompt}
+    onContinue={() => {
+      const task = repairPrompt.task
+      dismissRepairPrompt()
+      void act(task, "continue")
+    }}
+  />}
+  </>
 }

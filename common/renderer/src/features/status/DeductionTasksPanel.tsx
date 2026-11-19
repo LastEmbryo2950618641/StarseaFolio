@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, CheckCircle2, Circle, Loader2, RefreshCw, RotateCcw, X } from "lucide-react"
 import type { DeductionTask, ResettableRuntimeMetricId } from "@starseafolio/contracts"
 import { invokeBackend, type OpenProject, type TaskSnapshot } from "../../api/client.js"
+import { ExpandableErrorAlert } from "../../components/ExpandableErrorAlert.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
 import { PhaseIoDetails, PhaseIoPending } from "./phase-io-details.js"
 import { RuntimeMonitor } from "./TaskCheckpointPrototype.js"
@@ -190,8 +191,8 @@ export function DeductionTasksPanel({
       <strong>正文推演任务 <span>{tasks.length}</span></strong>
       <UiTooltip label="刷新任务"><button type="button" aria-label="刷新正文推演任务" onClick={() => { setRefresh((value) => value + 1) }}><RefreshCw size={15} /></button></UiTooltip>
     </header>
-    {error === undefined ? null : <p role="alert" className="graph-revision-error">{formatPanelError(error)}</p>}
-    {loadError === undefined ? null : <p role="alert" className="graph-revision-error">{formatPanelError(loadError)}</p>}
+    {error === undefined ? null : <ExpandableErrorAlert message={formatPanelError(error)} className="graph-revision-error" title="正文推演错误" testId="deduction-action-error" />}
+    {loadError === undefined ? null : <ExpandableErrorAlert message={formatPanelError(loadError)} className="graph-revision-error" title="正文推演读取错误" testId="deduction-load-error" />}
     {loading && tasks.length === 0 ? <p className="graph-revision-empty">正在读取任务…</p> : null}
     {!loading && tasks.length === 0 ? <p className="graph-revision-empty">{project === undefined ? "请先打开项目" : "暂无正文推演任务"}</p> : null}
     {tasks.map((task) => {
@@ -213,7 +214,7 @@ export function DeductionTasksPanel({
           <span>{task.status === "completed" ? "推演完成" : phaseLabel}…（{current}/{progress.total ?? "待定"}）</span>
         </div>
         {progress.total !== null && progress.total > 0 ? <progress aria-label={`${task.heading}推演进度`} max={progress.total} value={current} /> : null}
-        {task.error === undefined ? null : <p className="graph-revision-error">{task.error}</p>}
+        {task.error === undefined ? null : <ExpandableErrorAlert message={task.error} className="graph-revision-error" title="正文推演任务错误" testId={`deduction-task-error-${task.taskId}`} />}
         {progress.phases.length > 0 ? <details className="graph-revision-stages">
           <summary>阶段记录</summary>
           <DeductionStageRecord task={task} project={project} onResetMetrics={onResetMetrics} />

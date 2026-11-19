@@ -260,6 +260,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
     let lastRawResponse: string | undefined
     const startedAt = Date.now()
     let citationRepairUsed = false
+    let graphReferenceRepairUsed = false
     const schemaRepairs: string[] = []
 
     for (let repairAttempt = 0; repairAttempt <= this.config.maxSchemaRepairAttempts + 1; repairAttempt += 1) {
@@ -435,7 +436,11 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         lastError = error
         const dedicatedCitationRepair = repairAttempt >= this.config.maxSchemaRepairAttempts
           && request.phase === "synopsis_discuss" && error instanceof UnreadableCitationError && !citationRepairUsed
-        const canRepair = (repairAttempt < this.config.maxSchemaRepairAttempts || dedicatedCitationRepair)
+        const dedicatedGraphReferenceRepair = repairAttempt >= this.config.maxSchemaRepairAttempts
+          && isGraphReferenceValidationError(error) && !graphReferenceRepairUsed
+        const canRepair = (repairAttempt < this.config.maxSchemaRepairAttempts
+          || dedicatedCitationRepair
+          || dedicatedGraphReferenceRepair)
           && repairAttempt + 1 < request.remainingBudget.remainingCalls
           && Date.now() < request.remainingBudget.deadlineAtMs
           && Date.now() < (request.remainingBudget.modelRequestDeadlineAtMs ?? Infinity)
@@ -452,6 +457,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         if (!canRepair) break
         schemaRepairs.push(formatValidationError(error).replace(/\s+/g, " ").slice(0, 500))
         if (dedicatedCitationRepair) citationRepairUsed = true
+        if (dedicatedGraphReferenceRepair) graphReferenceRepairUsed = true
         const validationText = formatValidationError(error)
         const modelValidationText = referenceView.toModelText(validationText)
         const toolRequestExclusive = validationText.includes("toolRequest 不可与")
@@ -464,6 +470,8 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
               ? "The previous response was truncated or syntactically incomplete. Regenerate the complete object from the original request; do not continue or echo the partial response."
               : toolRequestExclusive
               ? "上一轮非法：toolRequest 不能与章节写入/草稿/choices/focusChange 等同回。本轮二选一——只 toolRequest（另加 assistantMessage+finalSelfReview），或去掉 toolRequest 只交付产物。不要复述上一份无效 JSON。"
+              : isGraphReferenceValidationError(error)
+              ? "上一轮图引用非法：只能使用本轮已读到的 node_*/link_*（或已声明的 local:*），不能写章节名、人名或标题。请整份重生成合法 JSON。"
               : "The previous response failed validation. Regenerate the complete object from the original request; do not echo the invalid response.",
             `Validation error: ${modelValidationText}`,
             buildRepairReminder(request, error, modelValidationText, referenceView),
@@ -1041,6 +1049,12 @@ function buildRepairReminder(
           `- Current citation allowlist: ${JSON.stringify([...referenceView.committedReadTokens, ...referenceView.visiblePendingTokens])}.`,
           "- Recheck each citation against readable evidence. Never infer alias mappings, reuse historical aliases, or remove a needed citation to pass validation; request the evidence again if it is missing.",
         ]
+      : isGraphReferenceValidationError(error)
+        ? [
+            "- Graph reference fields accept only owner IDs read in this turn (node_*/link_* permanent IDs, legacy node-*/link-* aliases, or a declared local:* handle). Never put chapter titles, character display names, scene labels, or other prose into a graph reference field.",
+            `- Read-evidence to graph-owner alias map: ${referenceView.graphReferencePairs.join(", ") || "none"}.`,
+            "- Replace every invalid reference listed in the validation error with one allowlisted owner ID from that map (or a declared local:*). Do not invent IDs and do not drop required bindings just to pass validation.",
+          ]
       : error instanceof SyntaxError
         ? ["- The prior result was incomplete or invalid JSON. Regenerate compact JSON with concise prose and close the complete object below the provider's configured output limit."]
         : []
@@ -1054,6 +1068,11 @@ function buildRepairReminder(
     ...(isFictionDeliveryPhase(phase) ? [fictionDeliveryReminder()] : []),
     "Close the JSON object immediately after the required result.",
   ].join("\n")
+}
+
+export function isGraphReferenceValidationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes("Graph references must be owner IDs read in this turn")
 }
 
 function parseFirstJsonObject(raw: string): unknown {

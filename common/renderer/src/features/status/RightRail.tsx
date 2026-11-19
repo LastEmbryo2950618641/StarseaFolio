@@ -4,6 +4,7 @@ import { aiPhaseValues, type ChapterReviewRevisionPayload, type ChapterRevisionR
 
 import type { GraphSlice, OpenProject, PhaseRunSnapshot, TaskSnapshot } from "../../api/client.js"
 import type { SynopsisConversationStreamSnapshot } from "@starseafolio/contracts"
+import { ExpandableErrorAlert } from "../../components/ExpandableErrorAlert.js"
 import { UiTooltip, uiTooltipRich } from "../../components/UiTooltip.js"
 import { useWorkbenchStore, type RightTab } from "../../state/workbench-store.js"
 import { WorldGraph } from "./WorldGraph.js"
@@ -276,9 +277,14 @@ export function ProcessPanel({
       }
       return rows
     })}{graphPlanned && !phases.includes("dependency_audit") ? <GraphGovernanceGroup task={task} onOpenCheckpoint={onOpenCheckpoint} /> : null}</div>}
-    {showTaskError
-      ? <p className="task-error" role="alert">
-          <span className="task-error-text">{taskErrorMessage}</span>
+    {showTaskError && taskErrorMessage !== undefined
+      ? <div className="task-error" role="alert">
+          <ExpandableErrorAlert
+            message={taskErrorMessage}
+            className="task-error-expandable"
+            title="任务错误"
+            testId="task-error"
+          />
           <button
             type="button"
             className="task-error-dismiss"
@@ -288,7 +294,7 @@ export function ProcessPanel({
           >
             <X size={14} />
           </button>
-        </p>
+        </div>
       : null}
   </div>
 }
