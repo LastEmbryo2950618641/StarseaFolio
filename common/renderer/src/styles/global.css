@@ -7466,6 +7466,7 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   min-height: 0;
   flex: 1;
   scroll-padding-block: 12px;
+  overflow-anchor: none;
 }
 .chapter-panel-volume {
   display: flex;

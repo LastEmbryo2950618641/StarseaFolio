@@ -89,7 +89,6 @@ function chapterDetailSourceKey(
 }
 
 const CARD_SIZE_STORAGE_KEY = "worldseed.chapterPanelCardSize"
-const SCROLL_STORAGE_KEY_PREFIX = "worldseed.chapterPanelScroll."
 export const CHAPTER_PANEL_CARD_SIZES = ["large", "medium", "small", "tile"] as const satisfies readonly ChapterPanelCardSize[]
 
 const CARD_SIZE_META: Readonly<Record<ChapterPanelCardSize, Readonly<{
@@ -108,7 +107,6 @@ export const ChapterPanel = memo(function ChapterPanel(props: ChapterPanelProps)
   const detailsCacheRef = useRef(detailsBySequence)
   detailsCacheRef.current = detailsBySequence
   const bodyRef = useRef<HTMLDivElement>(null)
-  const restoreScrollPendingRef = useRef(true)
   const activeSequence = props.selectedSequence
   const activeVolume = props.selectedVolumeFolderName
   const summaryBySequence = useMemo(() => {
@@ -139,26 +137,28 @@ export const ChapterPanel = memo(function ChapterPanel(props: ChapterPanelProps)
     }
   }, [cardSize])
 
-  useEffect(() => {
-    restoreScrollPendingRef.current = true
+  // Drop the old localStorage scroll restore: it reopened the list at the bottom
+  // under a sticky volume header. Fresh mounts stay at the top; selected cards
+  // are brought into view without fighting manual scrolling.
+  useLayoutEffect(() => {
+    try {
+      window.localStorage.removeItem(`worldseed.chapterPanelScroll.${props.projectId}`)
+    } catch {
+      // ignore storage failures
+    }
+    const node = bodyRef.current
+    if (node !== null) node.scrollTop = 0
   }, [props.projectId])
 
   useLayoutEffect(() => {
+    if (activeSequence === undefined) return
     const node = bodyRef.current
-    if (node === null || !restoreScrollPendingRef.current) return
-    const saved = loadScrollTop(props.projectId)
-    if (saved === undefined) {
-      restoreScrollPendingRef.current = false
-      return
+    if (node === null) return
+    const card = node.querySelector(`[data-testid="chapter-panel-card-${String(activeSequence)}"]`)
+    if (card instanceof HTMLElement) {
+      card.scrollIntoView({ block: "nearest", inline: "nearest" })
     }
-    node.scrollTop = saved
-    // Details load asynchronously and grow height; retry once after paint.
-    const timer = window.setTimeout(() => {
-      if (bodyRef.current !== null) bodyRef.current.scrollTop = saved
-      restoreScrollPendingRef.current = false
-    }, 0)
-    return () => { window.clearTimeout(timer) }
-  }, [props.projectId, props.chapters.length, detailsBySequence.size, cardSize])
+  }, [props.projectId, activeSequence, props.chapters.length, cardSize])
 
   useEffect(() => {
     let cancelled = false
@@ -294,10 +294,6 @@ export const ChapterPanel = memo(function ChapterPanel(props: ChapterPanelProps)
       className="chapter-panel-body"
       data-testid="chapter-panel-body"
       ref={bodyRef}
-      onScroll={(event) => {
-        restoreScrollPendingRef.current = false
-        saveScrollTop(props.projectId, event.currentTarget.scrollTop)
-      }}
     >
       {props.chapters.length === 0
         ? <p className="chapter-panel-empty">尚未检测到章节文件。可在创作台讨论生成梗概或正文。</p>
@@ -486,31 +482,6 @@ function loadCardSize(): ChapterPanelCardSize {
     // ignore storage failures
   }
   return "small"
-}
-
-function scrollStorageKey(projectId: string): string {
-  return `${SCROLL_STORAGE_KEY_PREFIX}${projectId}`
-}
-
-function loadScrollTop(projectId: string): number | undefined {
-  try {
-    if (typeof window === "undefined") return undefined
-    const raw = window.localStorage.getItem(scrollStorageKey(projectId))
-    if (raw === null || raw.trim().length === 0) return undefined
-    const value = Number(raw)
-    return Number.isFinite(value) && value >= 0 ? value : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function saveScrollTop(projectId: string, scrollTop: number): void {
-  try {
-    if (typeof window === "undefined") return
-    window.localStorage.setItem(scrollStorageKey(projectId), String(Math.max(0, Math.round(scrollTop))))
-  } catch {
-    // ignore storage failures
-  }
 }
 
 function stripLeadingHeading(content: string): string {
