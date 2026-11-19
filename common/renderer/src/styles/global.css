@@ -403,6 +403,55 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
 .backend-wait-timeout-method code {
   word-break: break-all;
 }
+
+.graph-reference-repair-dialog {
+  width: min(480px, calc(100vw - 48px));
+}
+
+.graph-reference-repair-dialog > header small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-reference-repair-invalid {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-hover);
+}
+
+.graph-reference-repair-invalid-label {
+  color: #b5bac1;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.graph-reference-repair-invalid ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.graph-reference-repair-invalid li {
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: #2b2d31;
+  color: #dbdee1;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .work-directory-prompt-dialog .work-directory-path {
   display: block;
   overflow-wrap: anywhere;

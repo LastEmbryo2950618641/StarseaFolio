@@ -1,4 +1,9 @@
+import { AlertTriangle } from "lucide-react"
 import { createPortal } from "react-dom"
+
+import {
+  parseInvalidGraphReferenceLabels,
+} from "./graph-reference-repair.js"
 
 export { isGraphReferenceRepairExhaustedError } from "./graph-reference-repair.js"
 
@@ -10,27 +15,34 @@ type Props = Readonly<{
 }>
 
 export function GraphReferenceRepairLimitDialog(props: Props): React.JSX.Element {
+  const invalidLabels = parseInvalidGraphReferenceLabels(props.error)
   // Right-rail ancestors use transform; portal to body so fixed centering covers the window.
   const dialog = <div className="dialog-backdrop" role="presentation">
     <section
-      className="work-name-prompt-dialog"
+      className="work-name-prompt-dialog graph-reference-repair-dialog"
       role="dialog"
       aria-modal="true"
       aria-labelledby="graph-reference-repair-limit-title"
       data-testid="graph-reference-repair-limit-dialog"
     >
       <header>
+        <span className="work-name-prompt-icon" aria-hidden="true"><AlertTriangle size={16} /></span>
         <div>
           <strong id="graph-reference-repair-limit-title">图引用自动修正已达上限</strong>
-          <small>{props.heading}</small>
+          <small title={props.heading}>{props.heading}</small>
         </div>
       </header>
       <div className="work-name-prompt-body">
         <p>
-          模型多次把章节名、人名等语义名写进了图引用字段，自动修正次数已用尽。
-          可以选择再试一轮（继续当前失败阶段），或先留在待重试状态稍后手动处理。
+          模型把章节名、人名等语义名写进了图引用字段，自动修正次数已用尽。
+          可以再试一轮当前失败阶段，或稍后在图治理任务里手动处理。
         </p>
-        <p className="backend-wait-timeout-method"><code>{props.error}</code></p>
+        {invalidLabels.length === 0 ? null : <div className="graph-reference-repair-invalid">
+          <span className="graph-reference-repair-invalid-label">本次非法引用</span>
+          <ul>
+            {invalidLabels.map((label) => <li key={label}>{label}</li>)}
+          </ul>
+        </div>}
       </div>
       <footer>
         <button type="button" data-testid="graph-reference-repair-limit-dismiss" onClick={props.onDismiss}>
