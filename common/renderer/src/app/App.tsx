@@ -1608,6 +1608,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       editing: [],
       toolRuns: [],
       todos: [],
+      compacting: false,
       updatedAtMs: Date.now(),
     })
     setError(undefined)
