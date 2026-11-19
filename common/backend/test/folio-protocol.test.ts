@@ -8,12 +8,58 @@ import {
   folioActionSchema,
   folioUiStateSchema,
 } from "@starseafolio/contracts"
+import { graphRevisionTasksToFolio } from "../src/application/folio/folio-action-host.js"
 import { FolioWorkspace } from "../src/application/folio/folio-workspace.js"
 import { FolioSkillRunner } from "../src/application/folio/folio-skill-runner.js"
 
 describe("folio protocol", () => {
   it("rejects an invalid ui-state payload", () => {
     expect(() => folioUiStateSchema.parse({ schemaVersion: 2 })).toThrow()
+  })
+
+  it("keeps graphSyncTaskId when projecting revision tasks into folio ui-state", () => {
+    const projected = graphRevisionTasksToFolio([{
+      revisionTaskId: "rev-1",
+      chapterId: "ch-1",
+      heading: "第十章",
+      graphSyncTaskId: "sync-1",
+      status: "failed",
+      blocksTurn: true,
+      canCancel: true,
+      canRetry: true,
+      canContinue: true,
+      updatedAtMs: 1,
+      activity: {
+        phase: "dependency_audit",
+        stage: "thinking",
+        attempt: 1,
+        startedAtMs: 1,
+        lastActivityAtMs: 2,
+        reasoningCharacters: 12,
+        contentCharacters: 0,
+      },
+      progress: {
+        completed: 2,
+        total: 7,
+        phase: "dependency_audit",
+        phases: [{ phase: "settings_extraction", status: "completed", attempt: 1 }],
+      },
+    }])
+    const parsed = folioUiStateSchema.parse({
+      ...emptyFolioUiState(),
+      panels: {
+        ...emptyFolioUiState().panels,
+        graphRevision: {
+          tasks: projected,
+          status: "failed",
+          error: null,
+        },
+      },
+    })
+    expect(parsed.panels.graphRevision.tasks[0]).toMatchObject({
+      graphSyncTaskId: "sync-1",
+      activity: { stage: "thinking", reasoningCharacters: 12 },
+    })
   })
 
   it("round-trips host, ui-state, and actions on disk", async () => {

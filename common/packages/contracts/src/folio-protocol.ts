@@ -59,16 +59,29 @@ export const folioGraphPhaseSchema = z.object({
 })
 export type FolioGraphPhase = z.infer<typeof folioGraphPhaseSchema>
 
+export const folioGraphTaskActivitySchema = z.object({
+  phase: z.string().min(1),
+  stage: z.enum(["waiting", "thinking", "responding", "repairing"]),
+  attempt: z.number().int().positive(),
+  startedAtMs: z.number().int().nonnegative(),
+  lastActivityAtMs: z.number().int().nonnegative(),
+  reasoningCharacters: z.number().int().nonnegative(),
+  contentCharacters: z.number().int().nonnegative(),
+})
+
 export const folioGraphTaskSchema = z.object({
   revisionTaskId: z.string().min(1),
   chapterId: z.string().min(1).optional(),
   heading: z.string().min(1),
+  /** Needed so the UI can poll turn.status for AI thinking/output on this revision. */
+  graphSyncTaskId: z.string().min(1).optional(),
   status: z.string().min(1),
   canCancel: z.boolean(),
   canRetry: z.boolean(),
   canContinue: z.boolean(),
   blocksTurn: z.boolean().optional(),
   error: z.string().optional(),
+  activity: folioGraphTaskActivitySchema.optional(),
   progress: z.object({
     completed: z.number().int().nonnegative(),
     total: z.number().int().nonnegative().nullable(),

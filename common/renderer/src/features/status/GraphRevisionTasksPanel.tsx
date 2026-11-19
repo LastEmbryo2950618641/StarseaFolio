@@ -156,14 +156,27 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
             panels: { graphRevision: { tasks: readonly GraphRevisionTask[] } }
           }>("folio.uiState.read", project)
           const fromFolio = ui.panels.graphRevision.tasks
+          const listed = await invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project)
+          // Folio is the shared panel source, but stage IO needs graphSyncTaskId from the
+          // authoritative list (older ui-state may have stripped it).
+          const listedById = new Map(listed.map((task) => [task.revisionTaskId, task]))
           const next = fromFolio.length > 0
-            ? fromFolio.map((task) => ({
+            ? fromFolio.map((task) => {
+              const authority = listedById.get(task.revisionTaskId)
+              return {
                 ...task,
-                chapterId: task.chapterId ?? "",
-                blocksTurn: task.blocksTurn ?? false,
-                canContinue: task.canContinue ?? false,
-              }))
-            : await invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project)
+                chapterId: task.chapterId ?? authority?.chapterId ?? "",
+                blocksTurn: task.blocksTurn ?? authority?.blocksTurn ?? false,
+                canContinue: task.canContinue ?? authority?.canContinue ?? false,
+                ...(task.graphSyncTaskId === undefined && authority?.graphSyncTaskId !== undefined
+                  ? { graphSyncTaskId: authority.graphSyncTaskId }
+                  : {}),
+                ...(task.activity === undefined && authority?.activity !== undefined
+                  ? { activity: authority.activity }
+                  : {}),
+              }
+            })
+            : listed
           if (!disposed && generation.current === current) { setTasks(next); setLoadError(undefined) }
         }
       } catch (cause) {
