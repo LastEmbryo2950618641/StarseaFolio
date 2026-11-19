@@ -34,6 +34,11 @@ export class ModelContextAppender {
     const artifacts = selectChangedArtifacts(input.artifacts, previousDeltas)
     const workspaceCatalogAlreadyVisible = previousInputs.some((previous) => previous.workspaceCatalog !== undefined)
     const coreInput = firstRequestInTurn ? selectCoreTurnInput(input, previousInputs) : {}
+    const chapterProse = resolveVisibleChapterProse(coreInput, previousInputs)
+    const slimmedArtifacts = slimDuplicateDraftProse(
+      slimGovernanceSettlementsForContext(artifacts),
+      chapterProse,
+    )
     const deltaInput = {
       ...(input.workspaceCatalog === undefined || workspaceCatalogAlreadyVisible
         ? {}
@@ -47,7 +52,7 @@ export class ModelContextAppender {
       ...(graphCapacity === undefined ? {} : { graphCapacity }),
       ...(verificationProbeExecutions.length === 0 ? {} : { verificationProbeExecutions }),
       ...(stageProjection === undefined ? {} : { stageProjection }),
-      ...(Object.keys(artifacts).length === 0 ? {} : { artifacts }),
+      ...(Object.keys(slimmedArtifacts).length === 0 ? {} : { artifacts: slimmedArtifacts }),
     }
     const committedReadIds = arrayOfStrings(source.committedReadIds).filter((readId) => readIds.has(readId))
     const visiblePendingIds = arrayOfStrings(source.visiblePendingIds).filter((readId) => readIds.has(readId))
@@ -195,7 +200,14 @@ function evidenceIdentities(value: unknown): string[] {
     && typeof content === "string"
     ? [`content:${JSON.stringify([evidence.ownerKind, evidence.ownerId, content])}`]
     : []
+  // Same workspace/graph owner already on the chain should not be re-appended just
+  // because a later read allocated a new versionKey or digest. Resurface explicitly
+  // when the model must see a refreshed copy.
+  const ownerIdentity = typeof evidence.ownerKind === "string" && typeof evidence.ownerId === "string"
+    ? [`owner:${evidence.ownerKind}:${evidence.ownerId}`]
+    : []
   return [
+    ...ownerIdentity,
     ...(versionKey === undefined ? [] : [`version:${versionKey}`]),
     ...contentIdentity,
     ...readIds.filter((readId) => !/^read-\d+$/u.test(readId)).map((readId) => `read:${readId}`),
@@ -247,6 +259,86 @@ function selectChangedArtifacts(
       .at(-1)
     return previousArtifact === undefined || JSON.stringify(previousArtifact) !== JSON.stringify(artifact)
   }))
+}
+
+/** Prefer a single chapter prose copy: drop draft.contentMarkdown when it matches userInput already on the chain. */
+function resolveVisibleChapterProse(
+  coreInput: Record<string, unknown>,
+  previousInputs: readonly Record<string, unknown>[],
+): string | undefined {
+  if (typeof coreInput.userInput === "string" && coreInput.userInput.length > 0) {
+    return coreInput.userInput
+  }
+  for (let index = previousInputs.length - 1; index >= 0; index -= 1) {
+    const previous = previousInputs[index]?.userInput
+    if (typeof previous === "string" && previous.length > 0) return previous
+  }
+  return undefined
+}
+
+function slimDuplicateDraftProse(
+  artifacts: Record<string, unknown>,
+  chapterProse: string | undefined,
+): Record<string, unknown> {
+  if (chapterProse === undefined || artifacts.draft === undefined) return artifacts
+  const draft = asRecord(artifacts.draft)
+  if (draft.contentMarkdown !== chapterProse) return artifacts
+  const { contentMarkdown: _omit, ...rest } = draft
+  return {
+    ...artifacts,
+    draft: rest,
+  }
+}
+
+/**
+ * Compress repeated settlement reasons/graphRef arrays when graph_governance enters the
+ * model chain. Orchestrator state keeps the full artifact; only the delta is slimmed.
+ */
+function slimGovernanceSettlementsForContext(
+  artifacts: Record<string, unknown>,
+): Record<string, unknown> {
+  const governance = artifacts.graph_governance
+  if (governance === undefined) return artifacts
+  const record = asRecord(governance)
+  const settlements = arrayOfUnknowns(record.settlementRecords)
+  if (settlements.length === 0) return artifacts
+  const reasonSets: Array<{ reason: string }> = []
+  const reasonIndexes = new Map<string, number>()
+  const graphRefSets: Array<{ graphRefs: unknown }> = []
+  const graphRefIndexes = new Map<string, number>()
+  const compactRecords = settlements.map((item) => {
+    const settlement = asRecord(item)
+    const reason = typeof settlement.reason === "string" ? settlement.reason : ""
+    let reasonIndex = reasonIndexes.get(reason)
+    if (reasonIndex === undefined) {
+      reasonIndex = reasonSets.length
+      reasonIndexes.set(reason, reasonIndex)
+      reasonSets.push({ reason })
+    }
+    const graphRefs = settlement.graphRefs
+    const graphKey = JSON.stringify(graphRefs ?? null)
+    let graphRefSetIndex = graphRefIndexes.get(graphKey)
+    if (graphRefSetIndex === undefined) {
+      graphRefSetIndex = graphRefSets.length
+      graphRefIndexes.set(graphKey, graphRefSetIndex)
+      graphRefSets.push({ graphRefs })
+    }
+    return {
+      sourceUnitIndex: settlement.sourceUnitIndex,
+      graphRefSetIndex,
+      reasonIndex,
+      status: settlement.status,
+    }
+  })
+  return {
+    ...artifacts,
+    graph_governance: {
+      ...record,
+      settlementReasonSets: reasonSets,
+      settlementGraphRefSets: graphRefSets,
+      settlementRecords: compactRecords,
+    },
+  }
 }
 
 function parseDelta(content: string): unknown[] {

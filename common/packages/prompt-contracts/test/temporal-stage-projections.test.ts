@@ -221,6 +221,7 @@ function governanceProjection() {
     proposalSettlements: [],
     retrievalProjections: [],
     sourceSettlementReferenceSets: [],
+    sourceSettlementReasonSets: [],
     sourceSettlements: [],
     affectedFrontierRefs: [],
     archiveOutletRefs: [],

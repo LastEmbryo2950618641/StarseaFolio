@@ -40,14 +40,84 @@ describe("ModelContextAppender", () => {
     expect(delta.input.readEvidence).toBeUndefined()
   })
 
-  it("appends a changed fact version even if its local alias was previously used for another version", () => {
+  it("does not re-append the same owner when only versionKey/digest changed", () => {
     const appender = new ModelContextAppender()
     const previous = { ...evidence("read-1"), ownerKind: "node", ownerId: "node-1", versionKey: "version-1" }
     const updated = { ...previous, digest: "updated", versionKey: "version-2", semanticText: "Updated fact" }
     const message = visibleMessage({ messageId: "old", sequence: 1, role: "user", kind: "phase_request", phase: "interpret",
       content: appender.formatDelta(appender.createDelta(createRequest(), createModelRequest([previous], {}), [])) })
     const delta = appender.createDelta(createRequest(), createModelRequest([updated], {}), [message]) as { input: { readEvidence?: unknown[] } }
+    expect(delta.input.readEvidence).toBeUndefined()
+  })
+
+  it("still resurfaces an owner when resurfacedReadIds names it", () => {
+    const appender = new ModelContextAppender()
+    const previous = { ...evidence("evidence_1"), ownerKind: "workspace:settings", ownerId: "设定集/readme.md", versionKey: "v1" }
+    const updated = { ...previous, readId: "evidence_2", digest: "updated", versionKey: "v2", semanticText: "Updated settings" }
+    const message = visibleMessage({ messageId: "old", sequence: 1, role: "user", kind: "phase_request", phase: "interpret",
+      content: appender.formatDelta(appender.createDelta(createRequest(), createModelRequest([previous], {}), [])) })
+    const delta = appender.createDelta(
+      createRequest(),
+      {
+        ...createModelRequest([updated], {}),
+        input: {
+          ...createModelRequest([updated], {}).input,
+          resurfacedReadIds: ["evidence_2"],
+        },
+      },
+      [message],
+    ) as { input: { readEvidence?: unknown[] } }
     expect(delta.input.readEvidence).toEqual([updated])
+  })
+
+  it("omits draft.contentMarkdown when it duplicates userInput on the same delta", () => {
+    const appender = new ModelContextAppender()
+    const prose = "# 第一章\n正文。"
+    const delta = appender.createDelta(
+      { ...createRequest(), phase: "settings_extraction" },
+      {
+        ...createModelRequest([], { draft: { contentMarkdown: prose, adoptedDecisionIndexes: [] } }),
+        input: {
+          ...createModelRequest([], {}).input,
+          workflow: "revision",
+          userInput: prose,
+          artifacts: { draft: { contentMarkdown: prose, adoptedDecisionIndexes: [] } },
+        },
+      },
+      [],
+    ) as { input: { userInput?: string; artifacts?: { draft?: Record<string, unknown> } } }
+    expect(delta.input.userInput).toBe(prose)
+    expect(delta.input.artifacts?.draft?.contentMarkdown).toBeUndefined()
+    expect(delta.input.artifacts?.draft?.adoptedDecisionIndexes).toEqual([])
+  })
+
+  it("slims repeated graph_governance settlement reasons and graphRefs in the delta", () => {
+    const appender = new ModelContextAppender()
+    const graphRefs = [{ targetKind: "node", targetRef: "node_1" }]
+    const reason = "shared settlement reason"
+    const governance = {
+      executionMode: "local_governance",
+      mutations: [],
+      settlementRecords: [0, 1, 2].map((sourceUnitIndex) => ({
+        sourceUnitIndex,
+        graphRefs,
+        reason,
+        status: "derived",
+      })),
+    }
+    const delta = appender.createDelta(
+      { ...createRequest(), phase: "dependency_audit" },
+      createModelRequest([], { graph_governance: governance }),
+      [systemMessage()],
+    ) as { input: { artifacts?: { graph_governance?: Record<string, unknown> } } }
+    const slimmed = delta.input.artifacts?.graph_governance
+    expect(slimmed?.settlementReasonSets).toEqual([{ reason }])
+    expect(slimmed?.settlementGraphRefSets).toEqual([{ graphRefs }])
+    expect(slimmed?.settlementRecords).toEqual([
+      { sourceUnitIndex: 0, graphRefSetIndex: 0, reasonIndex: 0, status: "derived" },
+      { sourceUnitIndex: 1, graphRefSetIndex: 0, reasonIndex: 0, status: "derived" },
+      { sourceUnitIndex: 2, graphRefSetIndex: 0, reasonIndex: 0, status: "derived" },
+    ])
   })
 
   it("appends each consumer phase's dependencies once while preserving the stable chain prefix", () => {
@@ -73,9 +143,15 @@ describe("ModelContextAppender", () => {
       phase: "interpret",
       content: "{\"phase\":\"interpret\",\"artifact\":{\"intent\":\"observe\"}}",
     })
+    const secondEvidence = {
+      ...evidence("evidence_2"),
+      ownerId: "设定集/人物/主角.json",
+      exactKeys: ["主角"],
+      semanticText: "主角设定",
+    }
     const secondModelRequest = createModelRequest([
       evidence("evidence_1"),
-      evidence("evidence_2"),
+      secondEvidence,
     ], {
       interpret: { intent: "observe" },
       rule_assembly: { selectedWorkspacePaths: [] },
@@ -93,7 +169,7 @@ describe("ModelContextAppender", () => {
     expect(firstSerialized.indexOf('"userInput"')).toBeLessThan(firstSerialized.indexOf('"presentation"'))
     expect(secondInput.userInput).toBeUndefined()
     expect(secondInput.workspaceCatalog).toBeUndefined()
-    expect(secondInput.readEvidence).toEqual([evidence("evidence_2")])
+    expect(secondInput.readEvidence).toEqual([secondEvidence])
     expect(secondInput.artifacts).toEqual({
       rule_assembly: { selectedWorkspacePaths: [] },
     })

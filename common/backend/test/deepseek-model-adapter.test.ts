@@ -74,7 +74,7 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(adapter.info).toMatchObject({ provider: "deepseek", model: "deepseek-v4-flash", available: true })
   })
 
-  it("keeps phase instructions and output schema in a stable system prefix before inherited history", async () => {
+  it("keeps only leading system rules and appends phase instruction/schema after inherited history", async () => {
     const request = createRequest()
     const fake = await new FakeAiModelAdapter(randomUUID).execute(request)
     let completionMessages: readonly { role: string; content: string }[] = []
@@ -172,15 +172,19 @@ describe("DeepSeekAiModelAdapter", () => {
     })
 
     expect(promptReads).toEqual([])
-    expect(completionMessages.slice(0, 4).map((message) => message.role)).toEqual(["system", "system", "system", "system"])
-    expect(completionMessages[0]?.content).toBe("stable system rules")
-    expect(completionMessages[1]?.content).toBe("prepared phase instruction")
-    expect(completionMessages[2]?.content).toContain("StarseaFolio protocol")
-    expect(completionMessages[3]?.content).toContain("complete model-facing result schema")
-    expect(completionMessages[3]?.content).toContain('"outcome":"continue"')
+    expect(completionMessages[0]).toEqual({ role: "system", content: "stable system rules" })
+    expect(completionMessages.every((message, index) => index === 0 || message.role !== "system")).toBe(true)
     expect(completionMessages.some((message) => message.content === "# synopsis_discuss\n旧阶段提示")).toBe(true)
     expect(completionMessages.some((message) => message.content === "# 第一章 已提交正文")).toBe(true)
-    expect(completionMessages.some((message) => message.content.startsWith("Worldseed context delta JSON:"))).toBe(true)
+    const deltaIndex = completionMessages.findIndex((message) => message.content.startsWith("Worldseed context delta JSON:"))
+    expect(deltaIndex).toBeGreaterThan(0)
+    expect(completionMessages.slice(deltaIndex).map((message) => message.role)).toEqual([
+      "user", "user", "user", "user", "user",
+    ])
+    expect(completionMessages[deltaIndex + 1]?.content).toBe("prepared phase instruction")
+    expect(completionMessages[deltaIndex + 2]?.content).toContain("StarseaFolio protocol")
+    expect(completionMessages[deltaIndex + 3]?.content).toContain("complete model-facing result schema")
+    expect(completionMessages[deltaIndex + 3]?.content).toContain('"outcome":"continue"')
     const currentRequirements = completionMessages.at(-1)?.content ?? ""
     expect(currentRequirements).toContain("CURRENT REQUEST REQUIREMENTS")
     expect(currentRequirements).not.toContain("complete model-facing result schema")
@@ -243,8 +247,8 @@ describe("DeepSeekAiModelAdapter", () => {
       phasePrompt: { ref: "phase://interpret", version: "test", digest: "interpret", text: "interpret" },
     })
 
-    expect(completionMessages.slice(0, 4).map(({ role }) => role)).toEqual(["system", "system", "system", "system"])
-    expect(completionMessages[0]?.content).toBe("stable system rules")
+    expect(completionMessages[0]).toEqual({ role: "system", content: "stable system rules" })
+    expect(completionMessages.every((message, index) => index === 0 || message.role !== "system")).toBe(true)
     expect(completionMessages.some((message) => message.role === "user" && message.content === "legacy phase instruction")).toBe(true)
     expect(completionMessages.some((message) => message.role === "assistant" && message.content === "legacy phase response")).toBe(true)
   })
@@ -253,7 +257,10 @@ describe("DeepSeekAiModelAdapter", () => {
     const turnId = randomUUID()
     const taskId = randomUUID()
     const firstEvidence = modelEvidence("evidence_1", "first evidence")
-    const secondEvidence = modelEvidence("evidence_2", "second evidence")
+    const secondEvidence = {
+      ...modelEvidence("evidence_2", "second evidence"),
+      ownerId: "参考文件/人物索引.md",
+    }
     const firstRequest = createRequest({
       taskId,
       turnId,
@@ -347,9 +354,13 @@ describe("DeepSeekAiModelAdapter", () => {
     const secondDelta = secondExecution.contextExchange?.requestMessages[0]?.content ?? ""
 
     expect(captured[1]?.[0]).toEqual({ role: "system", content: "stable system rules" })
-    expect(captured[1]?.[3]?.content).toContain("complete model-facing result schema")
-    expect(captured[1]?.some((message) => message.content.includes("只在本轮第一次追加的用户输入"))).toBe(true)
-    expect(captured[1]?.some((message) => message.content.includes("Fake AI completed interpret"))).toBe(true)
+    expect(captured[1]?.every((message, index) => index === 0 || message.role !== "system")).toBe(true)
+    const secondMessages = captured[1] ?? []
+    expect(secondMessages.at(-2)?.content).toContain("complete model-facing result schema")
+    expect(secondMessages.at(-1)?.content).toContain("MANDATORY OUTPUT CONTRACT")
+    expect(secondMessages.some((message) => message.content.includes("只在本轮第一次追加的用户输入"))).toBe(true)
+    expect(secondMessages.some((message) => message.content.includes("Fake AI completed interpret"))).toBe(true)
+    expect(captured[0]?.[0]).toEqual(secondMessages[0])
     expect(secondDelta).toContain("evidence_2")
     expect(secondDelta).not.toContain("evidence_1")
     const secondDeltaInput = JSON.parse(

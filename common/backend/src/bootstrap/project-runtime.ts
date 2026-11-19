@@ -42,7 +42,7 @@ import {
   type PromptResourcePort,
 } from "../application/index.js"
 import type { InternalProjectStore, WorkspacePort, InternalStorePort } from "../application/workspace/index.js"
-import { PROJECT_MANIFEST_VERSION, DEFAULT_VOLUME_FOLDER_NAME, collectUserRequirementText, digest, parseChapterSequenceFromLabel, WORK_STYLE_RULE_PATH } from "../core/index.js"
+import { PROJECT_MANIFEST_VERSION, DEFAULT_VOLUME_FOLDER_NAME, digest, parseChapterSequenceFromLabel, WORK_STYLE_RULE_PATH } from "../core/index.js"
 import {
   WORK_STYLE_SELECTION_PENDING_MESSAGE,
   canProceedPastWorkStyleGate,
@@ -1173,11 +1173,6 @@ export class ProjectRuntime {
   }
 
   /** Visible creation-desk user messages. Style revision quotes these, not the draft. */
-  private async loadUserRequirements(projectId: ProjectId): Promise<string> {
-    const messages = await new SqliteSynopsisConversationRepository(this.database).listMessagesForProject(projectId)
-    return collectUserRequirementText(messages)
-  }
-
   public createChapterRevisionService(): ChapterRevisionService {
     const persistence = new SqliteTurnPersistence(this.database, randomUUID)
     const documents = new SqliteDocumentRepository(this.database)
@@ -1258,7 +1253,9 @@ export class ProjectRuntime {
           workspaceRootRef: input.workspaceRootRef,
           internalStore: this.internalStore,
           userInput: content,
-          userRequirements: await this.loadUserRequirements(input.revision.projectId),
+          // Graph revision must not dump synopsis-desk chat as style requirements;
+          // presentation evidence already carries 作品风格.md / selected rules.
+          userRequirements: "",
           chapterSequence,
           sourceId: input.revision.proposedSourceId,
           existingSourceUnitIds: input.sourceUnitIds,

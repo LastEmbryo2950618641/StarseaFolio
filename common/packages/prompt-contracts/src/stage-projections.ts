@@ -38,10 +38,13 @@ export const graphGovernanceReviewProjectionSchema = z.object({
       proposalRef: referenceSchema.optional(),
     })),
   })),
+  sourceSettlementReasonSets: z.array(z.object({
+    reason: z.string().min(1),
+  })),
   sourceSettlements: z.array(z.object({
     sourceUnitIndex: indexSchema,
     graphRefSetIndex: indexSchema,
-    reason: z.string().min(1),
+    reasonIndex: indexSchema,
     status: z.string().min(1),
   })),
   affectedFrontierRefs: z.array(referenceSchema),
@@ -61,6 +64,13 @@ export const graphGovernanceReviewProjectionSchema = z.object({
         code: "custom",
         path: ["sourceSettlements", index, "graphRefSetIndex"],
         message: "graphRefSetIndex must reference an existing sourceSettlementReferenceSets entry",
+      })
+    }
+    if (settlement.reasonIndex >= projection.sourceSettlementReasonSets.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["sourceSettlements", index, "reasonIndex"],
+        message: "reasonIndex must reference an existing sourceSettlementReasonSets entry",
       })
     }
   })

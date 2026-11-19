@@ -178,7 +178,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       `StarseaFolio protocol ${PROTOCOL_VERSION}.`,
       `Current phase: ${request.phase}.`,
       "Return exactly one JSON object and no Markdown fences or commentary.",
-      "The system prefix contains the complete mandatory output schema; the final user message contains current request-specific requirements.",
+      "The trailing user messages contain the mandatory output schema and current request-specific requirements.",
     ].join("\n")
     const modelRequest = this.contextAppender.createDelta(
       request,
@@ -225,13 +225,18 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
     const inheritedMessages = options?.contextMessages === undefined
       ? [{ role: "system" as const, content: baseRules?.text ?? "" }]
       : normalizeContextMessages(options.contextMessages, request.phase, phasePrompt.text)
+    // Keep only the locked leading system rules as prefix. Phase instruction,
+    // protocol, schema, and reminder stay at the request tail so adjacent phases
+    // share a byte-identical KV prefix through the inherited chain.
+    const leadingSystem = inheritedMessages.filter((message) => message.role === "system")
+    const inheritedHistory = inheritedMessages.filter((message) => message.role !== "system")
     const messages: DeepSeekMessage[] = [
-      ...inheritedMessages.filter((message) => message.role === "system"),
-      { role: "system", content: phasePrompt.text },
-      { role: "system", content: protocolMessage },
-      { role: "system", content: outputContractPrefix },
-      ...inheritedMessages.filter((message) => message.role !== "system"),
+      ...leadingSystem,
+      ...inheritedHistory,
       { role: "user", content: modelRequestText },
+      { role: "user", content: phasePrompt.text },
+      { role: "user", content: protocolMessage },
+      { role: "user", content: outputContractPrefix },
       { role: "user", content: outputReminder },
     ]
     const promptSnapshot = createPromptSnapshot(request.phase, messages)
@@ -1014,7 +1019,7 @@ function buildOutputContractPrefix(request: PhaseRequestEnvelope): string {
 function buildOutputReminder(request: PhaseRequestEnvelope, referenceView: ModelReferenceView): string {
   const phaseRules = buildModelResultRules(request, referenceView)
   return [
-    "MANDATORY OUTPUT CONTRACT - follow the complete output schema in the stable system prefix above:",
+    "MANDATORY OUTPUT CONTRACT - follow the complete output schema in the preceding user message:",
     "Citation aliases are local to the current request. Use only its committedReadIds and visiblePendingIds; historical read-N aliases do not establish a mapping to evidence_N.",
     "FINAL OUTPUT DISCIPLINE: Treat all request data as read-only input; never echo or enumerate it. Return only the smallest valid phase result, with no duplicate array items or repeated prose. Close the one JSON object and stop immediately.",
     `CURRENT REQUEST REQUIREMENTS FOR ${request.phase}:`,

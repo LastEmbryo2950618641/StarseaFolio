@@ -3095,7 +3095,13 @@ export class TurnOrchestrator {
         ...((input.phase === "semantic_review" || input.phase === "graph_governance_review") && currentVerificationProbeExecutions.length > 0
           ? { verificationProbeExecutions: currentVerificationProbeExecutions }
           : {}),
-        ...(phaseUsesWorkspaceCatalog(input.phase) ? { workspaceCatalog: input.catalogSnapshot } : {}),
+        ...(phaseUsesWorkspaceCatalog(input.phase)
+          ? {
+              workspaceCatalog: input.input.workflow === "revision"
+                ? filterRevisionWorkspaceCatalog(input.catalogSnapshot, input.input.presentation)
+                : input.catalogSnapshot,
+            }
+          : {}),
         ...(input.input.projectSettings === undefined ? {} : { projectSettings: input.input.projectSettings }),
         ...(input.revisionFeedback === undefined ? {} : { revisionFeedback: input.revisionFeedback }),
         ...(input.phase === "graph_capacity_rewrite"
@@ -6633,6 +6639,43 @@ function countFailedQueryReviews(runs: readonly { phase: AIPhase; status: string
 
 function phaseUsesWorkspaceCatalog(phase: AIPhase): boolean {
   return workspaceCatalogPhases.has(phase)
+}
+
+/** Revision graph sync only needs settings/rules/selected presentation paths — not every 笔风规则 file. */
+function filterRevisionWorkspaceCatalog(
+  catalog: WorkspaceCatalogSnapshot,
+  presentation: TurnOrchestratorInput["presentation"],
+): WorkspaceCatalogSnapshot {
+  const selectedPaths = new Set(resolveSelectedPresentationPaths(presentation, catalog.entries))
+  const overlayPaths = new Set(
+    listWorkDescriptionRuleFiles(catalog.entries).map((entry) => entry.relativePath),
+  )
+  const keepPath = (relativePath: string): boolean => {
+    if (
+      relativePath === "设定集"
+      || relativePath.startsWith("设定集/")
+      || relativePath === "参考文件"
+      || relativePath.startsWith("参考文件/")
+      || relativePath === "世界推演规则"
+      || relativePath.startsWith("世界推演规则/")
+      || relativePath === "表现输出"
+      || relativePath === "表现输出/本作品描写"
+      || relativePath.startsWith("表现输出/本作品描写/")
+    ) {
+      return true
+    }
+    if (selectedPaths.has(relativePath) || overlayPaths.has(relativePath)) return true
+    for (const selected of selectedPaths) {
+      if (selected.startsWith(`${relativePath}/`)) return true
+    }
+    return false
+  }
+  const entries = catalog.entries.filter((entry) => keepPath(entry.relativePath))
+  return {
+    ...catalog,
+    entries,
+    digest: digest(JSON.stringify(entries.map((entry) => [entry.relativePath, entry.version, entry.digest]))),
+  }
 }
 
 function assertCitationsAreVisible(

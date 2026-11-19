@@ -59,17 +59,18 @@ describe("graph governance stage projections", () => {
     expect(withProbe.verificationProbeExecutions).toEqual([])
   })
 
-  it("stores repeated source graph references once while preserving every source mapping", () => {
+  it("stores repeated source graph references and reasons once while preserving every source mapping", () => {
     const graphRefs = Array.from({ length: 101 }, (_, index) => ({
       targetKind: "node" as const,
       targetRef: `node_${String(index + 1)}`,
     }))
+    const sharedReason = "all source units return through established owners"
     const retrieval = {
       projections: [],
       sourceSettlements: [0, 1, 2].map((sourceUnitIndex) => ({
         sourceUnitIndex,
         graphRefs,
-        reason: `source ${String(sourceUnitIndex)} returns through established owners`,
+        reason: sharedReason,
         status: "bound",
       })),
     }
@@ -81,17 +82,25 @@ describe("graph governance stage projections", () => {
     })
 
     expect(projection.sourceSettlementReferenceSets).toEqual([{ graphRefs }])
+    expect(projection.sourceSettlementReasonSets).toEqual([{ reason: sharedReason }])
     expect(projection.sourceSettlements).toEqual([
-      { sourceUnitIndex: 0, graphRefSetIndex: 0, reason: "source 0 returns through established owners", status: "bound" },
-      { sourceUnitIndex: 1, graphRefSetIndex: 0, reason: "source 1 returns through established owners", status: "bound" },
-      { sourceUnitIndex: 2, graphRefSetIndex: 0, reason: "source 2 returns through established owners", status: "bound" },
+      { sourceUnitIndex: 0, graphRefSetIndex: 0, reasonIndex: 0, status: "bound" },
+      { sourceUnitIndex: 1, graphRefSetIndex: 0, reasonIndex: 0, status: "bound" },
+      { sourceUnitIndex: 2, graphRefSetIndex: 0, reasonIndex: 0, status: "bound" },
     ])
-    expect(JSON.stringify({ sourceSettlements: projection.sourceSettlements, sets: projection.sourceSettlementReferenceSets }).length)
-      .toBeLessThan(JSON.stringify(retrieval.sourceSettlements).length / 2)
+    expect(JSON.stringify({
+      sourceSettlements: projection.sourceSettlements,
+      sets: projection.sourceSettlementReferenceSets,
+      reasons: projection.sourceSettlementReasonSets,
+    }).length).toBeLessThan(JSON.stringify(retrieval.sourceSettlements).length / 2)
     expect(() => graphGovernanceReviewProjectionSchema.parse({
       ...projection,
       sourceSettlements: [{ ...projection.sourceSettlements[0], graphRefSetIndex: 1 }],
     })).toThrow(/graphRefSetIndex must reference an existing/)
+    expect(() => graphGovernanceReviewProjectionSchema.parse({
+      ...projection,
+      sourceSettlements: [{ ...projection.sourceSettlements[0], reasonIndex: 1 }],
+    })).toThrow(/reasonIndex must reference an existing/)
   })
 
   it("builds minimal settlement and frontier responsibility projections", () => {

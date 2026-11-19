@@ -425,10 +425,28 @@ export class SqliteTurnPersistence implements TurnPersistencePort {
       }
     })
     const contextTokens = await readLatestRequestInputTokens(this.database, taskId)
+    const modelWindow = config.modelContextWindowTokens
     const contextThreshold = contextRecord?.budget.maxTokens ?? config.contextThresholdTokens
+    const contextState = contextTokens === null || modelWindow <= 0
+      ? "normal" as const
+      : contextTokens >= modelWindow
+        ? "exhausted" as const
+        : contextTokens >= Math.min(contextThreshold, modelWindow) * 0.8
+          ? "warning" as const
+          : "normal" as const
     metrics.push(
-      readOnlyMetric("context_tokens", "活动上下文", "context_window", "tokens", contextTokens, contextThreshold, contextTokens, contextTokens !== null && contextThreshold > 0 && contextTokens >= contextThreshold ? "exhausted" : contextTokens !== null && contextTokens >= contextThreshold * 0.8 ? "warning" : "normal", "最近一次已完成模型请求由提供方返回的真实输入 Token；请求完成前显示不可用。本地估算仅用于请求前压缩判断。"),
-      readOnlyMetric("context_limit", "模型上下文上限", "context_window", "tokens", config.modelContextWindowTokens, null, config.modelContextWindowTokens, "fixed", "模型配置声明的固定上下文容量，不能通过任务重置改变。"),
+      readOnlyMetric(
+        "context_tokens",
+        "活动上下文",
+        "context_window",
+        "tokens",
+        contextTokens,
+        modelWindow,
+        contextTokens,
+        contextState,
+        "最近一次已完成模型请求由提供方返回的真实输入 Token；分母为当前模型配置的上下文窗口。请求完成前显示不可用。本地估算仅用于请求前压缩判断。",
+      ),
+      readOnlyMetric("context_limit", "模型上下文上限", "context_window", "tokens", modelWindow, null, modelWindow, "fixed", "模型配置声明的固定上下文容量，不能通过任务重置改变。"),
       readOnlyMetric("retrieval_rounds", "当前阶段检索轮次", "phase", "count", await countCurrentRetrievalRounds(this.database, taskId), config.maxRetrievalRounds, null, "normal", "当前阶段已经消耗的选择性读取轮次。"),
       readOnlyMetric("kv_cache_hit_rate", "KV 缓存命中率", "task_total", "ratio", kv.hitRate, null, kv.hitRate, "fixed", "按提供方返回的缓存命中与未命中输入 Token 计算。"),
       readOnlyMetric("total_tokens", "累计 Token", "task_total", "tokens", cumulative.inputTokens + cumulative.outputTokens, null, cumulative.inputTokens + cumulative.outputTokens, "fixed", "本任务全部额度窗口累计的输入与输出 Token。"),

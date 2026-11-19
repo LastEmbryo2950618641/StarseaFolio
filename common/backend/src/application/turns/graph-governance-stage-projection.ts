@@ -68,6 +68,8 @@ export function buildGraphGovernanceReviewProjection(
   ))
   const sourceSettlementReferenceSets: Array<{ graphRefs: typeof retrieval.sourceSettlements[number]["graphRefs"] }> = []
   const referenceSetIndexes = new Map<string, number>()
+  const sourceSettlementReasonSets: Array<{ reason: string }> = []
+  const reasonSetIndexes = new Map<string, number>()
   const sourceSettlements = retrieval.sourceSettlements.map((settlement) => {
     const key = JSON.stringify(settlement.graphRefs)
     let graphRefSetIndex = referenceSetIndexes.get(key)
@@ -76,10 +78,16 @@ export function buildGraphGovernanceReviewProjection(
       referenceSetIndexes.set(key, graphRefSetIndex)
       sourceSettlementReferenceSets.push({ graphRefs: settlement.graphRefs })
     }
+    let reasonIndex = reasonSetIndexes.get(settlement.reason)
+    if (reasonIndex === undefined) {
+      reasonIndex = sourceSettlementReasonSets.length
+      reasonSetIndexes.set(settlement.reason, reasonIndex)
+      sourceSettlementReasonSets.push({ reason: settlement.reason })
+    }
     return {
       sourceUnitIndex: settlement.sourceUnitIndex,
       graphRefSetIndex,
-      reason: settlement.reason,
+      reasonIndex,
       status: settlement.status,
     }
   })
@@ -97,6 +105,7 @@ export function buildGraphGovernanceReviewProjection(
     proposalSettlements: spacetime.proposalSettlements,
     retrievalProjections: retrieval.projections,
     sourceSettlementReferenceSets,
+    sourceSettlementReasonSets,
     sourceSettlements,
     affectedFrontierRefs: structure.affectedFrontierRefs,
     archiveOutletRefs: structure.archiveOutletRefs,
