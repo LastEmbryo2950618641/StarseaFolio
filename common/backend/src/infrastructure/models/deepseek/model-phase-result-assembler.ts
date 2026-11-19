@@ -59,7 +59,9 @@ function stripSchemaMetadata(value: unknown): unknown {
 }
 
 export function parseModelPhaseResult(value: unknown, phase?: AIPhase): ModelPhaseResult {
-  const field = phase === "synopsis_discuss" ? "finalSelfReview" : phase === "graph_governance" ? "executionMode" : undefined
+  const field = phase === "synopsis_discuss" || phase === "settings_extraction"
+    ? "finalSelfReview"
+    : phase === "graph_governance" ? "executionMode" : undefined
   if (field !== undefined) {
     const result = asRecord(value)
     const artifact = asRecord(result.artifact)
@@ -203,6 +205,13 @@ function normalizeOptionalModelFields(phase: AIPhase, artifact: unknown): unknow
         ? finalSelfReview
         : "Completed synopsis discussion with the visible evidence.",
     }
+  }
+  if (phase === "settings_extraction") {
+    const finalSelfReview = typeof record.finalSelfReview === "string" ? record.finalSelfReview.trim() : ""
+    if (finalSelfReview.length > 0) return { ...record, finalSelfReview }
+    const { finalSelfReview: _ignored, ...rest } = record
+    void _ignored
+    return rest
   }
   if (phase === "emergence_planning" && record.noCreationReason === "") {
     const { noCreationReason: ignoredNoCreationReason, ...rest } = record

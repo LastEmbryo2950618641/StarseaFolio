@@ -27,6 +27,7 @@ import {
   parsePhaseResult,
   phaseArtifactJsonSchema,
   promptDefinitions,
+  settingsExtractionArtifactSchema,
   synopsisDiscussArtifactSchema,
   synopsisPresentationWriteSchema,
 } from "../src/index.js"
@@ -746,6 +747,19 @@ describe("prompt contracts", () => {
       synopsisBody: "",
     })
     expect(parsed.synopsisBody).toBeUndefined()
+  })
+
+  it("allows settings_extraction artifacts without finalSelfReview", () => {
+    const parsed = settingsExtractionArtifactSchema.parse({
+      summary: "本轮无新设定需要沉淀。",
+      proposals: [],
+    })
+    expect(parsed.finalSelfReview).toBeUndefined()
+    expect(settingsExtractionArtifactSchema.parse({
+      summary: "抽出一处地点。",
+      proposals: [],
+      finalSelfReview: "已自检。",
+    }).finalSelfReview).toBe("已自检。")
   })
 
   it("accepts chapterDraftProposal and promote_draft_to_body", () => {

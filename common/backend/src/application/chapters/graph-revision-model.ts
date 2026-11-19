@@ -1,12 +1,20 @@
 import type { GraphRevisionModelActivity } from "@starseafolio/contracts"
 import type { AIModelPort } from "../turns/ports/ai-model-port.js"
 
+export type GraphRevisionModelConfig = Readonly<{
+  /** Max silence between streamed chunks after the first token. Default 120s. */
+  idleTimeoutMs?: number
+  /** Max wait for the first streamed token (prefill / queue). Default 300s. */
+  firstTokenTimeoutMs?: number
+}>
+
 export function createGraphRevisionModel(
   model: AIModelPort,
   onActivity: (activity: GraphRevisionModelActivity | undefined) => void,
-  config: { idleTimeoutMs?: number } = {},
+  config: GraphRevisionModelConfig = {},
 ): AIModelPort {
   const idleTimeoutMs = config.idleTimeoutMs ?? 120_000
+  const firstTokenTimeoutMs = config.firstTokenTimeoutMs ?? 300_000
   return {
     ...(model.info === undefined ? {} : { info: model.info }),
     execute: async (request, options) => {
@@ -14,16 +22,30 @@ export function createGraphRevisionModel(
       const idleController = new AbortController()
       const signal = options?.signal === undefined ? idleController.signal : AbortSignal.any([options.signal, idleController.signal])
       let active = true
+      let receivedFirstToken = false
       let timer: ReturnType<typeof setTimeout> | undefined
       let activity: GraphRevisionModelActivity = {
         phase: request.phase, stage: "waiting", attempt: 1, startedAtMs: Date.now(), lastActivityAtMs: Date.now(),
         reasoningCharacters: 0, contentCharacters: 0,
       }
-      const heartbeat = (): void => {
+      const armWatchdog = (timeoutMs: number, message: string): void => {
         clearTimeout(timer)
         timer = setTimeout(() => {
-          idleController.abort(new Error(`模型连续 ${String(Math.round(idleTimeoutMs / 1000))} 秒未返回数据，已停止本次图同步，可重试。`))
-        }, idleTimeoutMs)
+          idleController.abort(new Error(message))
+        }, timeoutMs)
+      }
+      const heartbeat = (): void => {
+        if (!receivedFirstToken) {
+          armWatchdog(
+            firstTokenTimeoutMs,
+            `模型连续 ${String(Math.round(firstTokenTimeoutMs / 1000))} 秒未返回首包数据，已停止本次图同步，可重试。`,
+          )
+          return
+        }
+        armWatchdog(
+          idleTimeoutMs,
+          `模型连续 ${String(Math.round(idleTimeoutMs / 1000))} 秒未返回数据，已停止本次图同步，可重试。`,
+        )
       }
       let rejectAborted!: (reason: unknown) => void
       const aborted = new Promise<never>((_resolve, reject) => { rejectAborted = reject })
@@ -46,6 +68,7 @@ export function createGraphRevisionModel(
           onPartial: (partial) => {
             if (!active) return
             if (!partial.reasoningDelta && !partial.contentDelta) return
+            receivedFirstToken = true
             heartbeat()
             activity = {
               ...activity, stage: partial.contentDelta ? "responding" : "thinking", lastActivityAtMs: Date.now(),
@@ -57,6 +80,8 @@ export function createGraphRevisionModel(
           },
           onSchemaRepair: () => {
             if (!active) return
+            // Repair round starts a new generation; allow first-token grace again.
+            receivedFirstToken = false
             heartbeat()
             activity = { ...activity, stage: "repairing", attempt: activity.attempt + 1, lastActivityAtMs: Date.now(), reasoningCharacters: 0, contentCharacters: 0 }
             onActivity(activity)

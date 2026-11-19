@@ -50,13 +50,74 @@ describe("graph revision model", () => {
     try {
       const updates = vi.fn<(activity: GraphRevisionModelActivity | undefined) => void>()
       const stalled = vi.fn(() => new Promise<never>(() => undefined))
-      const pending = createGraphRevisionModel({ execute: stalled }, updates, { idleTimeoutMs: 1000 }).execute(request())
-      const rejection = expect(pending).rejects.toThrow("未返回数据")
+      const pending = createGraphRevisionModel({ execute: stalled }, updates, {
+        idleTimeoutMs: 1000,
+        firstTokenTimeoutMs: 1000,
+      }).execute(request())
+      const rejection = expect(pending).rejects.toThrow("未返回首包数据")
       await vi.advanceTimersByTimeAsync(1001)
       await rejection
       expect(stalled).toHaveBeenCalledOnce()
       expect(updates).toHaveBeenLastCalledWith(undefined)
       expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+
+  it("allows a slow first token beyond the mid-stream idle window", async () => {
+    vi.useFakeTimers()
+    try {
+      let partial: ((delta: { contentDelta: string }) => void) | undefined
+      const updates = vi.fn<(activity: GraphRevisionModelActivity | undefined) => void>()
+      const fake = new FakeAiModelAdapter()
+      const pending = createGraphRevisionModel({ execute: (req, options) => {
+        partial = options?.onPartial
+        return new Promise((resolve, reject) => {
+          const onAbort = (): void => { reject(options?.signal?.reason) }
+          options?.signal?.addEventListener("abort", onAbort, { once: true })
+          const finish = (): void => {
+            options?.signal?.removeEventListener("abort", onAbort)
+            void fake.execute(req).then(resolve, reject)
+          }
+          ;(globalThis as { __finishGraphRevision?: () => void }).__finishGraphRevision = finish
+        })
+      } }, updates, {
+        idleTimeoutMs: 1000,
+        firstTokenTimeoutMs: 5000,
+      }).execute(request())
+
+      await vi.advanceTimersByTimeAsync(2500)
+      expect(updates.mock.calls.at(-1)?.[0]).toMatchObject({ stage: "waiting" })
+      partial?.({ contentDelta: "{" })
+      expect(updates.mock.calls.at(-1)?.[0]).toMatchObject({ stage: "responding" })
+      await vi.advanceTimersByTimeAsync(900)
+      partial?.({ contentDelta: "}" })
+      ;(globalThis as { __finishGraphRevision?: () => void }).__finishGraphRevision?.()
+      await pending
+      expect(updates).toHaveBeenLastCalledWith(undefined)
+    } finally {
+      delete (globalThis as { __finishGraphRevision?: () => void }).__finishGraphRevision
+      vi.useRealTimers()
+    }
+  })
+
+  it("uses the shorter idle window after the first token arrives", async () => {
+    vi.useFakeTimers()
+    try {
+      let partial: ((delta: { contentDelta: string }) => void) | undefined
+      const updates = vi.fn<(activity: GraphRevisionModelActivity | undefined) => void>()
+      const pending = createGraphRevisionModel({ execute: (_req, options) => {
+        partial = options?.onPartial
+        return new Promise<never>(() => undefined)
+      } }, updates, {
+        idleTimeoutMs: 1000,
+        firstTokenTimeoutMs: 5000,
+      }).execute(request())
+      const rejection = expect(pending).rejects.toThrow("未返回数据")
+      await vi.advanceTimersByTimeAsync(500)
+      partial?.({ contentDelta: "a" })
+      await vi.advanceTimersByTimeAsync(1001)
+      await rejection
+      expect(updates).toHaveBeenLastCalledWith(undefined)
     } finally { vi.useRealTimers() }
   })
 
@@ -69,7 +130,7 @@ describe("graph revision model", () => {
       const pending = createGraphRevisionModel({ execute: (_req, options) => {
         partial = options?.onPartial
         return new Promise<never>(() => undefined)
-      } }, updates, { idleTimeoutMs: 1000 }).execute(request(), { signal: controller.signal })
+      } }, updates, { idleTimeoutMs: 1000, firstTokenTimeoutMs: 1000 }).execute(request(), { signal: controller.signal })
       const rejection = expect(pending).rejects.toThrow("user cancelled")
       await vi.advanceTimersByTimeAsync(800)
       partial?.({ contentDelta: "a" })

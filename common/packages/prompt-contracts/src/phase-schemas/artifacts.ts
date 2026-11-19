@@ -820,7 +820,8 @@ export const settingsExtractionArtifactSchema = z.object({
   summary: z.string().min(1),
   proposals: z.array(settingsExtractionProposalInputSchema),
   workStyleRevision: workStyleRevisionSchema.optional(),
-  finalSelfReview: z.string().min(1),
+  /** Optional in the phase prompt; keep optional so omitting it is not a hard contract failure. */
+  finalSelfReview: z.string().min(1).optional(),
 })
 
 export const phaseArtifactSchemas: Record<AIPhase, z.ZodType> = {

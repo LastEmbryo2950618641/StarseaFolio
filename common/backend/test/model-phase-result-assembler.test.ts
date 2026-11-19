@@ -32,6 +32,41 @@ describe("graph governance result normalization", () => {
   })
 })
 
+describe("settings extraction finalSelfReview", () => {
+  it("assembles when the model omits optional finalSelfReview", () => {
+    const request = { ...createRequest(), phase: "settings_extraction" as const }
+    const result = assembleModelPhaseResult({
+      outcome: "continue",
+      artifact: {
+        summary: "本轮无新设定需要沉淀。",
+        proposals: [],
+      },
+      requestedReads: [],
+      citedReadIds: [],
+      unresolvedDependencies: [],
+      reason: "无新设定",
+      selfReview: "已检查",
+    }, request)
+    expect(result.artifact).toMatchObject({ summary: "本轮无新设定需要沉淀。", proposals: [] })
+    expect(result.artifact).not.toHaveProperty("finalSelfReview")
+  })
+
+  it("lifts a misplaced top-level finalSelfReview into the artifact", () => {
+    const parsed = parseModelPhaseResult({
+      outcome: "continue",
+      artifact: { summary: "抽出一处地点。", proposals: [] },
+      finalSelfReview: "已自检。",
+      requestedReads: [],
+      citedReadIds: [],
+      unresolvedDependencies: [],
+      reason: "完成",
+      selfReview: "完成",
+    }, "settings_extraction")
+    expect(parsed).not.toHaveProperty("finalSelfReview")
+    expect(parsed.artifact).toMatchObject({ finalSelfReview: "已自检。" })
+  })
+})
+
 describe("assembleModelPhaseResult", () => {
   it("merges duplicate source settlement records before coverage validation", () => {
     const request = {
