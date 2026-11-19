@@ -501,8 +501,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         if (active) {
           setTask((previous) => {
             if (latest === null) return undefined
+            if (previous === undefined) return latest
             if (
-              previous?.handle?.taskId === latest.handle?.taskId
+              previous.handle?.taskId === latest.handle?.taskId
               && previous.status === latest.status
               && previous.lastPhase === latest.lastPhase
               && previous.error?.message === latest.error?.message
@@ -1630,9 +1631,10 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
               await new Promise((resolve) => setTimeout(resolve, 200))
               continue
             }
-            setSynopsisStream((previous) => (
-              previous !== undefined && synopsisStreamPeekUnchanged(previous, peek) ? previous : peek
-            ))
+            setSynopsisStream((previous) => {
+              if (previous !== undefined && synopsisStreamPeekUnchanged(previous, peek)) return previous
+              return peek
+            })
             if (peek.usage !== undefined) {
               setSynopsisUsage(peek.usage)
             }
@@ -1643,9 +1645,10 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             // staging search updates still reach the stream bubble.
           } else {
             observedRunningStream = true
-            setSynopsisStream((previous) => (
-              previous !== undefined && synopsisStreamPeekUnchanged(previous, peek) ? previous : peek
-            ))
+            setSynopsisStream((previous) => {
+              if (previous !== undefined && synopsisStreamPeekUnchanged(previous, peek)) return previous
+              return peek
+            })
             if (peek.usage !== undefined) {
               setSynopsisUsage(peek.usage)
             }
