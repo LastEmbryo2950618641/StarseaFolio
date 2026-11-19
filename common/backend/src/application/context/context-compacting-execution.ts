@@ -159,37 +159,82 @@ function latestToolDescriptionIds(messages: readonly VisibleModelContextMessage[
   return new Set([...latest.values()].map((message) => message.messageId))
 }
 
-function duplicateSystemRulesIds(messages: readonly VisibleModelContextMessage[], currentTurnId: string): Set<string> {
-  const latestByContent = new Map<string, string>()
-  for (const message of [...messages].sort((left, right) => left.sequence - right.sequence)) {
-    if (message.kind !== "system_rules" || message.turnId === currentTurnId) continue
-    latestByContent.set(message.content, message.messageId)
-  }
-  const kept = new Set(latestByContent.values())
-  const duplicates = new Set<string>()
-  for (const message of messages) {
-    if (message.kind !== "system_rules" || message.turnId === currentTurnId) continue
-    if (!kept.has(message.messageId)) duplicates.add(message.messageId)
-  }
-  return duplicates
-}
-
-export function isProtectedFoldMessage(message: VisibleModelContextMessage): boolean {
-  if (message.kind === "system_rules") return true
-  if (message.kind !== "phase_instruction") return false
+function readPhaseInstructionProtocol(message: VisibleModelContextMessage): string | undefined {
+  if (message.kind !== "phase_instruction") return undefined
   try {
     const value: unknown = JSON.parse(message.content)
-    if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined
     const protocol = (value as Record<string, unknown>).protocol
-    return protocol === "discuss-history-summary-v1"
-      || protocol === "discuss-step-failures-v1"
-      || protocol === "discuss-progress-v1"
-      || protocol === "discuss-gate-v1"
-      || protocol === CONTEXT_FOLD_SUMMARY_PROTOCOL
-      || protocol === CONTEXT_BUDGET_PROTOCOL
+    return typeof protocol === "string" ? protocol : undefined
   } catch {
-    return false
+    return undefined
   }
+}
+
+/** Small always-on protocols that must never be folded. History summaries and fold digests are not included. */
+function isAlwaysProtectedProtocol(protocol: string): boolean {
+  return protocol === "discuss-step-failures-v1"
+    || protocol === "discuss-progress-v1"
+    || protocol === "discuss-gate-v1"
+    || protocol === CONTEXT_BUDGET_PROTOCOL
+}
+
+/**
+ * True for messages that are protocol-locked regardless of turn.
+ * Prefer {@link collectProtectedFoldMessageIds} for fold decisions — that also keeps only the
+ * latest system_rules / fold-summary and the latest current-turn request/response.
+ */
+export function isProtectedFoldMessage(message: VisibleModelContextMessage): boolean {
+  if (message.kind === "system_rules") return true
+  const protocol = readPhaseInstructionProtocol(message)
+  return protocol !== undefined && (
+    isAlwaysProtectedProtocol(protocol)
+    || protocol === CONTEXT_FOLD_SUMMARY_PROTOCOL
+  )
+}
+
+/** Message ids that must stay visible for this fold pass. */
+export function collectProtectedFoldMessageIds(
+  messages: readonly VisibleModelContextMessage[],
+  currentTurnId: string,
+): Set<string> {
+  const ordered = [...messages].sort((left, right) => left.sequence - right.sequence)
+  const protectedIds = new Set<string>()
+
+  for (const message of ordered) {
+    const protocol = readPhaseInstructionProtocol(message)
+    if (protocol !== undefined && isAlwaysProtectedProtocol(protocol)) {
+      protectedIds.add(message.messageId)
+    }
+  }
+
+  const latestSystemRules = [...ordered].reverse().find((message) => message.kind === "system_rules")
+  if (latestSystemRules !== undefined) protectedIds.add(latestSystemRules.messageId)
+
+  const latestFoldSummary = [...ordered].reverse().find((message) => (
+    readPhaseInstructionProtocol(message) === CONTEXT_FOLD_SUMMARY_PROTOCOL
+  ))
+  if (latestFoldSummary !== undefined) protectedIds.add(latestFoldSummary.messageId)
+
+  const currentTurn = ordered.filter((message) => message.turnId === currentTurnId)
+  const latestRequest = [...currentTurn].reverse().find((message) => message.kind === "phase_request")
+  const latestResponse = [...currentTurn].reverse().find((message) => message.kind === "phase_response")
+  if (latestRequest !== undefined) protectedIds.add(latestRequest.messageId)
+  if (latestResponse !== undefined) protectedIds.add(latestResponse.messageId)
+
+  return protectedIds
+}
+
+function listFoldableMessages(
+  messages: readonly VisibleModelContextMessage[],
+  currentTurnId: string,
+): VisibleModelContextMessage[] {
+  const protectedIds = collectProtectedFoldMessageIds(messages, currentTurnId)
+  const keptDescriptions = latestToolDescriptionIds(messages)
+  return messages.filter((message) => (
+    !protectedIds.has(message.messageId)
+    && !keptDescriptions.has(message.messageId)
+  ))
 }
 
 function messageTokens(message: VisibleModelContextMessage): number {
@@ -204,21 +249,24 @@ function compressLimitTokens(windowTokens: number): number {
   return Math.max(1_000, windowTokens - COMPRESS_PROMPT_RESERVE_TOKENS - COMPRESS_OUTPUT_RESERVE_TOKENS)
 }
 
-/** Oldest-first slice covering at least half the foldable pool (by tokens). */
+/** Oldest-first slice covering at least half the foldable pool (by tokens), capped at half the count. */
 export function selectOldestHalfByTokens(
   foldable: readonly VisibleModelContextMessage[],
 ): VisibleModelContextMessage[] {
   if (foldable.length === 0) return []
+  if (foldable.length === 1) return [...foldable]
   const ordered = [...foldable].sort((left, right) => left.sequence - right.sequence)
   const target = Math.max(1, Math.ceil(totalMessageTokens(ordered) * 0.5))
+  const countCap = Math.max(1, Math.ceil(ordered.length / 2))
   const selected: VisibleModelContextMessage[] = []
   let weight = 0
   for (const message of ordered) {
     selected.push(message)
     weight += messageTokens(message)
-    if (weight >= target) break
+    if (selected.length >= countCap || weight >= target) break
   }
-  return selected
+  // Guarantees progress for shrink loops when early messages are tiny.
+  return selected.length < ordered.length ? selected : ordered.slice(0, countCap)
 }
 
 /** Shrink a chunk until its estimated tokens fit the compress call limit. */
@@ -228,7 +276,12 @@ export function shrinkChunkToCompressLimit(
 ): Readonly<{ messages: VisibleModelContextMessage[]; truncatedContent?: string }> {
   let current = [...chunk].sort((left, right) => left.sequence - right.sequence)
   while (current.length > 1 && totalMessageTokens(current) > limitTokens) {
-    current = selectOldestHalfByTokens(current)
+    const next = selectOldestHalfByTokens(current)
+    if (next.length >= current.length) {
+      current = current.slice(0, Math.max(1, Math.floor(current.length / 2)))
+      continue
+    }
+    current = next
   }
   if (current.length === 0) return { messages: [] }
   if (totalMessageTokens(current) <= limitTokens) return { messages: current }
@@ -309,31 +362,10 @@ export async function foldContextMessages(input: {
     return Math.max(0, Math.ceil(input.observedInputTokens * (local / Math.max(1, baselineLocal))))
   }
 
-  const protectedTokens = (): number => messages
-    .filter((message) => message.turnId === input.currentTurnId || isProtectedFoldMessage(message))
-    .reduce((sum, message) => sum + messageTokens(message), 0)
-
-  if (protectedTokens() > input.windowTokens) {
-    return {
-      messages,
-      hiddenMessageIds,
-      foldMessages,
-      foldsApplied,
-      blocked: "Protected system rules, current turn, and fold state exceed the model context window",
-    }
-  }
-
   for (let round = 0; round < 32; round += 1) {
     input.signal?.throwIfAborted()
     if (outgoingEstimate() <= targetTokens) break
-    const keptDescriptions = latestToolDescriptionIds(messages)
-    const duplicateRules = duplicateSystemRulesIds(messages, input.currentTurnId)
-    const foldable = messages.filter((message) => (
-      message.turnId !== input.currentTurnId
-      && !isProtectedFoldMessage(message)
-      && !keptDescriptions.has(message.messageId)
-      && (message.kind !== "system_rules" || duplicateRules.has(message.messageId))
-    ))
+    const foldable = listFoldableMessages(messages, input.currentTurnId)
     if (foldable.length === 0) break
 
     let chunk = selectOldestHalfByTokens(foldable)
@@ -384,6 +416,20 @@ export async function foldContextMessages(input: {
   const estimatedInputTokens = input.observedInputTokens === undefined || baselineLocal <= 0
     ? undefined
     : Math.max(0, Math.ceil(input.observedInputTokens * (totalMessageTokens(messages) / baselineLocal)))
+
+  if (
+    outgoingEstimate() > input.windowTokens
+    && listFoldableMessages(messages, input.currentTurnId).length === 0
+  ) {
+    return {
+      messages,
+      hiddenMessageIds,
+      foldMessages,
+      foldsApplied,
+      blocked: "Protected system rules, current turn, and fold state exceed the model context window",
+      ...(estimatedInputTokens === undefined ? {} : { estimatedInputTokens }),
+    }
+  }
 
   return {
     messages,

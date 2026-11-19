@@ -3,9 +3,11 @@ import type { PhaseRequestEnvelope, VisibleModelContextMessage } from "@starseaf
 import type { AIModelPort, PhaseModelExecution } from "../src/application/turns/ports/ai-model-port.js"
 import {
   buildFoldSummaryContent,
+  collectProtectedFoldMessageIds,
   CONTEXT_FOLD_SUMMARY_PROTOCOL,
   contextTokensAfterProviderUsage,
   executeWithContextCompaction,
+  foldContextMessages,
   readContextLengthError,
   selectOldestHalfByTokens,
   shrinkChunkToCompressLimit,
@@ -190,12 +192,16 @@ describe("AI fold context compaction", () => {
     expect(assembled).toContain("当前聚焦章正文保留一次")
   })
 
-  it("preserves discuss history summary and gate counters while folding", async () => {
-    const { input, execute } = setup(900_000)
+  it("preserves discuss gate while allowing history summary to fold", async () => {
+    const { input, execute, compressContext } = setup(900_000)
     const summary = {
       ...message("history-summary", "phase_instruction", "old", 1),
       role: "user" as const,
-      content: JSON.stringify({ protocol: "discuss-history-summary-v1", userInputs: ["已确认设定"] }),
+      content: JSON.stringify({
+        protocol: "discuss-history-summary-v1",
+        userInputs: ["已确认设定"],
+        exchanges: [{ role: "assistant", text: "历史交换".repeat(800) }],
+      }),
     }
     const retryState = {
       ...message("retry-state", "phase_instruction", "old", 2),
@@ -206,15 +212,168 @@ describe("AI fold context compaction", () => {
       message("system", "system_rules", "old", 0),
       summary,
       retryState,
-      message("old", "phase_response", "old", 3, "旧内容".repeat(500)),
-      message("current", "phase_request", "current", 4),
+      message("current", "phase_request", "current", 3),
     ]
     await executeWithContextCompaction(input)
+    expect(compressContext).toHaveBeenCalled()
     const ids = execute.mock.calls[0]?.[1]?.contextMessages?.map((item) => item.messageId) ?? []
     expect(ids).toContain("system")
-    expect(ids).toContain("history-summary")
     expect(ids).toContain("retry-state")
     expect(ids).toContain("current")
+    expect(ids).not.toContain("history-summary")
+  })
+
+  it("collects only latest system rules, fold summary, and current-turn request/response as protected", () => {
+    const foldOld = {
+      ...message("fold-old", "phase_instruction", "old", 1),
+      content: buildFoldSummaryContent({ summary: "旧折", foldedMessageCount: 1, foldedMessageIds: ["x"] }),
+    }
+    const foldNew = {
+      ...message("fold-new", "phase_instruction", "old", 2),
+      content: buildFoldSummaryContent({ summary: "新折", foldedMessageCount: 1, foldedMessageIds: ["y"] }),
+    }
+    const history = {
+      ...message("history", "phase_instruction", "old", 3),
+      content: JSON.stringify({ protocol: "discuss-history-summary-v1", userInputs: ["a"] }),
+    }
+    const gate = {
+      ...message("gate", "phase_instruction", "old", 4),
+      content: JSON.stringify({ protocol: "discuss-gate-v1", failures: {} }),
+    }
+    const protectedIds = collectProtectedFoldMessageIds([
+      message("rules-old", "system_rules", "old", 0, "rules-v1"),
+      message("rules-new", "system_rules", "current", 5, "rules-v2"),
+      foldOld,
+      foldNew,
+      history,
+      gate,
+      message("early-req", "phase_request", "current", 6, "早请求".repeat(40)),
+      message("early-res", "phase_response", "current", 7, "早响应".repeat(40)),
+      message("late-req", "phase_request", "current", 8, "晚请求"),
+      message("late-res", "phase_response", "current", 9, "晚响应"),
+    ], "current")
+    expect([...protectedIds].sort()).toEqual([
+      "fold-new", "gate", "late-req", "late-res", "rules-new",
+    ].sort())
+    expect(protectedIds.has("history")).toBe(false)
+    expect(protectedIds.has("fold-old")).toBe(false)
+    expect(protectedIds.has("early-req")).toBe(false)
+    expect(protectedIds.has("rules-old")).toBe(false)
+  })
+
+  it("folds before hard-blocking when protected-looking history still has foldable mass", async () => {
+    const compressContext = vi.fn<NonNullable<AIModelPort["compressContext"]>>().mockResolvedValue({
+      summary: "压扁后的摘要",
+      usage: { inputTokens: 10, outputTokens: 5, latencyMs: 0 },
+    })
+    let foldSerial = 0
+    const pad = "章".repeat(1_200)
+    const folded = await foldContextMessages({
+      model: {
+        info: { provider: "test", model: "test", available: true, contextWindowTokens: 8_000 },
+        execute: vi.fn(),
+        compressContext,
+      },
+      messages: [
+        message("system", "system_rules", "old", 0, "规则"),
+        message("old1", "phase_response", "old", 1, pad),
+        message("old2", "phase_response", "old", 2, pad),
+        {
+          ...message("history", "phase_instruction", "old", 3),
+          content: JSON.stringify({ protocol: "discuss-history-summary-v1", exchanges: [pad] }),
+        },
+        message("req", "phase_request", "current", 4, "当前请求"),
+      ],
+      currentTurnId: "current",
+      windowTokens: 8_000,
+      targetRatio: 0.5,
+      observedInputTokens: 60_000,
+      createMessageId: () => `fold-${String(++foldSerial)}`,
+    })
+    expect(compressContext).toHaveBeenCalled()
+    expect(folded.blocked).toBeUndefined()
+    expect(folded.foldsApplied).toBeGreaterThan(0)
+    expect(folded.hiddenMessageIds.length).toBeGreaterThan(0)
+  })
+
+  it("folds earlier same-turn steps while keeping the latest request and response", async () => {
+    const compressContext = vi.fn<NonNullable<AIModelPort["compressContext"]>>().mockResolvedValue({
+      summary: "同轮中间步摘要",
+      usage: { inputTokens: 10, outputTokens: 5, latencyMs: 0 },
+    })
+    let foldSerial = 0
+    const pad = "步".repeat(1_500)
+    const folded = await foldContextMessages({
+      model: {
+        info: { provider: "test", model: "test", available: true, contextWindowTokens: 12_000 },
+        execute: vi.fn(),
+        compressContext,
+      },
+      messages: [
+        message("system", "system_rules", "old", 0),
+        message("step-req", "phase_request", "current", 1, pad),
+        message("step-res", "phase_response", "current", 2, pad),
+        message("late-req", "phase_request", "current", 3, "最终请求"),
+        message("late-res", "phase_response", "current", 4, "最终响应"),
+      ],
+      currentTurnId: "current",
+      windowTokens: 12_000,
+      targetRatio: 0.5,
+      observedInputTokens: 40_000,
+      createMessageId: () => `fold-same-turn-${String(++foldSerial)}`,
+    })
+    expect(compressContext).toHaveBeenCalled()
+    expect(folded.blocked).toBeUndefined()
+    const ids = folded.messages.map((item) => item.messageId)
+    expect(ids).toContain("late-req")
+    expect(ids).toContain("late-res")
+    expect(ids).not.toContain("step-req")
+    expect(ids).not.toContain("step-res")
+  })
+
+  it("re-folds older fold summaries while keeping the newest digest", async () => {
+    const compressContext = vi.fn<NonNullable<AIModelPort["compressContext"]>>().mockResolvedValue({
+      summary: "再折旧摘要",
+      usage: { inputTokens: 10, outputTokens: 5, latencyMs: 0 },
+    })
+    let foldSerial = 0
+    const oldFold = {
+      ...message("fold-old", "phase_instruction", "old", 1),
+      content: buildFoldSummaryContent({
+        summary: "很旧的折叠正文".repeat(400),
+        foldedMessageCount: 3,
+        foldedMessageIds: ["a", "b", "c"],
+      }),
+    }
+    const newFold = {
+      ...message("fold-new", "phase_instruction", "old", 2),
+      content: buildFoldSummaryContent({
+        summary: "最新折叠",
+        foldedMessageCount: 1,
+        foldedMessageIds: ["d"],
+      }),
+    }
+    const folded = await foldContextMessages({
+      model: {
+        info: { provider: "test", model: "test", available: true, contextWindowTokens: 10_000 },
+        execute: vi.fn(),
+        compressContext,
+      },
+      messages: [
+        message("system", "system_rules", "old", 0),
+        oldFold,
+        newFold,
+        message("current", "phase_request", "current", 3, "当前"),
+      ],
+      currentTurnId: "current",
+      windowTokens: 10_000,
+      targetRatio: 0.5,
+      observedInputTokens: 30_000,
+      createMessageId: () => `fold-digest-${String(++foldSerial)}`,
+    })
+    expect(compressContext).toHaveBeenCalled()
+    expect(folded.hiddenMessageIds).toContain("fold-old")
+    expect(folded.messages.map((item) => item.messageId)).toContain("fold-new")
   })
 
   it("does not substitute estimates for provider usage when below threshold", async () => {
