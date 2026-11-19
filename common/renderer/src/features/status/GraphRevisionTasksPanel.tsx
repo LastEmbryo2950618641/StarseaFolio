@@ -310,15 +310,15 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
   }
 
   return <>
-  <section className="graph-revision-panel" aria-label="图治理任务" data-testid="graph-revision-panel">
+  <section className="graph-revision-panel" aria-label="章节入库" data-testid="graph-revision-panel">
     <header className="graph-revision-heading">
-      <strong>图治理任务 <span>{tasks.length}</span></strong>
-      <UiTooltip label="刷新任务"><button type="button" aria-label="刷新图治理任务" onClick={() => { setRefresh((value) => value + 1) }}><RefreshCw size={15} /></button></UiTooltip>
+      <strong>章节入库 <span>{tasks.length}</span></strong>
+      <UiTooltip label="刷新任务"><button type="button" aria-label="刷新章节入库任务" onClick={() => { setRefresh((value) => value + 1) }}><RefreshCw size={15} /></button></UiTooltip>
     </header>
-    {error === undefined ? null : <ExpandableErrorAlert message={error} className="graph-revision-error" title="图治理错误" testId="graph-revision-action-error" />}
-    {loadError === undefined ? null : <ExpandableErrorAlert message={loadError} className="graph-revision-error" title="图治理读取错误" testId="graph-revision-load-error" />}
+    {error === undefined ? null : <ExpandableErrorAlert message={error} className="graph-revision-error" title="章节入库错误" testId="graph-revision-action-error" />}
+    {loadError === undefined ? null : <ExpandableErrorAlert message={loadError} className="graph-revision-error" title="章节入库读取错误" testId="graph-revision-load-error" />}
     {loading && tasks.length === 0 ? <p className="graph-revision-empty">正在读取任务…</p> : null}
-    {!loading && tasks.length === 0 ? <p className="graph-revision-empty">{project === undefined ? "请先打开项目" : "暂无图治理任务"}</p> : null}
+    {!loading && tasks.length === 0 ? <p className="graph-revision-empty">{project === undefined ? "请先打开项目" : "暂无章节入库任务"}</p> : null}
     {tasks.map((task) => {
       const busy = pending[task.revisionTaskId]
       const { progress } = task
@@ -337,7 +337,7 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
           {activity.reasoningCharacters + activity.contentCharacters === 0 ? null : <span>已接收思考 {activity.reasoningCharacters.toLocaleString("zh-CN")} 字符 · 结果 {activity.contentCharacters.toLocaleString("zh-CN")} 字符</span>}
         </div>}
         {task.blocksTurn ? <p className="graph-revision-blocker">世界图尚未同步，暂不能开始新推演</p> : null}
-        {task.error === undefined ? null : <ExpandableErrorAlert message={task.error} className="graph-revision-error" title="图治理任务错误" testId={`graph-revision-task-error-${task.revisionTaskId}`} />}
+        {task.error === undefined ? null : <ExpandableErrorAlert message={task.error} className="graph-revision-error" title="章节入库任务错误" testId={`graph-revision-task-error-${task.revisionTaskId}`} />}
         {progress.phases.length > 0 ? <details className="graph-revision-stages">
           <summary>阶段记录</summary>
           <StageRecordPanel task={task} monitorTask={monitorTask} onResetMetrics={onResetMetrics} />

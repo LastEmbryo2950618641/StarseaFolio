@@ -98,7 +98,7 @@ async function asDesktopProfiles(raw: Readonly<{
       hasApiKey: Boolean((await credentials.get(credentialRef))?.trim()),
       thinkingModeEnabled: profile.thinkingModeEnabled !== false,
       reasoningEffort: (typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "high") as DesktopModelProfile["reasoningEffort"],
-      jsonModeEnabled: profile.jsonModeEnabled === true,
+      jsonModeEnabled: profile.jsonModeEnabled !== false,
       disableResponseStorage: profile.disableResponseStorage !== false,
       serviceTier: (typeof profile.serviceTier === "string" ? profile.serviceTier : "auto") as DesktopModelProfile["serviceTier"],
     }
@@ -198,6 +198,10 @@ export function installHttpWorldseedBridge(session: WebSession): WorldseedBridge
         else if (!profile.hasApiKey) await credentials.remove(profile.credentialRef)
       }
       return asDesktopProfiles(result, credentials)
+    },
+    getModelCredential: async (credentialRef) => {
+      const value = await credentials.get(credentialRef)
+      return value === undefined || value.trim().length === 0 ? undefined : value
     },
     listModels: async (input) => {
       try {

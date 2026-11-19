@@ -35,7 +35,7 @@ export function GraphReferenceRepairLimitDialog(props: Props): React.JSX.Element
       <div className="work-name-prompt-body">
         <p>
           模型把章节名、人名等语义名写进了图引用字段，自动修正次数已用尽。
-          可以再试一轮当前失败阶段，或稍后在图治理任务里手动处理。
+          可以再试一轮当前失败阶段，或稍后在章节入库里手动处理。
         </p>
         {invalidLabels.length === 0 ? null : <div className="graph-reference-repair-invalid">
           <span className="graph-reference-repair-invalid-label">本次非法引用</span>

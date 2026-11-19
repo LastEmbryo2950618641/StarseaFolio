@@ -523,6 +523,12 @@ export async function saveModelProfiles(input: { profiles: readonly DesktopModel
   return invokeBackend<DesktopModelProfiles>("model.profiles.save", input)
 }
 
+export async function getModelCredential(credentialRef: string): Promise<string | undefined> {
+  const bridge = getStarseaFolioBridge()
+  if (bridge !== undefined) return bridge.getModelCredential(credentialRef)
+  return undefined
+}
+
 export async function listModelCatalog(input: { baseUrl: string; credentialRef: string; apiKey?: string }): Promise<ModelListResult> {
   const bridge = getStarseaFolioBridge()
   if (bridge !== undefined) return bridge.listModels(input)
@@ -952,7 +958,7 @@ async function demoInvoke(method: BackendMethod, payload: unknown): Promise<unkn
     case "model.profiles.read":
       return {
         profiles: [
-          { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", credentialRef: "model-profile:deepseek", apiProtocol: "openai_chat_completions", contextWindowTokens: 1_000_000, apiKey: "", hasApiKey: false, thinkingModeEnabled: true, reasoningEffort: "high", jsonModeEnabled: false, disableResponseStorage: true, serviceTier: "auto" },
+          { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", credentialRef: "model-profile:deepseek", apiProtocol: "openai_chat_completions", contextWindowTokens: 1_000_000, apiKey: "", hasApiKey: false, thinkingModeEnabled: true, reasoningEffort: "high", jsonModeEnabled: true, disableResponseStorage: true, serviceTier: "auto" },
         ],
         activeProfileId: "deepseek",
       }

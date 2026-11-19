@@ -120,6 +120,16 @@ export function registerIpcRouter(
   })
   ipcMain.handle("worldseed:model-profiles:read", () => readModelProfiles(backend, vault))
   ipcMain.handle("worldseed:model-profiles:save", (_event, input: unknown) => saveModelProfiles(backend, vault, input))
+  ipcMain.handle("worldseed:model-credential:get", async (_event, input: unknown) => {
+    const credentialRef = typeof input === "string"
+      ? input.trim()
+      : (input !== null && typeof input === "object" && typeof (input as { credentialRef?: unknown }).credentialRef === "string"
+        ? (input as { credentialRef: string }).credentialRef.trim()
+        : "")
+    if (credentialRef.length === 0) return undefined
+    const value = await vault.get(credentialRef)
+    return value === undefined || value.trim().length === 0 ? undefined : value
+  })
   ipcMain.handle("worldseed:model-list", (_event, input: unknown) => listModels(backend, vault, input))
   ipcMain.handle("worldseed:app-settings:read", async () => {
     const stored = await readAppSettings(applicationDataRoot)

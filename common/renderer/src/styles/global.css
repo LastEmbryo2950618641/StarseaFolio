@@ -47,7 +47,7 @@
   --chapter-stage-outline: color-mix(in srgb, #f0b232 46%, var(--bg-input, #1e1f22));
   --chapter-stage-draft: color-mix(in srgb, #f97316 44%, var(--bg-input, #1e1f22));
   --chapter-stage-publishing: color-mix(in srgb, #a855f7 46%, var(--bg-input, #1e1f22));
-  --chapter-stage-body: color-mix(in srgb, #3dd68c 46%, var(--bg-input, #1e1f22));
+  --chapter-stage-body: color-mix(in srgb, #818cf8 46%, var(--bg-input, #1e1f22));
   --focus-ring: #5865f255;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   --radius-sm: 4px;
@@ -2587,9 +2587,43 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   container-type: inline-size;
   container-name: right-rail;
 }
+.right-rail.has-activity-strip {
+  grid-template-rows: auto var(--right-tabs-height, 35px) minmax(0, 1fr) auto;
+}
+.right-rail-activity {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-sidebar) 88%, var(--bg-input));
+  min-width: 0;
+}
+.right-rail-activity-block {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+.right-rail-activity-block strong {
+  flex: 0 0 auto;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text);
+}
+.right-rail-activity-block span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
 .right-tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border-subtle);
   min-width: 0;
@@ -3787,8 +3821,14 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
 .model-provider-option span { display: grid; gap: 4px; min-width: 0; }
 .model-provider-option strong { font-size: 15px; }
 .model-provider-option small,
-.model-provider-option em { color: var(--text-muted); font-size: 12px; font-style: normal; line-height: 1.35; }
-.model-provider-option em { color: var(--text-faint); }
+.model-provider-option em {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.3;
+  opacity: 0.72;
+}
+.model-provider-option em { opacity: 0.64; }
 .mobile-bottom-sheet[aria-label="选择模型厂商"] { max-width: 560px; margin-inline: auto; width: min(100%, 560px); }
 .secondary-command, .dialog-primary-command { height: 31px; padding: 0 13px; border-radius: 8px; font-size: 11px; }
 .secondary-command { border: 1px solid var(--border); background: var(--bg-active); color: var(--text-secondary); }

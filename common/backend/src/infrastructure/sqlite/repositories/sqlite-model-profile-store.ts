@@ -7,7 +7,7 @@ import type { RegistryDatabase } from "../database-types.js"
 import { runtimeLog } from "../../diagnostics/index.js"
 
 const defaultProfiles = Object.freeze([
-  { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", credentialRef: "model-profile:deepseek", apiProtocol: "openai_chat_completions", contextWindowTokens: 1_000_000, thinkingModeEnabled: true, reasoningEffort: "high", jsonModeEnabled: false, disableResponseStorage: true, serviceTier: "auto" },
+  { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", credentialRef: "model-profile:deepseek", apiProtocol: "openai_chat_completions", contextWindowTokens: 1_000_000, thinkingModeEnabled: true, reasoningEffort: "high", jsonModeEnabled: true, disableResponseStorage: true, serviceTier: "auto" },
 ] satisfies readonly ModelProfile[])
 
 export class SqliteModelProfileStore implements ModelProfileStorePort {

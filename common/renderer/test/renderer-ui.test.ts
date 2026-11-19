@@ -1222,7 +1222,7 @@ describe("right rail process UI contract", () => {
     expect(html).toContain("data-testid=\"chapter-panel-card-1\"")
     expect(html).toContain("data-testid=\"chapter-panel-card-2\"")
     expect(html).toContain('aria-label="正文章节"')
-    expect(html).toContain("图治理任务")
+    expect(html).toContain("章节入库")
     expect(html).not.toContain('aria-label="正文推演任务"')
     expect(html).not.toContain('aria-label="历史"')
     expect(html).not.toContain("data-testid=\"deduction-tasks-panel\"")
@@ -1255,7 +1255,7 @@ describe("right rail process UI contract", () => {
       monitorTask: { status: "completed" },
     }))
     expect(graphHtml).toContain("data-testid=\"graph-revision-panel\"")
-    expect(graphHtml).toContain("图治理任务")
+    expect(graphHtml).toContain("章节入库")
     expect(graphHtml).not.toContain("data-testid=\"deduction-tasks-panel\"")
     expect(graphHtml).not.toContain("data-testid=\"tool-monitor-split\"")
 

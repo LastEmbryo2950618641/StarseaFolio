@@ -1281,7 +1281,7 @@ describe("DeepSeekAiModelAdapter", () => {
       },
     }
     const adapter = new DeepSeekAiModelAdapter(
-      defaultDeepSeekRuntimeConfig,
+      { ...defaultDeepSeekRuntimeConfig, jsonModeEnabled: false },
       { getSecret: () => Promise.resolve("test-key") },
       new NodePromptResourceAdapter(promptRoot),
       client,

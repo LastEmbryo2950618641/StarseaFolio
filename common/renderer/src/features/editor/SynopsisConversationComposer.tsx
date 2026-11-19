@@ -603,7 +603,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
           ? null
           : <p className="creation-desk-discuss-status" data-testid="creation-desk-discuss-status" aria-live="polite">
               {discussStatusLabel}
-              <span className="creation-desk-discuss-status-hint">右侧「运行监控」显示正文推演/图治理状态</span>
+              <span className="creation-desk-discuss-status-hint">右侧「运行监控」显示正文推演/章节入库状态</span>
             </p>}
         <CreationDeskComposerInput
           compact={isRail}

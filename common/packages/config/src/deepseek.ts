@@ -40,7 +40,7 @@ export const defaultDeepSeekRuntimeConfig = Object.freeze({
   timeoutMs: defaultTurnWallTimeMs,
   maxAttempts: 2,
   maxSchemaRepairAttempts: 2,
-  jsonModeEnabled: false,
+  jsonModeEnabled: true,
   thinkingModeEnabled: true,
   reasoningEffort: "high",
   disableResponseStorage: true,

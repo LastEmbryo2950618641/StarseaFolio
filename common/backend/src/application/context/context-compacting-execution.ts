@@ -448,6 +448,8 @@ export async function executeWithContextCompaction(input: {
   triggerRatio: number
   targetRatio: number
   onReadyToCall?(): void
+  /** Fired around each compaction attempt so the UI can show a `compression` badge. */
+  onCompacting?(active: boolean): void
   onCompacted(event: ContextCompactionEvent): Promise<void>
   createMessageId?: () => string
 }): Promise<PhaseModelExecution> {
@@ -456,38 +458,43 @@ export async function executeWithContextCompaction(input: {
   const createMessageId = input.createMessageId ?? (() => `fold-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`)
 
   const compact = async (reason: ContextCompactionEvent["reason"], observedInputTokens?: number): Promise<boolean> => {
-    const folded = await foldContextMessages({
-      model: input.model,
-      messages,
-      currentTurnId: input.request.turnId,
-      windowTokens,
-      targetRatio: input.targetRatio,
-      ...(observedInputTokens === undefined ? {} : { observedInputTokens }),
-      ...(input.options.signal === undefined ? {} : { signal: input.options.signal }),
-      createMessageId,
-    })
-    if (folded.blocked !== undefined) {
-      throw new Error(folded.blocked)
+    input.onCompacting?.(true)
+    try {
+      const folded = await foldContextMessages({
+        model: input.model,
+        messages,
+        currentTurnId: input.request.turnId,
+        windowTokens,
+        targetRatio: input.targetRatio,
+        ...(observedInputTokens === undefined ? {} : { observedInputTokens }),
+        ...(input.options.signal === undefined ? {} : { signal: input.options.signal }),
+        createMessageId,
+      })
+      if (folded.blocked !== undefined) {
+        throw new Error(folded.blocked)
+      }
+      if (folded.hiddenMessageIds.length === 0) return false
+      const hiddenContents = messages
+        .filter((message) => folded.hiddenMessageIds.includes(message.messageId))
+        .map((message) => message.content)
+      const stripped = stripReplayedPayload(input.request.input, hiddenContents)
+      if (stripped !== input.request.input) {
+        (input.request as { input?: unknown }).input = stripped
+      }
+      messages = folded.messages
+      await input.onCompacted({
+        reason,
+        ...(observedInputTokens === undefined ? {} : { observedInputTokens }),
+        ...(folded.estimatedInputTokens === undefined ? {} : { estimatedInputTokens: folded.estimatedInputTokens }),
+        thresholdTokens: Math.floor(windowTokens * input.triggerRatio),
+        hiddenMessageIds: folded.hiddenMessageIds,
+        foldMessages: folded.foldMessages,
+        remainingMessageCount: messages.length,
+      })
+      return true
+    } finally {
+      input.onCompacting?.(false)
     }
-    if (folded.hiddenMessageIds.length === 0) return false
-    const hiddenContents = messages
-      .filter((message) => folded.hiddenMessageIds.includes(message.messageId))
-      .map((message) => message.content)
-    const stripped = stripReplayedPayload(input.request.input, hiddenContents)
-    if (stripped !== input.request.input) {
-      (input.request as { input?: unknown }).input = stripped
-    }
-    messages = folded.messages
-    await input.onCompacted({
-      reason,
-      ...(observedInputTokens === undefined ? {} : { observedInputTokens }),
-      ...(folded.estimatedInputTokens === undefined ? {} : { estimatedInputTokens: folded.estimatedInputTokens }),
-      thresholdTokens: Math.floor(windowTokens * input.triggerRatio),
-      hiddenMessageIds: folded.hiddenMessageIds,
-      foldMessages: folded.foldMessages,
-      remainingMessageCount: messages.length,
-    })
-    return true
   }
 
   if (input.lastRequestInputTokens !== undefined && input.lastRequestInputTokens >= windowTokens * input.triggerRatio) {

@@ -85,6 +85,8 @@ export type WorldseedBridge = Readonly<{
   onBackendWaitTimeout(listener: (info: BackendWaitTimeoutInfo) => void): () => void
   readModelProfiles(): Promise<DesktopModelProfiles>
   saveModelProfiles(input: { profiles: readonly DesktopModelProfile[]; activeProfileId: string }): Promise<DesktopModelProfiles>
+  /** Reveal a stored API key for UI display only; never write profiles with this value unless the user edits. */
+  getModelCredential(credentialRef: string): Promise<string | undefined>
   listModels(input: { baseUrl: string; apiKey?: string; credentialRef: string }): Promise<ModelListResult>
   readAppSettings(): Promise<AppSettingsReadResult>
   saveAppSettings(input: AppSettings): Promise<AppSettingsReadResult>

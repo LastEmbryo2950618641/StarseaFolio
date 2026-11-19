@@ -7,13 +7,14 @@ import {
   type ChapterSummary,
   type EvolutionProjection,
   type EvolutionProjectionStatus,
+  type GraphRevisionTask,
   type ProjectSettings,
   type ResettableRuntimeMetricId,
+  type SynopsisConversationStreamSnapshot,
   type WorldEvolutionListResult,
 } from "@starseafolio/contracts"
 
 import { invokeBackend, type GraphSlice, type OpenProject, type PhaseRunSnapshot, type TaskSnapshot } from "../../api/client.js"
-import type { SynopsisConversationStreamSnapshot } from "@starseafolio/contracts"
 import { ExpandableErrorAlert } from "../../components/ExpandableErrorAlert.js"
 import { UiTooltip, uiTooltipRich } from "../../components/UiTooltip.js"
 import { useWorkbenchStore, type RightTab } from "../../state/workbench-store.js"
@@ -37,6 +38,7 @@ type Props = Readonly<{
   unpublishedDrafts?: readonly ChapterRevisionReadResult[] | undefined
   draftCandidateVersionId?: string | undefined
   selectedChapterPath?: string | undefined
+  discussStream?: SynopsisConversationStreamSnapshot | undefined
   onOpenChapter?(path: string): void
   onSelectDraftCandidate?(revisionTaskId: string, versionId: string): void
   onResumeTask?(mode: "continue" | "retry_phase"): Promise<void>
@@ -45,6 +47,17 @@ type Props = Readonly<{
   onRefreshTask?(): Promise<void>
   onRefreshWorkspace?(): Promise<void>
 }>
+
+const ingestPhaseLabels: Record<string, string> = {
+  settings_extraction: "抽取并写入设定",
+  work_style_revision: "风格抽取与融合",
+  graph_governance: "准备修订与证据",
+  dependency_audit: "分析依赖与影响",
+  graph_structure_plan: "生成图变更",
+  graph_governance_review: "审核与查询验证",
+  frontier_settlement: "更新推演前沿",
+  commit_review: "校验并提交",
+}
 
 const labels: Record<string, string> = {
   interpret: "理解用户输入",
@@ -109,6 +122,7 @@ export function RightRail({
   unpublishedDrafts = [],
   draftCandidateVersionId,
   selectedChapterPath,
+  discussStream,
   onOpenChapter,
   onSelectDraftCandidate,
   onResumeTask,
@@ -119,6 +133,12 @@ export function RightRail({
 }: Props): React.JSX.Element {
   const [checkpointOpen, setCheckpointOpen] = useState(false)
   const [dismissedCheckpointKey, setDismissedCheckpointKey] = useState<string>()
+  const [ingestActivity, setIngestActivity] = useState<Readonly<{
+    heading: string
+    phaseLabel: string
+    current: number
+    total: number | null
+  }>>()
   const tab = useWorkbenchStore((state) => state.rightTab)
   const setTab = useWorkbenchStore((state) => state.setRightTab)
   const visibleTab: RightTab = tab === "history" || tab === "process" ? "chapters" : tab
@@ -146,12 +166,82 @@ export function RightRail({
       setDismissedCheckpointKey(undefined)
     }
   }, [task?.status, checkpointKey, dismissedCheckpointKey])
-  return <><aside className="right-rail">
+
+  useEffect(() => {
+    if (project === undefined) {
+      setIngestActivity(undefined)
+      return
+    }
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let busy = false
+    const poll = async (): Promise<void> => {
+      try {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+        const listed = await invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project)
+        if (disposed) return
+        const running = listed.find((item) => item.status === "running" || item.status === "pending")
+        busy = running !== undefined
+        if (running === undefined) {
+          setIngestActivity(undefined)
+          return
+        }
+        const { progress } = running
+        const current = progress.completed + Number(progress.phases.some((phase) => phase.status === "running"))
+        setIngestActivity({
+          heading: running.heading,
+          phaseLabel: ingestPhaseLabels[progress.phase ?? ""] ?? progress.phase ?? "章节入库",
+          current,
+          total: progress.total,
+        })
+      } catch {
+        if (!disposed) setIngestActivity(undefined)
+        busy = false
+      } finally {
+        if (!disposed) {
+          const hidden = typeof document !== "undefined" && document.visibilityState === "hidden"
+          timer = setTimeout(() => { void poll() }, hidden ? 12_000 : busy ? 1_500 : 8_000)
+        }
+      }
+    }
+    void poll()
+    return () => {
+      disposed = true
+      clearTimeout(timer)
+    }
+  }, [project?.projectId, project?.workspaceRootRef])
+
+  const compacting = discussStream?.compacting === true
+  const showActivityStrip = compacting || ingestActivity !== undefined
+
+  return <><aside className={`right-rail${showActivityStrip ? " has-activity-strip" : ""}`}>
+    {showActivityStrip
+      ? <div className="right-rail-activity" data-testid="right-rail-activity" aria-live="polite">
+          {compacting
+            ? <div className="right-rail-activity-block" data-testid="right-rail-activity-compression">
+                <Loader2 size={13} className="graph-revision-spinner" aria-hidden="true" />
+                <strong>compression</strong>
+                <span>上下文压缩中</span>
+              </div>
+            : null}
+          {ingestActivity === undefined
+            ? null
+            : <div className="right-rail-activity-block" data-testid="right-rail-activity-chapter-ingest">
+                <Loader2 size={13} className="graph-revision-spinner" aria-hidden="true" />
+                <strong>chapter_ingest</strong>
+                <span>
+                  {ingestActivity.phaseLabel}
+                  · {String(ingestActivity.current)}/{ingestActivity.total === null ? "?" : String(ingestActivity.total)}
+                  · {ingestActivity.heading}
+                </span>
+              </div>}
+        </div>
+      : null}
     <div className="right-tabs" role="tablist" aria-label="右侧面板">
       <Tab id="chapters" tab={visibleTab} onChange={setTab} icon={<BookOpen size={15} />} label="正文章节" />
       <Tab id="graph" tab={visibleTab} onChange={setTab} icon={<Network size={15} />} label="世界图" />
       <Tab id="evolution" tab={visibleTab} onChange={setTab} icon={<Orbit size={15} />} label="自洽演化" />
-      <Tab id="graph-revisions" tab={visibleTab} onChange={setTab} icon={<GitBranch size={15} />} label="图治理任务" />
+      <Tab id="graph-revisions" tab={visibleTab} onChange={setTab} icon={<GitBranch size={15} />} label="章节入库" />
     </div>
     <div className="right-content">
       {visibleTab === "chapters" ? <ChapterListPanel

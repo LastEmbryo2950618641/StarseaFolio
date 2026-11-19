@@ -43,18 +43,18 @@ describe("model provider presets", () => {
       baseUrl: "https://api.deepseek.com",
       apiProtocol: "openai_chat_completions",
       thinkingModeEnabled: true,
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
     })
     expect(createProfileFromPreset("zhipu")).toMatchObject({
       name: "智谱",
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
       apiProtocol: "openai_chat_completions",
       thinkingModeEnabled: false,
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
     })
     expect(createProfileFromPreset("openai")).toMatchObject({
       apiProtocol: "openai_responses",
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
     })
     expect(createProfileFromPreset("anthropic")).toMatchObject({
       name: "Anthropic",
@@ -62,14 +62,14 @@ describe("model provider presets", () => {
       apiProtocol: "anthropic_messages",
       model: "claude-sonnet-4-5",
       thinkingModeEnabled: true,
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
     })
     expect(createProfileFromPreset("custom")).toMatchObject({
       name: "自定义服务",
       baseUrl: "",
       apiProtocol: "openai_chat_completions",
       thinkingModeEnabled: false,
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
       hasApiKey: false,
       apiKey: "",
     })

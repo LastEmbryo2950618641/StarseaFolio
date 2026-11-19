@@ -123,6 +123,10 @@ export const worldseedBridge: WorldseedBridge = {
   },
   readModelProfiles: async () => ipcRenderer.invoke("worldseed:model-profiles:read") as Promise<DesktopModelProfiles>,
   saveModelProfiles: async (input) => ipcRenderer.invoke("worldseed:model-profiles:save", input) as Promise<DesktopModelProfiles>,
+  getModelCredential: async (credentialRef) => {
+    const value = await ipcRenderer.invoke("worldseed:model-credential:get", { credentialRef }) as unknown
+    return typeof value === "string" && value.trim().length > 0 ? value : undefined
+  },
   listModels: async (input) => ipcRenderer.invoke("worldseed:model-list", input) as Promise<ModelListResult>,
   readAppSettings: async () => normalizeAppSettingsReadResult(await ipcRenderer.invoke("worldseed:app-settings:read")),
   saveAppSettings: async (input) => normalizeAppSettingsReadResult(await ipcRenderer.invoke("worldseed:app-settings:save", input)),

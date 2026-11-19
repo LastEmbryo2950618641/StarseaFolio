@@ -3575,6 +3575,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           chapters={discussFocusChapters}
           chapterSummaries={chapterSummaries}
           unpublishedDrafts={unpublishedDrafts}
+          discussStream={synopsisStream}
           {...(discussDraftPromotion?.draftVersionId === undefined ? {} : { draftCandidateVersionId: discussDraftPromotion.draftVersionId })}
           onSelectDraftCandidate={selectDiscussDraftCandidate}
           selectedChapterPath={selectedPath}
@@ -3656,6 +3657,7 @@ function synopsisStreamPeekUnchanged(
     && previous.thinking === next.thinking
     && previous.content === next.content
     && previous.error === next.error
+    && previous.compacting === next.compacting
     && previous.thinkingRounds.length === next.thinkingRounds.length
     && previous.searching.length === next.searching.length
     && previous.editing.length === next.editing.length

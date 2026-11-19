@@ -3218,6 +3218,9 @@ export class SynopsisConversationService {
           onReadyToCall: () => {
             synopsisConversationStreamHub.beginThinkingRound(input.projectId, thinkingRound, this.dependencies.now())
           },
+          onCompacting: (active) => {
+            synopsisConversationStreamHub.setCompacting(input.projectId, active, this.dependencies.now())
+          },
           onCompacted: async (event) => {
             if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
             await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, event.hiddenMessageIds, this.dependencies.now())

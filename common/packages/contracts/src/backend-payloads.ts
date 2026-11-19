@@ -32,7 +32,7 @@ export const modelSelectionSchema = z.object({
   apiKey: z.string().trim().min(1).max(4096).optional(),
   thinkingModeEnabled: z.boolean().default(true),
   reasoningEffort: deepSeekReasoningEffortSchema.default("high"),
-  jsonModeEnabled: z.boolean().default(false),
+  jsonModeEnabled: z.boolean().default(true),
   disableResponseStorage: z.boolean().default(true),
   serviceTier: modelServiceTierSchema.default("auto"),
 })
@@ -676,7 +676,7 @@ export const modelProfileSchema = z.object({
   contextWindowTokens: z.number().int().positive().max(2_000_000).default(1_000_000),
   thinkingModeEnabled: z.boolean().default(true),
   reasoningEffort: deepSeekReasoningEffortSchema.default("high"),
-  jsonModeEnabled: z.boolean().default(false),
+  jsonModeEnabled: z.boolean().default(true),
   disableResponseStorage: z.boolean().default(true),
   serviceTier: modelServiceTierSchema.default("auto"),
 })

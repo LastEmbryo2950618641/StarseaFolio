@@ -238,6 +238,8 @@ export const synopsisConversationStreamSnapshotSchema = z.object({
   editing: z.array(synopsisConversationStreamEditSchema).default([]),
   toolRuns: z.array(synopsisConversationStreamRunSchema).default([]),
   todos: z.array(synopsisConversationTodoSchema).default([]),
+  /** True while discuss context compaction is actively folding history. */
+  compacting: z.boolean().default(false),
   usage: synopsisConversationStreamUsageSchema.optional(),
   budgetAdvisory: synopsisConversationBudgetAdvisorySchema.optional(),
   error: z.string().optional(),

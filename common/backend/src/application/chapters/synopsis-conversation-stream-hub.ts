@@ -65,6 +65,7 @@ type MutableSnapshot = {
   carriedTodoIds: Set<string>
   /** Per-turn usage while a send is running. */
   usage: MutableUsage
+  compacting: boolean
   error?: string
   updatedAtMs: number
 }
@@ -175,8 +176,20 @@ export class SynopsisConversationStreamHub {
       todos: carried,
       carriedTodoIds: new Set(carried.map((item) => item.id)),
       usage: emptyUsage(),
+      compacting: false,
       updatedAtMs: nowMs,
     })
+  }
+
+  public setCompacting(projectId: string, compacting: boolean, nowMs: number): void {
+    const current = this.byProject.get(projectId)
+    if (current === undefined || current.status === "failed") return
+    if (current.compacting === compacting) {
+      current.updatedAtMs = nowMs
+      return
+    }
+    current.compacting = compacting
+    current.updatedAtMs = nowMs
   }
 
   /**
@@ -355,6 +368,7 @@ export class SynopsisConversationStreamHub {
     }
     if (final?.content !== undefined) current.content = final.content
     current.status = "completed"
+    current.compacting = false
     current.updatedAtMs = nowMs
   }
 
@@ -373,12 +387,14 @@ export class SynopsisConversationStreamHub {
         todos: [],
         carriedTodoIds: new Set(),
         usage: { ...this.ensureCumulative(projectId) },
+        compacting: false,
         error,
         updatedAtMs: nowMs,
       })
       return
     }
     current.status = "failed"
+    current.compacting = false
     current.error = error
     current.updatedAtMs = nowMs
   }
@@ -396,6 +412,7 @@ export class SynopsisConversationStreamHub {
         editing: [],
         toolRuns: [],
         todos: [],
+        compacting: false,
         ...(cumulative === undefined ? {} : { usage: cumulative }),
         updatedAtMs: 0,
       }
@@ -410,6 +427,7 @@ export class SynopsisConversationStreamHub {
         editing: [],
         toolRuns: [],
         todos: [],
+        compacting: false,
         ...(cumulative === undefined ? {} : { usage: cumulative }),
         updatedAtMs: 0,
       }
@@ -424,6 +442,7 @@ export class SynopsisConversationStreamHub {
       editing: mapEditing(current.editing),
       toolRuns: mapToolRuns(current.toolRuns),
       todos: current.todos.map((item) => ({ ...item })),
+      compacting: current.compacting,
       ...(current.error === undefined ? {} : { error: current.error }),
       ...(cumulative === undefined ? {} : { usage: cumulative }),
       updatedAtMs: current.updatedAtMs,

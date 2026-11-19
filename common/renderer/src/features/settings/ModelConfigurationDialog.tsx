@@ -3,7 +3,7 @@ import { ArrowLeft, ChevronRight, Plus, CheckCircle2, Eye, EyeOff, KeyRound, Loa
 
 import type { ModelDescriptor, ModelListResult } from "@starseafolio/contracts"
 
-import { listModelCatalog } from "../../api/client.js"
+import { getModelCredential, listModelCatalog } from "../../api/client.js"
 import { MobileBottomSheet } from "../../components/MobileBottomSheet.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
 import {
@@ -21,6 +21,9 @@ import {
 } from "./model-provider-presets.js"
 
 export type { ModelProfile } from "./model-provider-presets.js"
+
+/** Display-only sentinel for a saved key that is not loaded into the draft yet. */
+export const SAVED_API_KEY_MASK = "********"
 
 type Props = Readonly<{
   profiles: readonly ModelProfile[]
@@ -43,6 +46,7 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   const [showProviderSheet, setShowProviderSheet] = useState(false)
   const [nextActiveId, setNextActiveId] = useState(activeProfileId)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [revealingApiKey, setRevealingApiKey] = useState(false)
   const [testState, setTestState] = useState<TestState>("idle")
   const [message, setMessage] = useState("选择一个配置进行编辑")
   const [saving, setSaving] = useState(false)
@@ -50,6 +54,10 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   const selectedProfile = useMemo(() => drafts.find((profile) => profile.id === selectedId) ?? drafts[0], [drafts, selectedId])
   const selectedCatalog = selectedProfile === undefined ? undefined : catalogs[selectedProfile.id]
   const deepSeekSelected = selectedProfile !== undefined && isOfficialDeepSeekEndpoint(selectedProfile.baseUrl)
+  const savedKeyPending = selectedProfile !== undefined
+    && selectedProfile.hasApiKey
+    && selectedProfile.apiKey.trim().length === 0
+  const apiKeyInputValue = savedKeyPending && !showApiKey ? SAVED_API_KEY_MASK : (selectedProfile?.apiKey ?? "")
 
   const loadDeepSeekModels = useCallback(async (profile: ModelProfile): Promise<ModelListResult | undefined> => {
     const signature = catalogSignature(profile)
@@ -105,6 +113,10 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   }, [onClose, showList, showProviderSheet])
 
   useEffect(() => {
+    setShowApiKey(false)
+  }, [selectedId])
+
+  useEffect(() => {
     if (showList || selectedProfile === undefined || !isOfficialDeepSeekEndpoint(selectedProfile.baseUrl)) return
     if ((!selectedProfile.hasApiKey && selectedProfile.apiKey.trim().length === 0) || !hasValidBaseUrl(selectedProfile.baseUrl)) return
     const signature = catalogSignature(selectedProfile)
@@ -155,8 +167,41 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
     setShowApiKey(false)
     setTestState("idle")
     setMessage(presetId === "custom"
-      ? "自定义配置已创建：填写 API Key 与服务地址即可，JSON Mode 默认关闭"
+      ? "自定义配置已创建：填写 API Key 与服务地址即可，JSON Mode 默认开启"
       : `${profile.name} 预设已填入，核对后填写 API Key 即可`)
+  }
+
+  const toggleApiKeyVisibility = async (): Promise<void> => {
+    if (selectedProfile === undefined || revealingApiKey) return
+    if (showApiKey) {
+      setShowApiKey(false)
+      return
+    }
+    if (selectedProfile.apiKey.trim().length > 0) {
+      setShowApiKey(true)
+      return
+    }
+    if (!selectedProfile.hasApiKey) {
+      setShowApiKey(true)
+      return
+    }
+    setRevealingApiKey(true)
+    try {
+      const revealed = await getModelCredential(selectedProfile.credentialRef)
+      if (revealed === undefined || revealed.trim().length === 0) {
+        setTestState("error")
+        setMessage("未能读取已保存的 API Key，请重新输入")
+        setShowApiKey(true)
+        return
+      }
+      updateSelected({ apiKey: revealed, hasApiKey: true })
+      setShowApiKey(true)
+    } catch (error) {
+      setTestState("error")
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRevealingApiKey(false)
+    }
   }
 
   const removeProfile = (profileId: string): void => {
@@ -311,7 +356,35 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
             </label>
             <label className="model-field">
               <span>API Key<small>单独保存在本机；自定义配置只要填好 Key 即可生效，不强制 JSON Mode</small></span>
-              <div className="secret-input"><KeyRound size={15} /><input type={showApiKey ? "text" : "password"} value={selectedProfile.apiKey} onChange={(event) => { updateSelected({ apiKey: event.target.value, hasApiKey: event.target.value.trim().length > 0 }); }} placeholder={selectedProfile.hasApiKey ? "已保存（重新输入可替换）" : "输入 API Key"} autoComplete="off" spellCheck={false} /><UiTooltip label={showApiKey ? "隐藏密钥" : "显示密钥"}><button type="button" aria-label={showApiKey ? "隐藏密钥" : "显示密钥"} onClick={() => { setShowApiKey((visible) => !visible); }}>{showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}</button></UiTooltip></div>
+              <div className="secret-input">
+                <KeyRound size={15} />
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKeyInputValue}
+                  onChange={(event) => {
+                    let next = event.target.value
+                    if (next.startsWith(SAVED_API_KEY_MASK)) next = next.slice(SAVED_API_KEY_MASK.length)
+                    if (next === SAVED_API_KEY_MASK && selectedProfile.hasApiKey) return
+                    updateSelected({
+                      apiKey: next === SAVED_API_KEY_MASK ? "" : next,
+                      hasApiKey: next.trim().length > 0 || selectedProfile.hasApiKey,
+                    })
+                  }}
+                  placeholder={selectedProfile.hasApiKey ? "重新输入可替换" : "输入 API Key"}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <UiTooltip label={showApiKey ? "隐藏密钥" : "显示密钥"}>
+                  <button
+                    type="button"
+                    aria-label={showApiKey ? "隐藏密钥" : "显示密钥"}
+                    disabled={revealingApiKey}
+                    onClick={() => { void toggleApiKeyVisibility() }}
+                  >
+                    {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </UiTooltip>
+              </div>
             </label>
             <label className="model-field">
               <span>模型<small>{deepSeekSelected ? "输入密钥后自动读取 DeepSeek 模型列表" : "输入兼容服务支持的模型名称"}</small></span>
@@ -348,7 +421,7 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
               <button className={`model-toggle ${selectedProfile.disableResponseStorage ? "" : "enabled"}`} type="button" role="switch" aria-checked={!selectedProfile.disableResponseStorage} onClick={() => { updateSelected({ disableResponseStorage: !selectedProfile.disableResponseStorage }); }}><i /><strong>{selectedProfile.disableResponseStorage ? "已关闭" : "已开启"}</strong></button>
             </div>
             <div className="model-field">
-              <span>JSON Mode<small>默认关闭，非强制；输出仍由业务 Schema 校验</small></span>
+              <span>JSON Mode<small>默认开启，非强制；输出仍由业务 Schema 校验</small></span>
               <button className={`model-toggle ${selectedProfile.jsonModeEnabled ? "enabled" : ""}`} type="button" role="switch" aria-checked={selectedProfile.jsonModeEnabled} onClick={() => { updateSelected({ jsonModeEnabled: !selectedProfile.jsonModeEnabled }); }}><i /><strong>{selectedProfile.jsonModeEnabled ? "已开启" : "已关闭"}</strong></button>
             </div>
             <div className={`model-test-status ${testState}`}>
@@ -390,12 +463,16 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
 }
 
 export function normalizeProfile(profile: ModelProfile): ModelProfile {
+  const trimmedKey = profile.apiKey.trim()
+  // Mask sentinel means "keep the vault secret"; never persist asterisks.
+  const apiKey = trimmedKey === SAVED_API_KEY_MASK ? "" : trimmedKey
   return {
     ...profile,
     name: profile.name.trim(),
     baseUrl: profile.baseUrl.trim(),
     model: profile.model.trim(),
-    apiKey: profile.apiKey.trim(),
+    apiKey,
+    hasApiKey: apiKey.length > 0 || profile.hasApiKey,
   }
 }
 
