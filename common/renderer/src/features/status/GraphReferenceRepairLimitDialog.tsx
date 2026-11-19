@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom"
+
 export { isGraphReferenceRepairExhaustedError } from "./graph-reference-repair.js"
 
 type Props = Readonly<{
@@ -8,7 +10,8 @@ type Props = Readonly<{
 }>
 
 export function GraphReferenceRepairLimitDialog(props: Props): React.JSX.Element {
-  return <div className="dialog-backdrop" role="presentation">
+  // Right-rail ancestors use transform; portal to body so fixed centering covers the window.
+  const dialog = <div className="dialog-backdrop" role="presentation">
     <section
       className="work-name-prompt-dialog"
       role="dialog"
@@ -44,4 +47,6 @@ export function GraphReferenceRepairLimitDialog(props: Props): React.JSX.Element
       </footer>
     </section>
   </div>
+  if (typeof document === "undefined") return dialog
+  return createPortal(dialog, document.body)
 }
