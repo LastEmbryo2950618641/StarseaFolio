@@ -4,7 +4,9 @@ import {
   applyGraphCapacityRewrite,
   assembleGraphGovernanceArtifact,
   invalidatedGraphGovernancePhases,
+  projectGraphRetrievalDesignFromGovernance,
   replayGraphCapacityRewrites,
+  resolveStructureProposalRef,
   stagedSettlementSupersedesRoutingGovernance,
 } from "../src/application/turns/graph-governance-assembler.js"
 
@@ -471,5 +473,83 @@ describe("staged settlement supersedes a stale routing candidate", () => {
       },
       sourceUnitCount: 0,
     })).toBeUndefined()
+  })
+})
+
+describe("retrieval proposal reference remapping", () => {
+  it("projects retrieval refs from the live structure plan instead of reminting mutation ids", () => {
+    const governance = {
+      executionMode: "full_governance" as const,
+      mutations: structure.proposals.map((proposal) => proposal.mutation),
+      retrievalProjections: [{
+        ownerKind: "node" as const,
+        ownerMutationIndex: 0,
+        exactKeys: ["场景"],
+        semanticText: "返回场景",
+      }],
+      settlementRecords: [{
+        sourceUnitIndex: 0,
+        graphRefs: [{
+          targetKind: "node" as const,
+          targetRef: "local:scene",
+          mutationIndex: 0,
+        }],
+        reason: "anchor",
+        status: "settled" as const,
+      }],
+      mutationSpacetimeSettlements: [],
+      sceneSpacetimeBindings: [],
+      affectedFrontierRefs: [],
+      archiveOutletRefs: [],
+      decisionRecords: [],
+    }
+    const retrieval = projectGraphRetrievalDesignFromGovernance(governance, structure)
+    expect(retrieval.projections[0]?.ownerProposalRef).toBe("proposal:node:scene")
+    expect(retrieval.sourceSettlements[0]?.graphRefs[0]?.proposalRef).toBe("proposal:node:scene")
+  })
+
+  it("assembles when retrieval still carries stale proposal:mutation:N refs", () => {
+    expect(resolveStructureProposalRef("proposal:mutation:1", structure)).toBe("proposal:node:scene")
+    const governance = assembleGraphGovernanceArtifact({
+      structure,
+      spacetime: {
+        sceneSpacetimeBindings: [],
+        proposalSettlements: [{
+          proposalRefs: ["proposal:node:scene", "proposal:node:time", "proposal:link:scene-time"],
+          effectDisposition: "world_effect",
+          effectiveSceneBindingIndexes: [],
+          effectiveExistingSceneAnchorRefs: ["local:scene"],
+          currentEntryRefs: ["local:scene"],
+          predecessorRevisionRequired: false,
+          predecessorRevisionReadRefs: [],
+          historicalReturnRefs: ["local:scene"],
+          reason: "All proposals become effective",
+          selfReview: "Discoverable",
+        }],
+      },
+      retrieval: {
+        projections: [{
+          ownerProposalRef: "proposal:mutation:1",
+          exactKeys: ["场景"],
+          semanticText: "返回场景",
+        }],
+        sourceSettlements: [{
+          sourceUnitIndex: 0,
+          graphRefs: [{
+            targetKind: "node",
+            targetRef: "local:scene",
+            proposalRef: "proposal:mutation:1",
+          }],
+          reason: "stale compact projection",
+          status: "settled",
+        }],
+      },
+      sourceUnitCount: 1,
+    })
+    expect(governance.retrievalProjections[0]?.ownerMutationIndex).toBe(0)
+    expect(governance.settlementRecords[0]?.graphRefs[0]).toMatchObject({
+      targetRef: "local:scene",
+      mutationIndex: 0,
+    })
   })
 })

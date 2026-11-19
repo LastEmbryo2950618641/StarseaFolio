@@ -338,9 +338,14 @@ describe("prompt contracts", () => {
     expect(extraction).toContain("## 性格")
     expect(extraction).toContain("姓名")
     expect(extraction).toContain("性别")
-    expect(extraction).toContain("workStyleRevision")
-    expect(extraction).toContain("userRequirements")
-    expect(extraction).toContain("融合")
+    expect(extraction).toContain("work_style_revision")
+    const workStyle = readFileSync(
+      resolve(packageRoot, promptDefinitions.work_style_revision.resourcePath),
+      "utf8",
+    )
+    expect(workStyle).toContain("userRequirements")
+    expect(workStyle).toContain("融合")
+    expect(workStyle).toContain("sections")
   })
 
   it("keeps rule assembly semantic and lets the runtime own its snapshot identity", () => {

@@ -32,6 +32,7 @@ const phaseLabels: Record<string, string> = {
   chapter_naming: "生成章节标题",
   dependency_audit: "检查依赖闭合",
   settings_extraction: "抽取并写入设定",
+  work_style_revision: "风格抽取与融合",
   response_review: "审查正文响应",
   graph_governance: "治理世界图",
   graph_structure_plan: "候选结构规划",

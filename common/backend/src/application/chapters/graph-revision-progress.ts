@@ -1,6 +1,7 @@
 import type { GraphRevisionTask } from "@starseafolio/contracts"
 const revisionProgressStages = [
   { phase: "settings_extraction", phases: ["settings_extraction"] },
+  { phase: "work_style_revision", phases: ["work_style_revision"] },
   { phase: "graph_governance", phases: ["graph_governance", "interpret", "rule_assembly", "source_retrieval", "emergence_planning", "emergence_review"] },
   { phase: "dependency_audit", phases: ["dependency_audit"] },
   { phase: "graph_structure_plan", phases: ["graph_structure_plan", "graph_capacity_rewrite", "graph_spacetime_settlement", "graph_retrieval_design"] },

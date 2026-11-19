@@ -816,9 +816,22 @@ export const workStyleRevisionSchema = z.object({
   })).max(8),
 })
 
+export const workStyleRevisionArtifactSchema = z.object({
+  summary: z.string().min(1),
+  sections: z.array(z.object({
+    heading: z.string().min(1).max(40),
+    mode: z.enum(["merge", "replace"]),
+    content: z.string().max(3_500),
+    userQuote: z.string().max(500),
+  })).max(8),
+  /** Optional in the phase prompt; keep optional so omitting it is not a hard contract failure. */
+  finalSelfReview: z.string().min(1).optional(),
+})
+
 export const settingsExtractionArtifactSchema = z.object({
   summary: z.string().min(1),
   proposals: z.array(settingsExtractionProposalInputSchema),
+  /** @deprecated Prefer the dedicated `work_style_revision` phase; retained for legacy artifacts. */
   workStyleRevision: workStyleRevisionSchema.optional(),
   /** Optional in the phase prompt; keep optional so omitting it is not a hard contract failure. */
   finalSelfReview: z.string().min(1).optional(),
@@ -834,6 +847,7 @@ export const phaseArtifactSchemas: Record<AIPhase, z.ZodType> = {
   chapter_naming: chapterNamingArtifactSchema,
   dependency_audit: dependencyAuditArtifactSchema,
   settings_extraction: settingsExtractionArtifactSchema,
+  work_style_revision: workStyleRevisionArtifactSchema,
   response_review: responseReviewArtifactSchema,
   graph_governance: graphGovernanceArtifactSchema,
   graph_structure_plan: graphStructurePlanArtifactSchema,
@@ -921,3 +935,4 @@ export function recordDiscussToolExclusiveStrip(strippedKeys: readonly string[])
 }
 export type SynopsisPresentationWrite = z.infer<typeof synopsisPresentationWriteSchema>
 export type SettingsExtractionArtifact = z.infer<typeof settingsExtractionArtifactSchema>
+export type WorkStyleRevisionArtifact = z.infer<typeof workStyleRevisionArtifactSchema>

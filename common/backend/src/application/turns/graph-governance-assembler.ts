@@ -113,15 +113,22 @@ export function projectGraphStructurePlanFromGovernance(
 
 export function projectGraphRetrievalDesignFromGovernance(
   governanceInput: GraphGovernanceArtifact,
-  structure: GraphStructurePlanArtifact,
+  structureInput: GraphStructurePlanArtifact,
 ): GraphRetrievalDesignArtifact {
   const governance = graphGovernanceArtifactSchema.parse(governanceInput)
-  graphStructurePlanArtifactSchema.parse(structure)
+  const structure = graphStructurePlanArtifactSchema.parse(structureInput)
+  const resolveMutationIndex = (index: number): string => {
+    const proposal = structure.proposals[index]
+    if (proposal === undefined) {
+      throw new Error(`Unknown graph mutation index for retrieval projection: ${String(index)}`)
+    }
+    return proposal.proposalRef
+  }
   return graphRetrievalDesignArtifactSchema.parse({
     projections: governance.retrievalProjections.map((projection) => ({
       ...(projection.ownerMutationIndex === undefined
         ? {}
-        : { ownerProposalRef: mutationProposalRef(projection.ownerMutationIndex) }),
+        : { ownerProposalRef: resolveMutationIndex(projection.ownerMutationIndex) }),
       ...(projection.ownerRef === undefined ? {} : { ownerRef: projection.ownerRef }),
       exactKeys: projection.exactKeys,
       semanticText: projection.semanticText,
@@ -133,12 +140,28 @@ export function projectGraphRetrievalDesignFromGovernance(
         targetRef: reference.targetRef,
         ...(reference.mutationIndex === undefined
           ? {}
-          : { proposalRef: mutationProposalRef(reference.mutationIndex) }),
+          : { proposalRef: resolveMutationIndex(reference.mutationIndex) }),
       })),
       reason: record.reason,
       status: record.status,
     })),
   })
+}
+
+/** Remap stale `proposal:mutation:N` refs onto the live structure plan after capacity rewrites. */
+export function resolveStructureProposalRef(
+  proposalRef: string,
+  structure: GraphStructurePlanArtifact,
+): string {
+  const known = structure.proposals.find((proposal) => proposal.proposalRef === proposalRef)
+  if (known !== undefined) return known.proposalRef
+  const match = /^proposal:mutation:(\d+)$/u.exec(proposalRef)
+  if (match !== null) {
+    const index = Number(match[1]) - 1
+    const proposal = structure.proposals[index]
+    if (proposal !== undefined) return proposal.proposalRef
+  }
+  throw new Error(`Unknown graph proposal reference: ${proposalRef}`)
 }
 
 export function assembleGraphGovernanceArtifact(input: Readonly<{
@@ -164,7 +187,8 @@ export function assembleGraphGovernanceArtifact(input: Readonly<{
       : []
   }))
   const mutationIndexes = (proposalRefs: readonly string[]): number[] => proposalRefs.map((proposalRef) => {
-    const index = mutationIndexByProposalRef.get(proposalRef)
+    const resolved = resolveStructureProposalRef(proposalRef, structure)
+    const index = mutationIndexByProposalRef.get(resolved)
     if (index === undefined) throw new Error(`Unknown graph proposal reference: ${proposalRef}`)
     return index
   })
@@ -172,7 +196,10 @@ export function assembleGraphGovernanceArtifact(input: Readonly<{
   const governance = graphGovernanceArtifactSchema.parse({
     mutations: structure.proposals.map((proposal) => proposal.mutation),
     retrievalProjections: retrieval.projections.map((projection) => {
-      const matchedProposalRef = projection.ownerProposalRef
+      const rawOwnerProposalRef = projection.ownerProposalRef === undefined
+        ? undefined
+        : resolveStructureProposalRef(projection.ownerProposalRef, structure)
+      const matchedProposalRef = rawOwnerProposalRef
         ?? (projection.ownerRef === undefined ? undefined : proposalRefByMutationRef.get(projection.ownerRef))
       return {
         ownerKind: matchedProposalRef === undefined

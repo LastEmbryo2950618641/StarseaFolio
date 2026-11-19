@@ -267,6 +267,12 @@ export class FakeAiModelAdapter implements AIModelPort {
           proposals: [],
           finalSelfReview: "No settings proposals were required for the fixture chapter.",
         }
+      case "work_style_revision":
+        return {
+          summary: "The deterministic fixture found no work-style revision for this turn.",
+          sections: [],
+          finalSelfReview: "No user style requirements required a work-style revision.",
+        }
       case "response_review":
         return {
           evidenceClosed: true,

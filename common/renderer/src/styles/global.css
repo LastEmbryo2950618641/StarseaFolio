@@ -7211,6 +7211,7 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   overflow: auto;
   min-height: 0;
   flex: 1;
+  scroll-padding-block: 12px;
 }
 .chapter-panel-volume {
   display: flex;
@@ -7219,10 +7220,17 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   min-width: 0;
 }
 .chapter-panel-volume-header-row {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  margin: 0 -4px;
+  padding: 4px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(6px);
 }
 .chapter-panel-volume-header {
   display: flex;
@@ -7320,7 +7328,18 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   cursor: pointer;
   overflow: hidden;
   isolation: isolate;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transform: scale(var(--chapter-focus-scale, 1));
+  opacity: var(--chapter-focus-opacity, 1);
+  transform-origin: center center;
+  will-change: transform, opacity;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 140ms ease, opacity 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chapter-panel-card {
+    transform: none;
+    opacity: 1;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
 }
 .chapter-panel-stage-cup {
   position: absolute;

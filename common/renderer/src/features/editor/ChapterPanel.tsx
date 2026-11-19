@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ChapterRevisionReadResult, ChapterSummary } from "@starseafolio/contracts"
 import { Columns2, FileText, Hash, LayoutGrid, Pause, Play, Square } from "lucide-react"
 
@@ -9,10 +9,13 @@ import {
   type BatchDeductionPhase,
 } from "./batch-chapter-deduction.js"
 import { countChapterCharacters } from "./chapter-draft-versions-prototype.js"
+import { chapterPanelFocusFromDistance } from "./chapter-panel-focus.js"
 import {
   groupChaptersByVolume,
   type DiscussFocusChapterOption,
 } from "./synopsis-path.js"
+
+export { chapterPanelFocusFromDistance } from "./chapter-panel-focus.js"
 
 export type ChapterPanelCardSize = "large" | "medium" | "small" | "tile"
 
@@ -90,6 +93,7 @@ const CARD_SIZE_META: Readonly<Record<ChapterPanelCardSize, Readonly<{
 export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
   const [cardSize, setCardSize] = useState<ChapterPanelCardSize>(() => loadCardSize())
   const [detailsBySequence, setDetailsBySequence] = useState<ReadonlyMap<number, ChapterCardDetails>>(new Map())
+  const bodyRef = useRef<HTMLDivElement>(null)
   const activeSequence = props.selectedSequence
   const activeVolume = props.selectedVolumeFolderName
   const summaryBySequence = useMemo(() => {
@@ -119,6 +123,56 @@ export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
       // ignore storage failures
     }
   }, [cardSize])
+
+  useEffect(() => {
+    const root = bodyRef.current
+    if (root === null) return
+    const reduceMotion = typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    let frame = 0
+    const clearFocus = (): void => {
+      for (const card of root.querySelectorAll<HTMLElement>(".chapter-panel-card")) {
+        card.style.removeProperty("--chapter-focus-scale")
+        card.style.removeProperty("--chapter-focus-opacity")
+      }
+    }
+    const updateFocus = (): void => {
+      frame = 0
+      if (reduceMotion) {
+        clearFocus()
+        return
+      }
+      const rect = root.getBoundingClientRect()
+      if (rect.height <= 0) return
+      const midY = rect.top + rect.height / 2
+      const half = rect.height / 2
+      for (const card of root.querySelectorAll<HTMLElement>(".chapter-panel-card")) {
+        const cardRect = card.getBoundingClientRect()
+        const focus = chapterPanelFocusFromDistance(
+          cardRect.top + cardRect.height / 2 - midY,
+          half,
+        )
+        card.style.setProperty("--chapter-focus-scale", String(focus.scale))
+        card.style.setProperty("--chapter-focus-opacity", String(focus.opacity))
+      }
+    }
+    const schedule = (): void => {
+      if (frame !== 0) return
+      frame = window.requestAnimationFrame(updateFocus)
+    }
+    updateFocus()
+    root.addEventListener("scroll", schedule, { passive: true })
+    window.addEventListener("resize", schedule)
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(schedule)
+    observer?.observe(root)
+    return () => {
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+      root.removeEventListener("scroll", schedule)
+      window.removeEventListener("resize", schedule)
+      observer?.disconnect()
+      clearFocus()
+    }
+  }, [cardSize, props.chapters, volumeGroups.length])
 
   useEffect(() => {
     let cancelled = false
@@ -230,7 +284,7 @@ export function ChapterPanel(props: ChapterPanelProps): React.JSX.Element {
         </UiTooltip>
       </div>
     </header>
-    <div className="chapter-panel-body">
+    <div className="chapter-panel-body" ref={bodyRef} data-testid="chapter-panel-body">
       {props.chapters.length === 0
         ? <p className="chapter-panel-empty">尚未检测到章节文件。可在创作台讨论生成梗概或正文。</p>
         : volumeGroups.map((group) => {

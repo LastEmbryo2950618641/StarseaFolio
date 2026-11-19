@@ -48,7 +48,7 @@ import {
   type GraphGovernanceArtifact,
   type SemanticReviewArtifact,
   type SettlementReviewArtifact,
-  type SettingsExtractionArtifact,
+  type WorkStyleRevisionArtifact,
 } from "@starseafolio/prompt-contracts"
 
 import {
@@ -162,7 +162,10 @@ import {
   isTemporalReadRequest,
   MAX_TEMPORAL_READS_PER_ROUND,
 } from "../chapters/synopsis-temporal-reads.js"
-import { settingsExtractionArtifactSchema } from "@starseafolio/prompt-contracts"
+import {
+  settingsExtractionArtifactSchema,
+  workStyleRevisionArtifactSchema,
+} from "@starseafolio/prompt-contracts"
 
 const turnModelPhases: readonly AIPhase[] = [
   "interpret",
@@ -220,6 +223,7 @@ const evolutionExecutionPhases: readonly AIPhase[] = [
 
 export const revisionExecutionPhases: readonly AIPhase[] = [
   "settings_extraction",
+  "work_style_revision",
   "interpret",
   "rule_assembly",
   "source_retrieval",
@@ -238,6 +242,7 @@ export const revisionExecutionPhases: readonly AIPhase[] = [
 
 export const adaptiveRevisionExecutionPhases: readonly AIPhase[] = [
   "settings_extraction",
+  "work_style_revision",
   "graph_governance",
   "dependency_audit",
   "graph_structure_plan",
@@ -260,17 +265,18 @@ const phaseInternalArtifactDependencies = {
   chapter_naming: ["draft"],
   dependency_audit: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "graph_governance"],
   settings_extraction: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit"],
+  work_style_revision: ["settings_extraction"],
   response_review: ["source_retrieval", "draft", "dependency_audit"],
-  graph_governance: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit", "settings_extraction"],
-  graph_structure_plan: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit", "settings_extraction", "graph_governance"],
+  graph_governance: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit", "settings_extraction", "work_style_revision"],
+  graph_structure_plan: ["source_retrieval", "emergence_planning", "emergence_review", "draft", "dependency_audit", "settings_extraction", "work_style_revision", "graph_governance"],
   graph_capacity_rewrite: ["graph_structure_plan"],
   graph_spacetime_settlement: ["dependency_audit", "graph_structure_plan", "graph_governance"],
   graph_retrieval_design: ["graph_structure_plan", "graph_spacetime_settlement"],
   graph_governance_review: ["dependency_audit", "graph_structure_plan", "graph_spacetime_settlement", "graph_retrieval_design", "graph_governance"],
-  semantic_review: ["draft", "dependency_audit", "settings_extraction", "graph_governance"],
-  settlement_review: ["dependency_audit", "settings_extraction", "graph_governance", "semantic_review"],
+  semantic_review: ["draft", "dependency_audit", "settings_extraction", "work_style_revision", "graph_governance"],
+  settlement_review: ["dependency_audit", "settings_extraction", "work_style_revision", "graph_governance", "semantic_review"],
   frontier_settlement: ["graph_governance", "semantic_review", "settlement_review"],
-  commit_review: ["draft", "dependency_audit", "settings_extraction", "graph_governance", "graph_governance_review", "semantic_review", "settlement_review", "frontier_settlement"],
+  commit_review: ["draft", "dependency_audit", "settings_extraction", "work_style_revision", "graph_governance", "graph_governance_review", "semantic_review", "settlement_review", "frontier_settlement"],
   revision_review: [],
   synopsis_discuss: [],
   work_naming: [],
@@ -284,7 +290,13 @@ const phaseModelArtifactDependencies = {
   commit_review: [],
 } as const satisfies Record<AIPhase, readonly AIPhase[]>
 
-const workspaceCatalogPhases = new Set<AIPhase>(["interpret", "rule_assembly", "source_retrieval", "settings_extraction"])
+const workspaceCatalogPhases = new Set<AIPhase>([
+  "interpret",
+  "rule_assembly",
+  "source_retrieval",
+  "settings_extraction",
+  "work_style_revision",
+])
 
 export type WorldWorkflow = "turn" | "query" | "evolution" | "revision"
 
@@ -801,15 +813,126 @@ export class TurnOrchestrator {
         worldDivergenceMode: resolveWorldDivergenceMode(input.projectSettings),
       })
     }
-    await this.applyWorkStyleRevisionFromArtifact(input, taskId, extraction)
+  }
+
+  private async runWorkStyleRevision(
+    input: TurnOrchestratorInput,
+    state: TurnExecutionState,
+  ): Promise<void> {
+    if (state.artifacts.work_style_revision !== undefined) {
+      await this.commitWorkStyleRevisionArtifact(
+        input,
+        state.taskId,
+        state.artifacts.work_style_revision,
+        state.artifacts.settings_extraction,
+      )
+      return
+    }
+    const phase: AIPhase = "work_style_revision"
+    const userRequirements = resolveWorkStyleRequirementSource(input)
+    const legacySections = settingsExtractionArtifactSchema
+      .safeParse(state.artifacts.settings_extraction)
+      .data?.workStyleRevision?.sections
+    if (userRequirements.length === 0 && (legacySections === undefined || legacySections.length === 0)) {
+      const mechanical = await this.executeMechanicalRevisionPhase({
+        input,
+        state,
+        context: state.context,
+        artifacts: state.artifacts,
+        readEvidence: state.readEvidence,
+        visibleEvidence: state.visibleEvidence,
+        phase,
+        usage: state.budgetWindowUsage,
+        artifact: {
+          summary: "本轮无用户风格要求，跳过风格抽取与融合",
+          sections: [],
+        },
+        reason: "No user style requirements for this revision",
+      })
+      state.context = mechanical.context
+      state.readEvidence = [...mechanical.readEvidence]
+      state.visibleEvidence = [...mechanical.visibleEvidence]
+      state.budgetWindowUsage = addPhaseUsage(state.budgetWindowUsage, mechanical.usage)
+      state.totalUsage = addPhaseUsage(state.totalUsage, mechanical.usage)
+      state.artifacts.work_style_revision = mechanical.artifact
+      state.phaseRunIds.push(mechanical.phaseRunId)
+      state.phaseRuns.set(phase, mechanical.phaseRunId)
+      return
+    }
+    const phaseRunId = this.dependencies.createId()
+    const attempt = (state.phaseAttempts.get(phase) ?? 0) + 1
+    state.phaseAttempts.set(phase, attempt)
+    state.phaseRunIds.push(phaseRunId)
+    state.phaseRuns.set(phase, phaseRunId)
+    const result = await this.executePhase({
+      input,
+      inputScopeId: state.scopeId,
+      sourceId: state.sourceId,
+      sourceUnitIds: state.sourceUnitIds,
+      phase,
+      phaseRunId,
+      attempt,
+      phaseRunIds: state.phaseRunIds,
+      context: state.context,
+      artifacts: state.artifacts,
+      readEvidence: state.readEvidence,
+      visibleEvidence: state.visibleEvidence,
+      retrievalGaps: state.retrievalGaps,
+      verificationProbeCheckpoints: state.verificationProbeCheckpoints,
+      catalogSnapshot: state.catalogSnapshot,
+      modelContextChainId: state.modelContextChainId,
+      budget: state.budget,
+      usage: state.budgetWindowUsage,
+      ...(state.signal === undefined ? {} : { signal: state.signal }),
+    })
+    state.context = result.context
+    state.readEvidence = [...result.readEvidence]
+    state.visibleEvidence = [...result.visibleEvidence]
+    state.retrievalGaps = [...result.retrievalGaps]
+    state.artifacts.work_style_revision = result.artifact
+    state.budgetWindowUsage = addPhaseUsage(state.budgetWindowUsage, result.usage)
+    state.totalUsage = addPhaseUsage(state.totalUsage, result.usage)
+    await this.dependencies.persistence.saveTaskCheckpoint({
+      projectId: input.projectId,
+      taskId: state.taskId,
+      phaseRunId: result.phaseRunId,
+      phase,
+      context: state.context,
+      modelContextChainId: state.modelContextChainId,
+      savedAtMs: this.dependencies.now(),
+    })
+    await this.commitWorkStyleRevisionArtifact(
+      input,
+      state.taskId,
+      result.artifact,
+      state.artifacts.settings_extraction,
+    )
+    this.log("info", "revision.work_style_revision.committed", {
+      taskId: state.taskId,
+      phaseRunId: result.phaseRunId,
+      sectionCount: workStyleRevisionArtifactSchema.parse(result.artifact).sections.length,
+    })
+  }
+
+  private async commitWorkStyleRevisionArtifact(
+    input: TurnOrchestratorInput,
+    taskId: string,
+    artifact: unknown,
+    settingsArtifact: unknown,
+  ): Promise<void> {
+    const revision = workStyleRevisionArtifactSchema.parse(artifact)
+    const legacy = settingsExtractionArtifactSchema.safeParse(settingsArtifact).data?.workStyleRevision
+    const sections = revision.sections.length > 0
+      ? revision.sections
+      : legacy?.sections
+    await this.applyWorkStyleRevisionFromArtifact(input, taskId, sections)
   }
 
   private async applyWorkStyleRevisionFromArtifact(
     input: TurnOrchestratorInput,
     taskId: string,
-    extraction: SettingsExtractionArtifact,
+    sections: WorkStyleRevisionArtifact["sections"] | undefined,
   ): Promise<void> {
-    const sections = extraction.workStyleRevision?.sections
     if (sections === undefined || sections.length === 0) return
     const userRequirements = resolveWorkStyleRequirementSource(input)
     if (userRequirements.length === 0) {
@@ -856,6 +979,8 @@ export class TurnOrchestrator {
     let phase: AIPhase = "settings_extraction"
     try {
       await this.runSettingsExtraction(input, state)
+      phase = "work_style_revision"
+      await this.runWorkStyleRevision(input, state)
     } catch (error) {
       await this.dependencies.commit.resetPending(state.scopeId).catch(() => undefined)
       await this.dependencies.persistence.updateTask(
@@ -1811,6 +1936,43 @@ export class TurnOrchestrator {
           phaseIndex += 1
           continue
         }
+        if (phase === "work_style_revision" && artifacts.work_style_revision !== undefined) {
+          await this.commitWorkStyleRevisionArtifact(
+            input,
+            state.taskId,
+            artifacts.work_style_revision,
+            artifacts.settings_extraction,
+          )
+          phaseIndex += 1
+          continue
+        }
+        if (phase === "work_style_revision") {
+          const userRequirements = resolveWorkStyleRequirementSource(input)
+          const legacySections = settingsExtractionArtifactSchema
+            .safeParse(artifacts.settings_extraction)
+            .data?.workStyleRevision?.sections
+          if (userRequirements.length === 0 && (legacySections === undefined || legacySections.length === 0)) {
+            const mechanical = await this.executeMechanicalRevisionPhase({
+              input, state, context, artifacts, readEvidence, visibleEvidence, phase,
+              usage: windowUsage,
+              artifact: {
+                summary: "本轮无用户风格要求，跳过风格抽取与融合",
+                sections: [],
+              },
+              reason: "No user style requirements for this revision",
+            })
+            context = mechanical.context
+            readEvidence = [...mechanical.readEvidence]
+            visibleEvidence = [...mechanical.visibleEvidence]
+            windowUsage = addPhaseUsage(windowUsage, mechanical.usage)
+            totalUsage = addPhaseUsage(totalUsage, mechanical.usage)
+            artifacts[phase] = mechanical.artifact
+            phaseRunIds.push(mechanical.phaseRunId)
+            phaseRuns.set(phase, mechanical.phaseRunId)
+            phaseIndex += 1
+            continue
+          }
+        }
         throwIfExecutionCancelled(state.signal)
         const compactRevision = workflow === "revision" && state.adaptiveGraphGovernance === "compact"
         if (compactRevision && phase === "graph_structure_plan") {
@@ -1848,13 +2010,14 @@ export class TurnOrchestrator {
           })
           if (capacityAssessment.violations.length === 0) {
             graphCapacityFeedback = undefined
-            if (compactRevision) {
+            const anchorProposalRef = structure.proposals[0]?.proposalRef
+            if (compactRevision && anchorProposalRef !== undefined) {
               const mechanical = await this.executeMechanicalRevisionPhase({
                 input, state, context, artifacts, readEvidence, visibleEvidence, phase,
                 usage: windowUsage,
                 artifact: {
-                  hotspotRefs: [structure.proposals[0]?.proposalRef ?? "proposal:mutation:1"],
-                  affectedProposalRefs: [structure.proposals[0]?.proposalRef ?? "proposal:mutation:1"],
+                  hotspotRefs: [anchorProposalRef],
+                  affectedProposalRefs: [anchorProposalRef],
                   removeProposalRefs: [],
                   upsertProposals: [],
                   reason: "Compact revision capacity assessment found no degree violation",
@@ -2151,6 +2314,14 @@ export class TurnOrchestrator {
         })
         if (phase === "settings_extraction") {
           await this.commitSettingsExtractionArtifact(input, state.taskId, result.phaseRunId, result.artifact)
+        }
+        if (phase === "work_style_revision") {
+          await this.commitWorkStyleRevisionArtifact(
+            input,
+            state.taskId,
+            result.artifact,
+            artifacts.settings_extraction,
+          )
         }
         if (workflow === "query" && phase === "response_review") {
           const reviewDecision = queryReviewDecision(result, artifacts.source_retrieval)

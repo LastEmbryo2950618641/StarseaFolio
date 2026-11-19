@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Activity, AlertCircle, BookOpen, Check, Circle, GitBranch, Network, Orbit, X } from "lucide-react"
+import { AlertCircle, BookOpen, Check, Circle, GitBranch, Network, Orbit, X } from "lucide-react"
 import { aiPhaseValues, type ChapterReviewRevisionPayload, type ChapterRevisionReadResult, type ChapterSummary, type ProjectSettings, type ResettableRuntimeMetricId } from "@starseafolio/contracts"
 
 import type { GraphSlice, OpenProject, PhaseRunSnapshot, TaskSnapshot } from "../../api/client.js"
@@ -8,7 +8,6 @@ import { ExpandableErrorAlert } from "../../components/ExpandableErrorAlert.js"
 import { UiTooltip, uiTooltipRich } from "../../components/UiTooltip.js"
 import { useWorkbenchStore, type RightTab } from "../../state/workbench-store.js"
 import { WorldGraph } from "./WorldGraph.js"
-import { DeductionTasksPanel } from "./DeductionTasksPanel.js"
 import { GraphRevisionTasksPanel } from "./GraphRevisionTasksPanel.js"
 import { PhaseIoDetails, PhaseIoPending } from "./phase-io-details.js"
 import { RuntimeMonitor, TaskCheckpointDialog } from "./TaskCheckpointPrototype.js"
@@ -47,6 +46,7 @@ const labels: Record<string, string> = {
   chapter_naming: "生成章节标题",
   dependency_audit: "检查依赖闭合",
   settings_extraction: "抽取并写入设定",
+  work_style_revision: "风格抽取与融合",
   response_review: "审查正文响应",
   graph_governance: "治理世界图",
   graph_structure_plan: "候选结构规划",
@@ -71,6 +71,7 @@ const stagedGraphPhases = [
 const turnCutIdlePhases = new Set([
   "emergence_review",
   "settings_extraction",
+  "work_style_revision",
   "response_review",
   "settlement_review",
   "commit_review",
@@ -110,14 +111,14 @@ export function RightRail({
   const [dismissedCheckpointKey, setDismissedCheckpointKey] = useState<string>()
   const tab = useWorkbenchStore((state) => state.rightTab)
   const setTab = useWorkbenchStore((state) => state.setRightTab)
-  const visibleTab: RightTab = tab === "history" ? "chapters" : tab
+  const visibleTab: RightTab = tab === "history" || tab === "process" ? "chapters" : tab
   const checkpointKey = checkpointDecisionKey(task)
   const closeCheckpoint = (): void => {
     setCheckpointOpen(false)
     if (checkpointKey !== undefined) setDismissedCheckpointKey(checkpointKey)
   }
   useEffect(() => {
-    if (tab === "history") setTab("chapters")
+    if (tab === "history" || tab === "process") setTab("chapters")
   }, [setTab, tab])
   useEffect(() => {
     const status = task?.status
@@ -138,7 +139,6 @@ export function RightRail({
   return <><aside className="right-rail">
     <div className="right-tabs" role="tablist" aria-label="右侧面板">
       <Tab id="chapters" tab={visibleTab} onChange={setTab} icon={<BookOpen size={15} />} label="正文章节" />
-      <Tab id="process" tab={visibleTab} onChange={setTab} icon={<Activity size={15} />} label="正文推演任务" />
       <Tab id="graph" tab={visibleTab} onChange={setTab} icon={<Network size={15} />} label="世界图" />
       <Tab id="evolution" tab={visibleTab} onChange={setTab} icon={<Orbit size={15} />} label="自洽演化" />
       <Tab id="graph-revisions" tab={visibleTab} onChange={setTab} icon={<GitBranch size={15} />} label="图治理任务" />
@@ -154,15 +154,6 @@ export function RightRail({
         {...(onSelectDraftCandidate === undefined ? {} : { onSelectDraftCandidate })}
         {...(selectedChapterPath === undefined ? {} : { selectedPath: selectedChapterPath })}
         onOpenBody={onOpenChapter ?? (() => undefined)}
-      /> : null}
-      {visibleTab === "process" ? <DeductionTasksPanel
-        key={project?.projectId}
-        project={project}
-        onResetMetrics={onResetTaskMetrics}
-        onChanged={async () => {
-          await onRefreshTask?.()
-          await onRefreshWorkspace?.()
-        }}
       /> : null}
       {visibleTab === "graph-revisions" ? <GraphRevisionTasksPanel
         key={project?.projectId}
@@ -619,7 +610,7 @@ function shouldShowOptionalPhase(phase: string, task: TaskSnapshot | undefined):
 }
 
 function shouldShowTopLevelPhase(phase: string, task: TaskSnapshot | undefined): boolean {
-  if (phase === "settings_extraction") {
+  if (phase === "settings_extraction" || phase === "work_style_revision") {
     const latest = task?.phaseRuns?.filter((run) => run.phase === phase).at(-1)
     if (latest !== undefined && isActiveTaskStatus(task?.status)) return true
   }
