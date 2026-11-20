@@ -6228,6 +6228,52 @@ a.project-rail-download {
   margin-top: 8px;
   font-size: 11px;
 }
+.creation-desk-thinking-tail-note {
+  margin: 6px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: right;
+}
+.creation-desk-thinking-tail-note > .creation-desk-pending {
+  margin: 0;
+  max-width: min(420px, 72%);
+  font-size: inherit;
+}
+.creation-desk-preview-note-action {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.creation-desk-preview-note-action:hover,
+.creation-desk-preview-note-action:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+  outline: none;
+}
+.creation-desk-thinking-full-dialog {
+  width: min(720px, 100%);
+  max-height: min(78vh, 820px);
+  display: flex;
+  flex-direction: column;
+}
+.creation-desk-thinking-full-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
 .creation-desk-discuss-status {
   display: flex;
   flex-wrap: wrap;
@@ -6647,20 +6693,38 @@ a.project-rail-download {
   padding: 4px 8px 4px 0;
   justify-content: flex-end;
 }
-.creation-desk-session-bar {
+.creation-desk-control-stack {
   width: min(760px, 100%);
   margin: 0 auto 8px;
+  display: grid;
+  gap: 8px;
+}
+.creation-desk-session-bar {
+  width: 100%;
+  margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 32px;
+  padding: 0;
   font-size: 11px;
   color: var(--text-muted);
+}
+.creation-desk-session-bar > svg {
+  flex: 0 0 auto;
+  color: var(--text-faint);
 }
 .creation-desk-session-bar span {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.creation-desk-session-bar .synopsis-open-file {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
   white-space: nowrap;
 }
 .creation-desk-focus-combobox {
@@ -6747,24 +6811,23 @@ a.project-rail-download {
   padding: 8px;
   color: var(--text-muted);
 }
-.creation-desk-settings-heading {
-  width: min(760px, 100%);
-  margin: 0 auto 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
 .creation-desk-writing-settings {
   min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+.creation-desk-writing-settings[open] {
+  border-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-elevated, var(--bg-sidebar)) 72%, transparent);
 }
 .creation-desk-writing-settings > summary {
   width: fit-content;
-  min-height: 26px;
+  min-height: 28px;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 7px;
+  margin: 0;
+  padding: 0 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -6772,6 +6835,9 @@ a.project-rail-download {
   cursor: pointer;
   list-style: none;
   user-select: none;
+}
+.creation-desk-writing-settings[open] > summary {
+  margin: 6px 8px 0;
 }
 .creation-desk-writing-settings > summary::-webkit-details-marker { display: none; }
 .creation-desk-writing-settings > summary:hover,
@@ -6788,21 +6854,34 @@ a.project-rail-download {
   transform: rotate(180deg);
 }
 .creation-desk-settings {
-  width: min(760px, 100%);
-  margin: 0 auto 10px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
   font-size: 11px;
   color: var(--text-muted);
 }
 .creation-desk-settings label {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+  min-width: 0;
+}
+.creation-desk-settings label > span,
+.creation-desk-settings .ui-tooltip-anchor {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 .creation-desk-settings select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
   height: 28px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -6810,10 +6889,16 @@ a.project-rail-download {
   color: var(--text);
   font-size: 11px;
   padding: 0 6px;
-  max-width: 180px;
+}
+.creation-desk-word-count-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 .creation-desk-word-count input {
   width: 58px;
+  min-width: 0;
   height: 28px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -6823,71 +6908,165 @@ a.project-rail-download {
   color: var(--text);
 }
 .creation-desk-word-count.invalid input { border-color: var(--danger); background: var(--danger-soft); }
-.creation-desk-proceed-mode {
-  display: inline-flex;
+.creation-desk-proceed-panel {
+  display: flex;
   align-items: center;
-  height: 28px;
-  flex: 0 0 auto;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated, var(--bg-sidebar)) 68%, transparent);
 }
-.creation-desk-proceed-mode select {
-  height: 28px;
-  min-width: 108px;
+.creation-desk-proceed-mode {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 120px;
+  min-width: 0;
+  height: 26px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 0 8px;
-  font-size: 12px;
+  padding: 0 6px;
+  font-size: 11px;
   background: var(--bg-input);
   color: var(--text);
 }
 .creation-desk-proceed-stages {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 12px 0;
-  width: min(760px, 100%);
-  margin: 0 auto;
+  align-items: center;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: 4px;
+}
+.creation-desk-proceed-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.creation-desk-proceed-connector {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 1px;
+  margin: 0 2px 0 0;
+  border-radius: 999px;
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+.creation-desk-proceed-step.is-done .creation-desk-proceed-connector,
+.creation-desk-proceed-step.is-active .creation-desk-proceed-connector {
+  background: color-mix(in srgb, var(--accent) 70%, var(--border));
 }
 .creation-desk-proceed-stage {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  min-height: 24px;
-  padding: 2px 8px;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--bg-elevated);
+  background: var(--bg-input);
   color: var(--text-muted);
+  font: inherit;
   font-size: 11px;
-  line-height: 1.2;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+}
+.creation-desk-proceed-stage-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.creation-desk-proceed-stage-gate {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.82;
 }
 .creation-desk-proceed-stages.interactive .creation-desk-proceed-stage {
   cursor: pointer;
 }
-.creation-desk-proceed-stages.interactive .creation-desk-proceed-stage.auto {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+.creation-desk-proceed-stages.interactive .creation-desk-proceed-stage:hover,
+.creation-desk-proceed-stages.interactive .creation-desk-proceed-stage:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
   color: var(--text);
+  outline: none;
 }
-.creation-desk-proceed-stages.interactive .creation-desk-proceed-stage.stop {
-  opacity: 0.85;
+.creation-desk-proceed-step.stop .creation-desk-proceed-stage {
+  border-color: color-mix(in srgb, var(--warning, #e3b341) 35%, var(--border));
 }
-.creation-desk-proceed-stage.active {
-  color: var(--text);
+.creation-desk-proceed-step.auto .creation-desk-proceed-stage {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.creation-desk-proceed-step.is-done .creation-desk-proceed-stage {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+  color: var(--text-secondary);
+}
+.creation-desk-proceed-step.is-active .creation-desk-proceed-stage {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-input));
+  color: var(--text);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
 }
-.creation-desk-proceed-stage.active.status-waiting {
+.creation-desk-proceed-step.is-active.status-waiting .creation-desk-proceed-stage {
   border-style: dashed;
+  border-color: color-mix(in srgb, var(--warning, #e3b341) 70%, var(--accent));
+  background: color-mix(in srgb, var(--warning, #e3b341) 12%, var(--bg-input));
+  box-shadow: none;
 }
-.creation-desk-proceed-stage.active.status-done {
-  opacity: 0.75;
+.creation-desk-proceed-step.is-active.status-running .creation-desk-proceed-stage {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-input));
 }
-.creation-desk-proceed-stage-gate {
-  font-size: 10px;
-  opacity: 0.8;
+.creation-desk-proceed-step.is-active.status-done .creation-desk-proceed-stage {
+  border-color: color-mix(in srgb, var(--accent) 70%, #1a7f4b);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-input));
+}
+.creation-desk-proceed-step.stop .creation-desk-proceed-stage-gate {
+  color: var(--warning, #e3b341);
+}
+.creation-desk-proceed-step.auto .creation-desk-proceed-stage-gate {
+  color: color-mix(in srgb, var(--accent) 85%, var(--text-muted));
+}
+.creation-desk-proceed-step.is-active .creation-desk-proceed-stage-label {
+  color: var(--text);
+}
+.creation-desk-proceed-step.is-done .creation-desk-proceed-stage-label {
+  color: var(--text-secondary);
+}
+@media (max-width: 720px) {
+  .creation-desk-settings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .creation-desk-proceed-panel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .creation-desk-proceed-mode {
+    max-width: none;
+    width: 100%;
+  }
 }
 @media (max-width: 560px) {
-  .creation-desk-settings-heading { gap: 4px; }
-  .creation-desk-proceed-mode select { min-width: 96px; }
+  .creation-desk-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .creation-desk-settings label {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
 }
 .creation-desk-composer {
   width: min(760px, 100%);
@@ -7362,7 +7541,7 @@ a.project-rail-download {
   position: absolute;
   right: 0;
   bottom: calc(100% + 6px);
-  min-width: 220px;
+  min-width: 260px;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -7376,6 +7555,51 @@ a.project-rail-download {
   color: var(--text-faint);
   font-size: 10px;
   line-height: 1.4;
+}
+.creation-desk-no-progress-guard {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.creation-desk-no-progress-guard-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.creation-desk-no-progress-guard-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+.creation-desk-no-progress-guard-limit {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.creation-desk-no-progress-guard-limit input {
+  width: 64px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 11px;
+}
+.creation-desk-no-progress-guard-limit input:disabled {
+  opacity: 0.5;
+}
+.creation-desk-no-progress-guard .creation-desk-advanced-hint {
+  padding: 0;
 }
 .creation-desk-advanced-panel .creation-desk-start-turn {
   width: 100%;

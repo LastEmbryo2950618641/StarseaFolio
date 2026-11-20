@@ -1,22 +1,23 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Bot, ChevronDown, ChevronRight, Ellipsis, FileText, Globe, ListTodo, Loader2, Play, Send, Settings2, Sparkles, Square, Terminal, UserRound } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight, Ellipsis, FileText, Globe, ListTodo, Loader2, Play, Send, Settings2, Sparkles, Square, Terminal, UserRound, X } from "lucide-react"
 import { CachedMarkdown } from "./CachedMarkdown.js"
 import {
   truncateThinkingForLiveRender,
   windowCreationDeskMessages,
 } from "./creation-desk-render-budget.js"
-import type {
-  DiscussAgentMode,
-  DiscussCustomProceedGates,
-  DiscussFocusKind,
-  DiscussProceedMode,
-  DiscussProceedStage,
-  SynopsisConversationMessage,
-  SynopsisConversationSession,
-  SynopsisConversationStreamSnapshot,
-  SynopsisConversationTodo,
-  SynopsisStagingPromoteProposal,
-  ChapterNarrativeIntent,
+import {
+  resolveProceedAutonomy,
+  type DiscussAgentMode,
+  type DiscussCustomProceedGates,
+  type DiscussFocusKind,
+  type DiscussProceedMode,
+  type DiscussProceedStage,
+  type SynopsisConversationMessage,
+  type SynopsisConversationSession,
+  type SynopsisConversationStreamSnapshot,
+  type SynopsisConversationTodo,
+  type SynopsisStagingPromoteProposal,
+  type ChapterNarrativeIntent,
 } from "@starseafolio/contracts"
 
 import { UiTooltip } from "../../components/UiTooltip.js"
@@ -66,6 +67,12 @@ import {
   PROCEED_MODE_OPTIONS,
   PROCEED_STAGE_LABELS,
 } from "./proceed-mode.js"
+import {
+  clampNoProgressGuardLimit,
+  loadNoProgressGuardPrefs,
+  type NoProgressGuardPrefs,
+  persistNoProgressGuardPrefs,
+} from "./no-progress-guard.js"
 import { CreationDeskTodoPopover } from "./CreationDeskTodoPopover.js"
 import {
   expandCreationDeskFooterCollapse,
@@ -144,6 +151,8 @@ type Props = Readonly<{
     agentMode?: DiscussAgentMode
     proceedMode?: DiscussProceedMode
     customProceedGates?: DiscussCustomProceedGates
+    noProgressGuardEnabled?: boolean
+    noProgressGuardLimit?: number
     setupAnswerTo?: string
   }>): Promise<void>
   onStop?(): Promise<void>
@@ -178,6 +187,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const [todoOpen, setTodoOpen] = useState(false)
   const [agentMode, setAgentMode] = useState<DiscussAgentMode>(() => loadDiscussAgentMode())
   const [proceedMode, setProceedMode] = useState<DiscussProceedMode>(() => loadProceedMode())
+  const [noProgressGuard, setNoProgressGuard] = useState(() => loadNoProgressGuardPrefs())
   const [customProceedGates, setCustomProceedGates] = useState<DiscussCustomProceedGates>(() => loadCustomProceedGates())
   const [lastProceedProgress, setLastProceedProgress] = useState<SynopsisConversationStreamSnapshot["proceedProgress"]>()
   const [goalsOpen, setGoalsOpen] = useState(false)
@@ -246,10 +256,12 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
       agentMode,
       proceedMode,
       ...(proceedMode === "custom" ? { customProceedGates } : {}),
+      noProgressGuardEnabled: noProgressGuard.enabled,
+      noProgressGuardLimit: noProgressGuard.limit,
       ...(setupAnswerTo === undefined ? {} : { setupAnswerTo }),
     })
     await goals.refresh()
-  }, [agentMode, customProceedGates, goals.refresh, proceedMode, props.messages, props.onSend])
+  }, [agentMode, customProceedGates, goals.refresh, noProgressGuard, proceedMode, props.messages, props.onSend])
 
   const visibleTodos = resolveDiscussTodos(props.stream, props.messages)
 
@@ -551,7 +563,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
               <span className="creation-desk-footer-handle-grip" aria-hidden="true" />
             </button>}
         {showFooterToolbar
-          ? <>
+          ? <div className="creation-desk-control-stack">
               {props.session !== undefined && props.onSetFocus !== undefined
                 ? <CreationDeskFocusBar
                     session={props.session}
@@ -565,29 +577,51 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                       <span>{props.session.synopsisPath}</span>
                     </div>
                   : null}
-              <ProceedStageBar
-                mode={proceedMode}
-                gates={customProceedGates}
-                activeStage={(props.stream?.proceedProgress ?? lastProceedProgress)?.stage}
-                activeStatus={(props.stream?.proceedProgress ?? lastProceedProgress)?.status}
-                interactive={proceedMode === "custom"}
-                onToggleGate={(stage) => {
-                  setCustomProceedGates((current) => {
-                    const next = { ...current, [stage]: !current[stage] }
-                    persistCustomProceedGates(next)
-                    return next
-                  })
-                }}
-              />
-              <div className="creation-desk-settings-heading">
-                <details className="creation-desk-writing-settings" open={writingSettingsOpen} onToggle={(event) => {
-                  useWorkbenchStore.getState().setWritingSettingsOpen(event.currentTarget.open)
-                }}>
-                  <summary>
-                    <Settings2 size={13} aria-hidden="true" />
-                    写作设置
-                    <ChevronDown size={13} aria-hidden="true" />
-                  </summary>
+              <div className="creation-desk-proceed-panel">
+                <select
+                  className="creation-desk-proceed-mode"
+                  aria-label="推进模式"
+                  title={PROCEED_MODE_OPTIONS.find((option) => option.value === proceedMode)?.hint ?? "推进模式"}
+                  data-testid="creation-desk-proceed-mode"
+                  value={proceedMode}
+                  onChange={(event) => {
+                    const next = event.target.value as DiscussProceedMode
+                    setProceedMode(next)
+                    persistProceedMode(next)
+                  }}
+                >
+                  {PROCEED_MODE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <ProceedStageBar
+                  mode={proceedMode}
+                  gates={customProceedGates}
+                  agentMode={agentMode}
+                  {...((() => {
+                    const progress = props.stream?.proceedProgress ?? lastProceedProgress
+                    return progress === undefined
+                      ? {}
+                      : { activeStage: progress.stage, activeStatus: progress.status }
+                  })())}
+                  interactive={proceedMode === "custom"}
+                  onToggleGate={(stage) => {
+                    setCustomProceedGates((current) => {
+                      const next = { ...current, [stage]: !current[stage] }
+                      persistCustomProceedGates(next)
+                      return next
+                    })
+                  }}
+                />
+              </div>
+              <details className="creation-desk-writing-settings" open={writingSettingsOpen} onToggle={(event) => {
+                useWorkbenchStore.getState().setWritingSettingsOpen(event.currentTarget.open)
+              }}>
+                <summary>
+                  <Settings2 size={13} aria-hidden="true" />
+                  写作设置
+                  <ChevronDown size={13} aria-hidden="true" />
+                </summary>
                 <div className="creation-desk-settings">
                   <label>
                     <span>小说大类</span>
@@ -621,9 +655,11 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                     <UiTooltip label="正文主体字数范围，标题不计入">
                       <span>字数</span>
                     </UiTooltip>
-                    <input aria-label="正文最少字数" type="number" min="1" step="100" value={props.minimumWordCount} onChange={(event) => { props.onMinimumWordCountChange(event.target.value); }} />
-                    <span>—</span>
-                    <input aria-label="正文最多字数" type="number" min="1" step="100" value={props.maximumWordCount} onChange={(event) => { props.onMaximumWordCountChange(event.target.value); }} />
+                    <div className="creation-desk-word-count-inputs">
+                      <input aria-label="正文最少字数" type="number" min="1" step="100" value={props.minimumWordCount} onChange={(event) => { props.onMinimumWordCountChange(event.target.value); }} />
+                      <span aria-hidden="true">—</span>
+                      <input aria-label="正文最多字数" type="number" min="1" step="100" value={props.maximumWordCount} onChange={(event) => { props.onMaximumWordCountChange(event.target.value); }} />
+                    </div>
                   </label>
                   <label>
                     <UiTooltip label="管情节节奏，不管设定发散。压而不决：加压与过程选择，禁止不可逆定局。">
@@ -658,28 +694,8 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                     </select>
                   </label>
                 </div>
-                </details>
-                <UiTooltip label={PROCEED_MODE_OPTIONS.find((option) => option.value === proceedMode)?.hint ?? "推进模式"}>
-                  <label className="creation-desk-proceed-mode">
-                    <span className="sr-only">推进模式</span>
-                    <select
-                      aria-label="推进模式"
-                      data-testid="creation-desk-proceed-mode"
-                      value={proceedMode}
-                      onChange={(event) => {
-                        const next = event.target.value as DiscussProceedMode
-                        setProceedMode(next)
-                        persistProceedMode(next)
-                      }}
-                    >
-                      {PROCEED_MODE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                </UiTooltip>
-              </div>
-            </>
+              </details>
+            </div>
           : null}
         {goals.error !== undefined
           ? <div className="creation-desk-goals-error" role="alert">{goals.error}</div>
@@ -719,6 +735,15 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
           onCloseTodoMenu={() => { setTodoOpen(false); }}
           onToggleAdvancedMenu={() => { setAdvancedMenuOpen((open) => !open); }}
           onCloseAdvancedMenu={() => { setAdvancedMenuOpen(false); }}
+          noProgressGuard={noProgressGuard}
+          onNoProgressGuardChange={(next) => {
+            const clamped = {
+              enabled: next.enabled,
+              limit: clampNoProgressGuardLimit(next.limit),
+            }
+            setNoProgressGuard(clamped)
+            persistNoProgressGuardPrefs(clamped)
+          }}
           onSend={sendMessage}
           onStartTurn={props.onStartTurn}
           chapterWorkflowEnabled={props.chapterWorkflowEnabled === true}
@@ -759,6 +784,8 @@ type ComposerInputProps = Readonly<{
   onCloseTodoMenu(): void
   onToggleAdvancedMenu(): void
   onCloseAdvancedMenu(): void
+  noProgressGuard: NoProgressGuardPrefs
+  onNoProgressGuardChange(next: NoProgressGuardPrefs): void
   onSend(message: string): Promise<void>
   onStop?(): Promise<void>
   onStartTurn(): void
@@ -933,6 +960,49 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
       </div>
   const advancedContent = <div className="creation-desk-advanced-panel" role={mobile ? undefined : "menu"} data-testid="creation-desk-advanced-menu">
     {mobile ? modelControls : null}
+    <div
+      className="creation-desk-no-progress-guard"
+      data-testid="creation-desk-no-progress-guard"
+      onClick={(event) => { event.stopPropagation() }}
+      onKeyDown={(event) => { event.stopPropagation() }}
+    >
+      <label className="creation-desk-no-progress-guard-toggle">
+        <input
+          type="checkbox"
+          checked={props.noProgressGuard.enabled}
+          aria-label="空转停跑保护"
+          data-testid="creation-desk-no-progress-guard-enabled"
+          onChange={(event) => {
+            props.onNoProgressGuardChange({
+              enabled: event.target.checked,
+              limit: props.noProgressGuard.limit,
+            })
+          }}
+        />
+        <span>空转停跑保护</span>
+      </label>
+      <label className="creation-desk-no-progress-guard-limit">
+        <span>连续空转次数</span>
+        <input
+          type="number"
+          min={1}
+          max={30}
+          step={1}
+          value={props.noProgressGuard.limit}
+          disabled={!props.noProgressGuard.enabled}
+          aria-label="连续空转次数"
+          data-testid="creation-desk-no-progress-guard-limit"
+          onChange={(event) => {
+            const next = Number(event.target.value)
+            props.onNoProgressGuardChange({
+              enabled: props.noProgressGuard.enabled,
+              limit: clampNoProgressGuardLimit(Number.isFinite(next) ? next : props.noProgressGuard.limit),
+            })
+          }}
+        />
+      </label>
+      <p className="creation-desk-advanced-hint">自动续跑时，工作区连续无实质进展达到此次数后停止，防止烧 token。</p>
+    </div>
     <p className="creation-desk-advanced-hint">先补齐剧情梗概与细纲，再开始正文</p>
     {props.chapterWorkflowEnabled !== true
       ? <p className="creation-desk-advanced-hint" data-testid="creation-desk-start-turn-disabled">正文推演工具已在项目设置中关闭；讨论 Agent 可用 chapterDraftProposal 写草稿</p>
@@ -1431,7 +1501,7 @@ function renderAgentProcessSegment(input: Readonly<{
       </>}
     >
       {live.truncated
-        ? <p className="creation-desk-pending creation-desk-preview-note">长思考仅渲染尾部，展开后仍只保留最近片段以保持输入流畅。</p>
+        ? <ThinkingTailPreviewNote fullText={segment.text} />
         : null}
       <CachedMarkdown className="agent-stream-thinking-markdown" text={live.text} />
     </LazyOpenDetails>
@@ -1590,55 +1660,125 @@ function resolveDiscussTodos(
   return []
 }
 
+function ThinkingTailPreviewNote(props: Readonly<{ fullText: string }>): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  return <>
+    <div className="creation-desk-thinking-tail-note">
+      <span className="creation-desk-pending">长思考仅渲染尾部，展开后仍只保留最近片段。</span>
+      <button
+        type="button"
+        className="creation-desk-preview-note-action"
+        data-testid="creation-desk-thinking-view-all"
+        onClick={() => { setOpen(true) }}
+      >
+        查看全部
+      </button>
+    </div>
+    {open
+      ? <div
+          className="dialog-backdrop"
+          role="presentation"
+          data-testid="creation-desk-thinking-full-dialog"
+          onClick={() => { setOpen(false) }}
+        >
+          <section
+            className="work-name-prompt-dialog creation-desk-thinking-full-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="creation-desk-thinking-full-title"
+            onClick={(event) => { event.stopPropagation() }}
+          >
+            <header>
+              <div>
+                <strong id="creation-desk-thinking-full-title">完整思考</strong>
+                <small>弹窗内显示全文；列表里仍只渲染尾部以保持输入流畅</small>
+              </div>
+              <button type="button" aria-label="关闭" onClick={() => { setOpen(false) }}>
+                <X size={16} aria-hidden="true" />
+              </button>
+            </header>
+            <div className="creation-desk-thinking-full-dialog-body">
+              <CachedMarkdown className="agent-stream-thinking-markdown" text={props.fullText} />
+            </div>
+            <footer>
+              <button type="button" className="dialog-primary-command" onClick={() => { setOpen(false) }}>关闭</button>
+            </footer>
+          </section>
+        </div>
+      : null}
+  </>
+}
+
 function ProceedStageBar(props: Readonly<{
   mode: DiscussProceedMode
   gates: DiscussCustomProceedGates
+  agentMode: DiscussAgentMode
   activeStage?: DiscussProceedStage
   activeStatus?: "waiting" | "running" | "done"
   interactive: boolean
   onToggleGate(stage: DiscussProceedStage): void
 }>): React.JSX.Element {
+  const activeIndex = props.activeStage === undefined
+    ? -1
+    : DISCUSS_PROCEED_STAGE_ORDER.indexOf(props.activeStage)
   return (
-    <div
+    <ol
       className={`creation-desk-proceed-stages${props.interactive ? " interactive" : " readonly"}`}
       data-testid="creation-desk-proceed-stages"
       data-mode={props.mode}
-      role="list"
       aria-label={props.interactive ? "自定义推进节点" : "当前推进阶段"}
     >
-      {DISCUSS_PROCEED_STAGE_ORDER.map((stage) => {
-        const auto = props.gates[stage]
+      {DISCUSS_PROCEED_STAGE_ORDER.map((stage, index) => {
+        const auto = resolveProceedAutonomy({
+          mode: props.mode,
+          stage,
+          customGates: props.gates,
+          agentMode: props.agentMode,
+        })
         const isActive = props.activeStage === stage
+        const isDone = activeIndex >= 0 && (
+          index < activeIndex
+          || (isActive && props.activeStatus === "done")
+        )
         const status = isActive ? (props.activeStatus ?? "running") : undefined
-        if (props.interactive) {
-          return (
-            <button
-              key={stage}
-              type="button"
-              role="listitem"
-              className={`creation-desk-proceed-stage${auto ? " auto" : " stop"}${isActive ? ` active status-${status ?? "running"}` : ""}`}
-              data-testid={`creation-desk-proceed-stage-${stage}`}
-              aria-pressed={auto}
-              title={auto ? "自动：点击改为停等" : "停等：点击改为自动"}
-              onClick={() => { props.onToggleGate(stage) }}
-            >
-              <span className="creation-desk-proceed-stage-label">{PROCEED_STAGE_LABELS[stage]}</span>
-              <span className="creation-desk-proceed-stage-gate">{auto ? "自动" : "停等"}</span>
-            </button>
-          )
-        }
+        const stateClass = isActive
+          ? ` is-active status-${status ?? "running"}`
+          : isDone
+            ? " is-done"
+            : " is-todo"
+        const label = PROCEED_STAGE_LABELS[stage]
+        const gateText = auto ? "自动" : "停等"
+        const content = <>
+          <span className="creation-desk-proceed-stage-label">{label}</span>
+          <span className="creation-desk-proceed-stage-gate">{gateText}</span>
+        </>
         return (
-          <span
-            key={stage}
-            role="listitem"
-            className={`creation-desk-proceed-stage${isActive ? ` active status-${status ?? "running"}` : ""}`}
-            data-testid={`creation-desk-proceed-stage-${stage}`}
-          >
-            <span className="creation-desk-proceed-stage-label">{PROCEED_STAGE_LABELS[stage]}</span>
-          </span>
+          <li key={stage} className={`creation-desk-proceed-step${stateClass}${auto ? " auto" : " stop"}`}>
+            {index > 0 ? <span className="creation-desk-proceed-connector" aria-hidden="true" /> : null}
+            {props.interactive
+              ? <button
+                  type="button"
+                  className="creation-desk-proceed-stage"
+                  data-testid={`creation-desk-proceed-stage-${stage}`}
+                  aria-current={isActive ? "step" : undefined}
+                  aria-pressed={auto}
+                  title={auto ? `${label} · 自动：点击改为停等` : `${label} · 停等：点击改为自动`}
+                  onClick={() => { props.onToggleGate(stage) }}
+                >
+                  {content}
+                </button>
+              : <span
+                  className="creation-desk-proceed-stage"
+                  data-testid={`creation-desk-proceed-stage-${stage}`}
+                  aria-current={isActive ? "step" : undefined}
+                  title={`${label} · ${gateText}`}
+                >
+                  {content}
+                </span>}
+          </li>
         )
       })}
-    </div>
+    </ol>
   )
 }
 
