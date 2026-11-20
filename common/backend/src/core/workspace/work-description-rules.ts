@@ -1,5 +1,18 @@
 /** This-work presentation overlay: all files inject every turn; AI may write here. */
 
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { dirname, join } from "node:path"
+
+const require = createRequire(import.meta.url)
+// package exports block ./package.json; resolve entry then walk to package root.
+const promptContractsEntry = require.resolve("@starseafolio/prompt-contracts")
+const promptContractsRoot = dirname(dirname(promptContractsEntry))
+const DEAI_DESCRIPTION_RULE_FILE = join(
+  promptContractsRoot,
+  "resources/presentation/表现输出/描写规则/去AI味.md",
+)
+
 export const WORK_DESCRIPTION_RULES_DIR = "表现输出/本作品描写"
 export const DESCRIPTION_RULES_DIR = "表现输出/描写规则"
 export const PROSE_STYLE_RULES_DIR = "表现输出/笔风规则"
@@ -83,67 +96,9 @@ export const SENSORY_DESCRIPTION_RULE_MARKDOWN = [
 
 /**
  * Platform seed: always-on anti-AI-slop baseline.
- * Synthesized from common fiction deslop practice (banned tells, show-don't-explain, speech-like dialogue).
+ * Source of truth is the presentation markdown (includes full external原文 blocks; do not re-summarize here).
  */
-export const DEAI_DESCRIPTION_RULE_MARKDOWN = [
-  "# 去AI味",
-  "",
-  "> 职责：压掉机器腔与模板句，让正文读起来像人写的场面。不管题材腔、笔风词表；那些由笔风规则 / 本作品描写负责。",
-  ">",
-  "> **完整去味 / 对话 / 人味 / 情绪演出**：以平台 skill（`load_skill` / 阶段默认包）中的 `chinese-webnovel-skills` vendor 原文为准（MIT，StarseaFolio 不擅自删改）。本文件是描写目录里的**短基线提醒**；冲突时以更具体的 skill 条款为准。",
-  "",
-  "## 本轮身份",
-  "",
-  "本文件是描写**基线**，每轮正式推演与创作台讨论都会注入，不论下拉选「自动」还是锁定某一场面卡。",
-  "切镜与密度仍由场面卡负责；感官落点时机由 `感官描写.md` 负责；本文件只管「别写成 AI 套话」。",
-  "作品专属禁用词、口头禅偏好写在 `表现输出/本作品描写/`，可叠加在本基线之上。",
-  "",
-  "## 硬约束",
-  "",
-  "- **信任读者**：场面已经演出来的情绪/关系，禁止再跟一句作者总结（「他明白了」「这意味着」「真正重要的是」「从这一刻起」「你刚才说了三句话」）。",
-  "- **落到具体**：关键情绪用动作、物件、声音、后果承载；禁止空挂「感到一丝XX」「涌起一股XX」「一种说不清的感觉」「他不是不敢他是怕」。",
-  "- **对话像说话**：可打断、吞字、说偏一点；禁止人人出口成章、句句金句。",
-  "- **对话有功能**：禁止 A 半截话 → B「什么/担什么」→ A 再解释的乒乓球（详见 vendor dialogue）。",
-  "- **句式要有起伏**：长短交错；禁止整段同长并列、三连排比感官清单当装饰。",
-  "- **意图优先**：保留人物表达的目的、对象与因果；比喻不得偷换原意。作品未设古风且用户未指定时，不擅自写成仿古腔，细则按平台正文规则执行。",
-  "- **章末单一钩**：禁止对仗双「他知道…也知道…」升华收束；只留一个动作或一条具体信息。",
-  "- **不要为去味而注水**：删套话后用当场证据补上，不要机械换同义词，也不要故意错字装人。",
-  "",
-  "## 优先杀掉的模板（正文尽量不出现）",
-  "",
-  "### 中文高频套话",
-  "",
-  "- 眼中闪过一丝… / 眼神里写满了… / 目光如炬 / 眸光",
-  "- 嘴角勾起一抹… / 嘴角微扬 / 扯出一抹笑",
-  "- 心中涌起一股… / 不禁… / 不由自主… / 他感到… / 他意识到…",
-  "- 空气仿佛凝固 / 时间在这一刻静止 / 沉默变得沉重",
-  "- 映入眼帘 / 只见 / 此时此刻 / 深吸一口气（作万能转场）",
-  "- 「不是A，而是B」/「是A，不是B」及变体「不A，是B」「觉不出A，只觉出B」「手/心不是他的」；「声音不大，却带着…」；「带着一丝XX地说」",
-  "- **否定排比造意味**：「没有A，没有B」及「没给A，也没给B」等变体；尤其禁止把无因果关系的两项缺失排成齐整句式，硬造冷酷、命运感或金句感（如「刘悠没给她纸，也没给她编号」）。两项事实都要保留时，写清共同事件/制度因果和实际后果；无共同因果就拆开叙述，不能擅自补动作或动机。",
-  "- 「取而代之的是…」；「浑身散发着一股…气息/气场」；「命运/齿轮/棋局」收束升华",
-  "- 连续堆砌「一丝 / 一抹 / 仿佛 / 似乎 / 显得有些 / 微微 / 淡淡 / 缓缓」",
-  "- 人人出口成章、句句机锋；长段一次讲透的推理口播",
-  "- 对白乒乓球：「我要担。」「担什么？」——第二句若只搭台阶就删",
-  "",
-  "### 英文/翻译腔常见 AI tell（若正文出现英式转写也禁）",
-  "",
-  "- a sense of… / couldn't help but (feel) / a pang/wave of… washed over",
-  "- eyes widened / heart pounded in his chest / let out a breath he didn't know he was holding",
-  "- the air was thick with… / piercing … eyes / a knowing smile",
-  "",
-  "## 正向替代（原则，不规定用词）",
-  "",
-  "- 要写怒/怕/欲：写手、呼吸、距离、物件、话说到一半停住——不要贴标签。",
-  "- 要写好看/可怕/臭：落到观察者当场看见或闻到的一点（与 `感官描写.md` 配合），不要只说「很好看/很可怕」。",
-  "- 场面结束后直接切下一动作或对白；不要加旁白讲课。",
-  "- 比喻须来自角色生活经验；禁止万能「像一把刀/像潮水」无差别乱贴。",
-  "",
-  "## 不做的事",
-  "",
-  "- 不规定必须冷峻、必须口语、必须短句——那是笔风规则的事。",
-  "- 不要求每句都「骚操作」；过场可以平。",
-  "- 人物对白里允许说套话（若符合性格）；作者叙述禁止套话。",
-].join("\n")
+export const DEAI_DESCRIPTION_RULE_MARKDOWN = readFileSync(DEAI_DESCRIPTION_RULE_FILE, "utf8")
 
 /** Platform seed for dropdown「自动」: conductor for switching sibling description presets. */
 export const AUTO_DESCRIPTION_RULE_MARKDOWN = [
