@@ -647,6 +647,9 @@ export class BackendFacade {
             ? {}
             : { noProgressGuardLimit: payload.noProgressGuardLimit }),
           ...(payload.agentMode === undefined ? {} : { agentMode: payload.agentMode }),
+          ...(payload.writePermissionMode === undefined
+            ? {}
+            : { writePermissionMode: payload.writePermissionMode }),
         })
         const assistant = [...result.messages].reverse().find((message) => message.role === "assistant")
         await runtime.mirrorDiscussTurnToFolio({

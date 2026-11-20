@@ -449,6 +449,40 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
+  it("lists proceedProgress from disk without a send turn", async () => {
+    await withScript((_call, request) => {
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return { choices }
+    }, async (harness) => {
+      await clearChapterPlanningMaterials(harness)
+      const listed = await harness.facade.handle({
+        protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method: "synopsis.conversation.list",
+        payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef },
+      })
+      if (!listed.ok) throw new Error(listed.error.message)
+      expect((listed.data as { proceedProgress?: { stage: string } }).proceedProgress?.stage)
+        .toBe("chapter_requirements")
+    })
+  })
+
+  it("does not auto-continue on continueTurn alone without 入库 or open todos", async () => {
+    await withScript((_call, request) => {
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return {
+        assistantMessage: "先对齐本章目标，暂不落盘下一阶段材料。",
+        choices,
+        continueTurn: true,
+      }
+    }, async (_harness, send) => {
+      const sent = await send({
+        message: "我们只讨论一下，先不要继续代发。",
+        proceedMode: "single",
+        batchProceed: false,
+      })
+      expect(sent.autoContinue).toBeUndefined()
+    })
+  })
+
   it("waits for draft confirmation instead of executing every alternative", async () => {
     await withScript((_call, request) => {
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
@@ -581,21 +615,25 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
   })
 
   it("stops automatic continuation across turns that make no durable progress", async () => {
+    const stagnant = "# 第一章 剧情梗概\n\n林烬停在站台口，这一句不再推进。"
     await withScript((_call, request) => {
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
-      return { choices, continueTurn: true }
+      // Rewriting the same body keeps auto-continue via 入库 path, but fingerprint stalls.
+      return { synopsisBody: stagnant, choices }
     }, async (_harness, send) => {
-      const results = []
-      for (let turn = 0; turn < 2; turn += 1) results.push(await send({ message: "继续检查当前进度" }))
-      expect(results[0]?.autoContinue).toBeDefined()
-      await expect(send({ message: "继续检查当前进度" })).rejects.toThrow(/3.*没有实际内容进展.*停止/)
+      const extra = { message: "继续检查当前进度" }
+      // First rewrite differs from harness seed → progress; later identical rewrites stall.
+      expect((await send(extra)).autoContinue).toBeDefined()
+      expect((await send(extra)).autoContinue).toBeDefined()
+      expect((await send(extra)).autoContinue).toBeDefined()
+      await expect(send(extra)).rejects.toThrow(/3.*没有实际内容进展.*停止/)
     })
   })
 
   it("keeps batch continuation available while real planning content changes", async () => {
     await withScript((call, request) => {
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
-      return { synopsisBody: `# 第一章 剧情梗概\n\n林烬发现信后追查线索，当前追查到第${String(call)}处站台。`, choices, continueTurn: true }
+      return { synopsisBody: `# 第一章 剧情梗概\n\n林烬发现信后追查线索，当前追查到第${String(call)}处站台。`, choices }
     }, async (_harness, send) => {
       for (let turn = 0; turn < 5; turn += 1) {
         const sent = await send({ message: "继续完善当前章梗概" })
@@ -605,9 +643,15 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
   })
 
   it("does not count a successful planning update as a failed no-progress turn", async () => {
+    const stagnant = "# 第一章 剧情梗概\n\n林烬在旧站台找到信件，并决定追查失踪者。"
     await withScript((call, request) => {
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
-      return { ...(call === 1 ? { synopsisBody: "# 第一章 剧情梗概\n\n林烬在旧站台找到信件，并决定追查失踪者。" } : {}), choices, continueTurn: true }
+      return {
+        synopsisBody: call === 1
+          ? stagnant
+          : stagnant,
+        choices,
+      }
     }, async (_harness, send) => {
       const extra = { message: "继续完善当前章规划" }
       for (let turn = 0; turn < 3; turn += 1) expect((await send(extra)).autoContinue).toBeDefined()

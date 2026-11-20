@@ -161,6 +161,7 @@ type Props = Readonly<{
     agentMode?: "auto" | "plan" | "accept_edits"
     proceedMode?: "precise" | "single" | "batch" | "custom"
     customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
+    writePermissionMode?: "full" | "settings_write_confirm"
     noProgressGuardEnabled?: boolean
     noProgressGuardLimit?: number
     setupAnswerTo?: string

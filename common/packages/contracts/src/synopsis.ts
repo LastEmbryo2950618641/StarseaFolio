@@ -176,6 +176,14 @@ export type SynopsisConversationStreamRun = z.infer<typeof synopsisConversationS
 export const discussAgentModeSchema = z.enum(["auto", "plan", "accept_edits"])
 export type DiscussAgentMode = z.infer<typeof discussAgentModeSchema>
 
+/**
+ * Creation-desk write permission (更多操作):
+ * - full: write settings / overlays without confirmation (default; proceed mode still gates chapter pipeline)
+ * - settings_write_confirm: stagingPromote to 设定集 requires explicit「确认落盘」
+ */
+export const discussWritePermissionModeSchema = z.enum(["full", "settings_write_confirm"])
+export type DiscussWritePermissionMode = z.infer<typeof discussWritePermissionModeSchema>
+
 /** Creation-desk chapter proceed mode (replaces the boolean 批量推进 toggle). */
 export const discussProceedModeSchema = z.enum(["precise", "single", "batch", "custom"])
 export type DiscussProceedMode = z.infer<typeof discussProceedModeSchema>
@@ -388,6 +396,8 @@ export const synopsisConversationListResultSchema = z.object({
   session: synopsisConversationSessionSchema.optional(),
   messages: z.array(synopsisConversationMessageSchema),
   usage: synopsisConversationStreamUsageSchema.optional(),
+  /** Disk-derived pipeline stage for the active focus chapter (no send required). */
+  proceedProgress: discussProceedProgressSchema.optional(),
 })
 export type SynopsisConversationListResult = z.infer<typeof synopsisConversationListResultSchema>
 
@@ -395,6 +405,7 @@ export const synopsisConversationStartResultSchema = z.object({
   session: synopsisConversationSessionSchema,
   messages: z.array(synopsisConversationMessageSchema),
   usage: synopsisConversationStreamUsageSchema.optional(),
+  proceedProgress: discussProceedProgressSchema.optional(),
 })
 export type SynopsisConversationStartResult = z.infer<typeof synopsisConversationStartResultSchema>
 

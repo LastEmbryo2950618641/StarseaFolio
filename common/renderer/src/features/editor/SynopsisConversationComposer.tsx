@@ -12,6 +12,7 @@ import {
   type DiscussFocusKind,
   type DiscussProceedMode,
   type DiscussProceedStage,
+  type DiscussWritePermissionMode,
   type SynopsisConversationMessage,
   type SynopsisConversationSession,
   type SynopsisConversationStreamSnapshot,
@@ -58,6 +59,11 @@ import {
   loadDiscussAgentMode,
   persistDiscussAgentMode,
 } from "./discuss-agent-mode.js"
+import {
+  DISCUSS_WRITE_PERMISSION_OPTIONS,
+  loadDiscussWritePermissionMode,
+  persistDiscussWritePermissionMode,
+} from "./discuss-write-permission.js"
 import {
   DISCUSS_PROCEED_STAGE_ORDER,
   loadCustomProceedGates,
@@ -151,6 +157,7 @@ type Props = Readonly<{
     agentMode?: DiscussAgentMode
     proceedMode?: DiscussProceedMode
     customProceedGates?: DiscussCustomProceedGates
+    writePermissionMode?: DiscussWritePermissionMode
     noProgressGuardEnabled?: boolean
     noProgressGuardLimit?: number
     setupAnswerTo?: string
@@ -189,6 +196,9 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const [todoOpen, setTodoOpen] = useState(false)
   const [agentMode, setAgentMode] = useState<DiscussAgentMode>(() => loadDiscussAgentMode())
   const [proceedMode, setProceedMode] = useState<DiscussProceedMode>(() => loadProceedMode())
+  const [writePermissionMode, setWritePermissionMode] = useState<DiscussWritePermissionMode>(
+    () => loadDiscussWritePermissionMode(),
+  )
   const [noProgressGuard, setNoProgressGuard] = useState(() => loadNoProgressGuardPrefs())
   const [customProceedGates, setCustomProceedGates] = useState<DiscussCustomProceedGates>(() => loadCustomProceedGates())
   const [lastProceedProgress, setLastProceedProgress] = useState<SynopsisConversationStreamSnapshot["proceedProgress"]>()
@@ -258,12 +268,22 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
       agentMode,
       proceedMode,
       ...(proceedMode === "custom" ? { customProceedGates } : {}),
+      writePermissionMode,
       noProgressGuardEnabled: noProgressGuard.enabled,
       noProgressGuardLimit: noProgressGuard.limit,
       ...(setupAnswerTo === undefined ? {} : { setupAnswerTo }),
     })
     await goals.refresh()
-  }, [agentMode, customProceedGates, goals.refresh, noProgressGuard, proceedMode, props.messages, props.onSend])
+  }, [
+    agentMode,
+    customProceedGates,
+    goals.refresh,
+    noProgressGuard,
+    proceedMode,
+    props.messages,
+    props.onSend,
+    writePermissionMode,
+  ])
 
   const visibleTodos = resolveDiscussTodos(props.stream, props.messages)
 
@@ -733,6 +753,11 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
             setAgentMode(mode)
             persistDiscussAgentMode(mode)
           }}
+          writePermissionMode={writePermissionMode}
+          onWritePermissionModeChange={(mode) => {
+            setWritePermissionMode(mode)
+            persistDiscussWritePermissionMode(mode)
+          }}
           todos={visibleTodos}
           todoOpen={todoOpen}
           todoMenuRef={todoMenuRef}
@@ -782,6 +807,8 @@ type ComposerInputProps = Readonly<{
   onReasoningEffortChange(effort: ReasoningEffort): void
   agentMode: DiscussAgentMode
   onAgentModeChange(mode: DiscussAgentMode): void
+  writePermissionMode: DiscussWritePermissionMode
+  onWritePermissionModeChange(mode: DiscussWritePermissionMode): void
   todos: readonly SynopsisConversationTodo[]
   todoOpen: boolean
   todoMenuRef: React.RefObject<HTMLDivElement | null>
@@ -965,6 +992,31 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
       </div>
   const advancedContent = <div className="creation-desk-advanced-panel" role={mobile ? undefined : "menu"} data-testid="creation-desk-advanced-menu">
     {mobile ? modelControls : null}
+    <div
+      className="creation-desk-write-permission"
+      data-testid="creation-desk-write-permission"
+      onClick={(event) => { event.stopPropagation() }}
+      onKeyDown={(event) => { event.stopPropagation() }}
+    >
+      <label>
+        <span>权限模式</span>
+        <select
+          aria-label="权限模式"
+          data-testid="creation-desk-write-permission-mode"
+          value={props.writePermissionMode}
+          onChange={(event) => {
+            props.onWritePermissionModeChange(event.target.value as DiscussWritePermissionMode)
+          }}
+        >
+          {DISCUSS_WRITE_PERMISSION_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value} title={option.hint}>{option.label}</option>
+          ))}
+        </select>
+      </label>
+      <p className="creation-desk-advanced-hint">
+        {DISCUSS_WRITE_PERMISSION_OPTIONS.find((option) => option.value === props.writePermissionMode)?.hint}
+      </p>
+    </div>
     <div
       className="creation-desk-no-progress-guard"
       data-testid="creation-desk-no-progress-guard"
@@ -1752,7 +1804,7 @@ function ProceedStageBar(props: Readonly<{
             ? " is-done"
             : " is-todo"
         const label = PROCEED_STAGE_LABELS[stage]
-        const gateText = auto ? "自动" : "停等"
+        const gateText = isActive ? "当前" : auto ? "自动" : "停等"
         const content = <>
           <span className="creation-desk-proceed-stage-label">{label}</span>
           <span className="creation-desk-proceed-stage-gate">{gateText}</span>
@@ -1767,7 +1819,9 @@ function ProceedStageBar(props: Readonly<{
                   data-testid={`creation-desk-proceed-stage-${stage}`}
                   aria-current={isActive ? "step" : undefined}
                   aria-pressed={auto}
-                  title={auto ? `${label} · 自动：点击改为停等` : `${label} · 停等：点击改为自动`}
+                  title={isActive
+                    ? `${label} · 当前阶段`
+                    : auto ? `${label} · 自动：点击改为停等` : `${label} · 停等：点击改为自动`}
                   onClick={() => { props.onToggleGate(stage) }}
                 >
                   {content}
@@ -1776,7 +1830,7 @@ function ProceedStageBar(props: Readonly<{
                   className="creation-desk-proceed-stage"
                   data-testid={`creation-desk-proceed-stage-${stage}`}
                   aria-current={isActive ? "step" : undefined}
-                  title={`${label} · ${gateText}`}
+                  title={isActive ? `${label} · 当前阶段` : `${label} · ${auto ? "自动" : "停等"}`}
                 >
                   {content}
                 </span>}
