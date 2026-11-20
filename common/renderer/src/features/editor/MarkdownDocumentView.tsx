@@ -103,20 +103,10 @@ export function MarkdownDocumentView(props: Props): React.JSX.Element {
   )
 }
 
-function MarkdownPreview(props: Readonly<{ content: string }>): React.JSX.Element {
-  return (
-    <div className="md-document-preview" data-testid="md-document-preview">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code: MarkdownCode,
-          pre: ({ children }) => <>{children}</>,
-        }}
-      >
-        {props.content}
-      </ReactMarkdown>
-    </div>
-  )
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
+
+function MarkdownPre(props: Readonly<{ children?: ReactNode }>): React.JSX.Element {
+  return <>{props.children}</>
 }
 
 function MarkdownCode(props: Readonly<{
@@ -143,6 +133,24 @@ function MarkdownCode(props: Readonly<{
   return <code className="md-document-inline-code">{props.children}</code>
 }
 
+const MARKDOWN_COMPONENTS = {
+  code: MarkdownCode,
+  pre: MarkdownPre,
+}
+
+function MarkdownPreview(props: Readonly<{ content: string }>): React.JSX.Element {
+  return (
+    <div className="md-document-preview" data-testid="md-document-preview">
+      <ReactMarkdown
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
+      >
+        {props.content}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
 let mermaidReady: Promise<typeof import("mermaid").default> | undefined
 
 function loadMermaid(): Promise<typeof import("mermaid").default> {
@@ -153,6 +161,9 @@ function loadMermaid(): Promise<typeof import("mermaid").default> {
         securityLevel: "strict",
         theme: "dark",
         fontFamily: "inherit",
+        flowchart: { useMaxWidth: false },
+        sequence: { useMaxWidth: false },
+        gantt: { useMaxWidth: false },
       })
       return mod.default
     })
@@ -172,14 +183,17 @@ function MermaidDiagram(props: Readonly<{ chart: string }>): React.JSX.Element {
     void (async () => {
       try {
         const mermaid = await loadMermaid()
-        const renderId = `md-mermaid-${reactId}-${Math.random().toString(36).slice(2, 9)}`
+        // Stable id across remounts; clear any leftover node before re-render.
+        const renderId = `md-mermaid-${reactId}`
+        document.getElementById(renderId)?.remove()
         const { svg } = await mermaid.render(renderId, props.chart)
         if (cancelled || hostRef.current === null) return
         hostRef.current.innerHTML = svg
-        setError(undefined)
+        setError((prev) => (prev === undefined ? prev : undefined))
       } catch (cause) {
         if (cancelled) return
-        setError(cause instanceof Error ? cause.message : String(cause))
+        const message = cause instanceof Error ? cause.message : String(cause)
+        setError((prev) => (prev === message ? prev : message))
         if (hostRef.current !== null) hostRef.current.innerHTML = ""
       }
     })()

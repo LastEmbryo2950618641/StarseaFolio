@@ -1843,6 +1843,8 @@ a.project-rail-download {
 .md-document-preview {
   height: 100%;
   overflow: auto;
+  /* Prevent tall Mermaid SVGs from oscillating scrollbar ↔ width ↔ height. */
+  scrollbar-gutter: stable;
   padding: 28px 56px 40px 28px;
   color: #dbdee1;
   font-size: 15px;
@@ -1927,14 +1929,23 @@ a.project-rail-download {
   border-radius: 10px;
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-input) 80%, transparent);
-  overflow: auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 .md-mermaid-host {
-  display: flex;
-  justify-content: center;
+  display: block;
+  min-width: 0;
   min-height: 40px;
+  /* Isolate Mermaid label metrics from preview typography inheritance. */
+  font-size: 16px;
+  line-height: normal;
+  overflow-wrap: normal;
+  text-align: center;
 }
 .md-mermaid-host svg {
+  display: block;
+  margin: 0 auto;
   max-width: 100%;
   height: auto;
 }

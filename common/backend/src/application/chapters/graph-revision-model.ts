@@ -15,8 +15,11 @@ export function createGraphRevisionModel(
 ): AIModelPort {
   const idleTimeoutMs = config.idleTimeoutMs ?? 120_000
   const firstTokenTimeoutMs = config.firstTokenTimeoutMs ?? 300_000
+  const compressContext = model.compressContext?.bind(model)
   return {
     ...(model.info === undefined ? {} : { info: model.info }),
+    // Chapter graph sync still needs fold support; do not drop optional ports.
+    ...(compressContext === undefined ? {} : { compressContext }),
     execute: async (request, options) => {
       options?.signal?.throwIfAborted()
       const idleController = new AbortController()

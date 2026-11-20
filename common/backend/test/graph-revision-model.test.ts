@@ -15,6 +15,22 @@ const request = (): PhaseRequestEnvelope => ({
 })
 
 describe("graph revision model", () => {
+  it("forwards compressContext so graph sync can fold long context", async () => {
+    const fake = new FakeAiModelAdapter()
+    const compressContext = vi.fn<NonNullable<AIModelPort["compressContext"]>>((input) => fake.compressContext(input))
+    const wrapped = createGraphRevisionModel({ info: fake.info, execute: fake.execute.bind(fake), compressContext }, () => undefined)
+    expect(wrapped.compressContext).toBeTypeOf("function")
+    const result = await wrapped.compressContext!({ texts: ["old chapter history"] })
+    expect(compressContext).toHaveBeenCalledOnce()
+    expect(result.summary.length).toBeGreaterThan(0)
+  })
+
+  it("omits compressContext when the inner model lacks it", () => {
+    const fake = new FakeAiModelAdapter()
+    const wrapped = createGraphRevisionModel({ info: fake.info, execute: fake.execute.bind(fake) }, () => undefined)
+    expect(wrapped.compressContext).toBeUndefined()
+  })
+
   it("keeps canonical prose, rules and this task while projecting out other phase exchanges", async () => {
     const input = request()
     const messages: VisibleModelContextMessage[] = ["system_rules", "canonical_chapter", "chapter_revision", "phase_request", "phase_response", "phase_instruction"].map((kind, sequence) => ({
