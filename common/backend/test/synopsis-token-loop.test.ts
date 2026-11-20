@@ -12,8 +12,38 @@ import { peekSynopsisModelBudgetAdvisory } from "../src/application/chapters/syn
 import { serializeVolumePlanningState } from "../src/application/chapters/volume-planning-gate.js"
 import { ChapterRevisionService, RevisionInvalidStateError } from "../src/application/chapters/chapter-revision-service.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
-import { DEFAULT_VOLUME_FOLDER_NAME, deriveSynopsisMarkdownPath, deriveOutlineMarkdownPath, siblingPlanningMarkdownPath } from "../src/core/index.js"
+import { DEFAULT_VOLUME_FOLDER_NAME, deriveSynopsisMarkdownPath, deriveOutlineMarkdownPath, digest, siblingPlanningMarkdownPath } from "../src/core/index.js"
 import { confirmedVolumeStorylineFixture, openChapterHarness, prepareChapterPlanning, seedCommittedChapter, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+
+const EMPTY_SYNOPSIS = "# 第一章 雨夜旧站台 剧情梗概\n\n"
+const EMPTY_OUTLINE = "# 第一章 雨夜旧站台 剧情细纲\n\n"
+
+async function clearChapterPlanningMaterials(harness: ChapterHarness): Promise<string> {
+  const listed = await harness.facade.handle({
+    protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method: "synopsis.conversation.list",
+    payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef },
+  })
+  if (!listed.ok) throw new Error(listed.error.message)
+  const synopsisPath = (listed.data as { session: { synopsisPath: string } }).session.synopsisPath
+  const outlinePath = siblingPlanningMarkdownPath(synopsisPath, "outline")
+  if (outlinePath === undefined) throw new Error("missing outline path")
+  await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, synopsisPath, EMPTY_SYNOPSIS)
+  await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, outlinePath, EMPTY_OUTLINE)
+  const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+  try {
+    database.prepare(`
+      update synopsis_conversation_sessions
+      set synopsis_confirmed_at_ms = null,
+          last_agent_digest = ?,
+          last_outline_agent_digest = ?,
+          focus_kind = 'plot_synopsis'
+      where project_id = ? and chapter_sequence = 1
+    `).run(digest(EMPTY_SYNOPSIS), digest(EMPTY_OUTLINE), harness.projectId)
+  } finally {
+    database.close()
+  }
+  return synopsisPath
+}
 
 const todos = [{ id: "draft", content: "生成正文草稿", status: "in_progress" as const }]
 const draft = { base: "body", heading: "第一章 雨夜旧站台", body: "林烬走进雨夜的旧站台，灯下多了一封没有落款的信。他展开信纸，认出了失踪者的字迹。" }
@@ -359,7 +389,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
-  it("auto-continues to the outline after a batch-written synopsis without model continuation flags", async () => {
+  it("auto-continues after a batch-written synopsis without forcing the next stage", async () => {
     let calls = 0
     const synopsisBody = "# 第一章 雨夜旧站台 剧情梗概\n主角在旧站台发现一封来自失踪者的信，并决定追查信件来源。"
     await withScript((call, request) => {
@@ -372,8 +402,50 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       expect(calls).toBe(1)
       expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, sent.session.synopsisPath))
         .toContain("来自失踪者的信")
-      expect(sent.autoContinue?.message).toContain("剧情梗概已写入并通过状态门禁")
-      expect(sent.autoContinue?.message).toContain("写入本章细纲")
+      expect(sent.proceedProgress?.stage).toBe("synopsis_discuss")
+      expect(sent.autoContinue?.message).toContain("剧情梗概已入库")
+      expect(sent.autoContinue?.message).toContain("进入梗概阶段")
+      expect(sent.autoContinue?.message).not.toContain("推进尚未完成的下一步")
+    })
+  })
+
+  it("keeps chapter_requirements on discuss-only turns and does not push next materials", async () => {
+    await withScript((_call, request) => {
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return {
+        assistantMessage: "先对齐本章要写什么：雨夜旧站台与失踪者信件。",
+        choices,
+        continueTurn: true,
+      }
+    }, async (harness, send) => {
+      await clearChapterPlanningMaterials(harness)
+      const sent = await send({
+        message: "我们先讨论一下这一章要写什么，先不要落盘。",
+        proceedMode: "precise",
+        batchProceed: false,
+      })
+      expect(sent.proceedProgress?.stage).toBe("chapter_requirements")
+      expect(sent.autoContinue).toBeUndefined()
+      expect(sent.messages.at(-1)?.content ?? "").not.toMatch(/写入(?:本章)?细纲|去写梗概/)
+    })
+  })
+
+  it("advances proceed stage only after synopsis 入库", async () => {
+    const synopsisBody = "# 第一章 雨夜旧站台 剧情梗概\n\n主角在旧站台发现失踪者的信，决定追查来源。"
+    await withScript((_call, request) => {
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return { synopsisBody, choices }
+    }, async (harness, send) => {
+      const synopsisPath = await clearChapterPlanningMaterials(harness)
+      const sent = await send({
+        message: "把本章梗概写好并入库。",
+        proceedMode: "single",
+        batchProceed: false,
+      })
+      expect(sent.proceedProgress?.stage).toBe("synopsis_discuss")
+      expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, synopsisPath))
+        .toContain("失踪者的信")
+      expect(sent.autoContinue?.message).toContain("剧情梗概已入库")
     })
   })
 

@@ -173,6 +173,7 @@ type Props = Readonly<{
   onOpenSynopsisFile(path: string): void
   onSetFocus?(sequence: number, focusKind: DiscussFocusKind): void
   focusChapters?: readonly DiscussFocusChapterOption[]
+  volumeTargetChapterCount?: number
   onOpenSettingsLineage?(): void
   requireCompleteHookSchedules?: boolean
   chapterWorkflowEnabled?: boolean
@@ -282,6 +283,9 @@ export function EditorArea(props: Props): React.JSX.Element {
         onOpenSynopsisFile={props.onOpenSynopsisFile}
         {...(props.onSetFocus === undefined ? {} : { onSetFocus: props.onSetFocus })}
         {...(props.focusChapters === undefined ? {} : { focusChapters: props.focusChapters })}
+        {...(props.volumeTargetChapterCount === undefined
+          ? {}
+          : { volumeTargetChapterCount: props.volumeTargetChapterCount })}
         {...(props.onOpenSettingsLineage === undefined
           ? {}
           : { onOpenSettingsLineage: props.onOpenSettingsLineage })}

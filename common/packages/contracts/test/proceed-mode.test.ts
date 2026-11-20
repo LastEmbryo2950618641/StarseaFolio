@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   DEFAULT_CUSTOM_PROCEED_GATES,
+  resolveDiscussPipelineStage,
   resolveDiscussProceedMode,
   resolveProceedAutonomy,
   resolveProceedNextChapterAutonomy,
@@ -93,6 +94,41 @@ describe("discuss proceed mode contracts", () => {
       },
     })
     expect(custom.customProceedGates?.body_discuss).toBe(true)
+  })
+
+  it("derives pipeline stage from durable materials, not from discussion alone", () => {
+    expect(resolveDiscussPipelineStage({
+      synopsisReady: false,
+      outlineReady: false,
+      draftReady: false,
+    })).toBe("chapter_requirements")
+    expect(resolveDiscussPipelineStage({
+      synopsisReady: true,
+      outlineReady: false,
+      draftReady: false,
+    })).toBe("synopsis_discuss")
+    expect(resolveDiscussPipelineStage({
+      synopsisReady: true,
+      outlineReady: true,
+      draftReady: false,
+    })).toBe("outline_discuss")
+    expect(resolveDiscussPipelineStage({
+      synopsisReady: true,
+      outlineReady: true,
+      draftReady: true,
+    })).toBe("draft_discuss")
+    expect(resolveDiscussPipelineStage({
+      synopsisReady: true,
+      outlineReady: true,
+      draftReady: true,
+      awaitingBodyConfirm: true,
+    })).toBe("body_discuss")
+    expect(resolveDiscussPipelineStage({
+      synopsisReady: true,
+      outlineReady: true,
+      draftReady: true,
+      chapterPublished: true,
+    })).toBe("body_discuss")
   })
 
   it("carries proceedProgress on stream snapshot and send result", () => {

@@ -672,6 +672,19 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     )) || stream.editing.some((edit) => edit.kind === "draft")
   }, [agentAutoChainActive, batchStatus.running, synopsisConversationBusy, synopsisStream])
 
+  const activeVolumeTargetChapterCount = useMemo(() => {
+    const sessionVolume = discussFocusChapters
+      .find((chapter) => chapter.sequence === synopsisConversation.session?.chapterSequence)
+      ?.volumeFolderName
+    if (sessionVolume === undefined) return undefined
+    const plan = volumeBatchPlan?.volumeFolderName === sessionVolume ? volumeBatchPlan : undefined
+    return plan !== undefined && plan.targetChapterCount > 0 ? plan.targetChapterCount : undefined
+  }, [
+    discussFocusChapters,
+    synopsisConversation.session?.chapterSequence,
+    volumeBatchPlan,
+  ])
+
   const batchProgressRows = useMemo(() => {
     const sessionVolume = discussFocusChapters
       .find((chapter) => chapter.sequence === synopsisConversation.session?.chapterSequence)
@@ -3573,6 +3586,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           onOpenSynopsisFile={(path) => { void openFile(path); }}
           onSetFocus={(sequence, focusKind) => { void setDiscussFocus(sequence, focusKind); }}
           focusChapters={discussFocusChapters}
+          {...(activeVolumeTargetChapterCount === undefined
+            ? {}
+            : { volumeTargetChapterCount: activeVolumeTargetChapterCount })}
           onOpenSettingsLineage={() => { void openSettingsLineage() }}
           requireCompleteHookSchedules={projectSettings?.creationDesk.requireCompleteHookSchedules !== false}
           chapterWorkflowEnabled={projectSettings?.creationDesk.chapterWorkflowEnabled === true}
