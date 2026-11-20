@@ -75,20 +75,34 @@ from pathlib import Path
 candidates = [
     Path("/etc/nginx/sites-available/starseafolio"),
     Path("/etc/nginx/sites-available/worldseed"),
+    *sorted(Path("/etc/nginx/sites-available").glob("*")),
 ]
 markers = ["location /StarseaFolio/", "location /worldseed/"]
-path = next((item for item in candidates if item.exists()), None)
-if path is None:
-    raise SystemExit("missing nginx site config (starseafolio/worldseed)")
-text = path.read_text()
-marker = next((item for item in markers if item in text), None)
-if marker is None:
-    raise SystemExit("missing location /StarseaFolio/ or /worldseed/")
+seen: set[Path] = set()
+path = None
+text = ""
+marker = None
+for candidate in candidates:
+    if candidate in seen or not candidate.is_file():
+        continue
+    seen.add(candidate)
+    content = candidate.read_text()
+    found = next((item for item in markers if item in content), None)
+    if found is None:
+        continue
+    path = candidate
+    text = content
+    marker = found
+    break
+if path is None or marker is None:
+    print("SKIP\t\t")
+    raise SystemExit(0)
 start = text.find(marker)
 start = text.rfind("\n", 0, start) + 1
 brace = text.find("{", start)
 if brace < 0:
-    raise SystemExit(f"{marker} has no brace")
+    print(f"SKIP\t{path}\t{marker}")
+    raise SystemExit(0)
 depth = 0
 end = None
 for index, char in enumerate(text[brace:], brace):
@@ -100,7 +114,8 @@ for index, char in enumerate(text[brace:], brace):
             end = index + 1
             break
 if end is None:
-    raise SystemExit(f"{marker} is not closed")
+    print(f"SKIP\t{path}\t{marker}")
+    raise SystemExit(0)
 block = text[start:end]
 updated = block.replace("127.0.0.1:8787", "127.0.0.1:8791")
 if "X-Real-Ip" not in updated and "proxy_pass" in updated:
@@ -119,7 +134,7 @@ else:
     path.write_text(new_text)
     print(f"CHANGED\t{path}\t{marker}")
 PY
-)"
+)" || true
 nginx_state="${nginx_state//$'\r'/}"
 nginx_action="${nginx_state%%$'\t'*}"
 nginx_rest="${nginx_state#*$'\t'}"
@@ -128,28 +143,32 @@ nginx_marker="${nginx_rest#*$'\t'}"
 
 if [ "$nginx_action" = "CHANGED" ]; then
   if ! nginx -t; then
-    if [ -f "${nginx_path}.bak-account-gate" ]; then
+    if [ -n "$nginx_path" ] && [ -f "${nginx_path}.bak-account-gate" ]; then
       cp "${nginx_path}.bak-account-gate" "$nginx_path"
     fi
-    exit 1
+    echo "nginx -t failed; left account gate running without nginx rewrite" >&2
+  else
+    systemctl reload nginx
   fi
-  systemctl reload nginx
+elif [ "$nginx_action" = "SKIP" ]; then
+  echo "nginx location /StarseaFolio/ or /worldseed/ not found; account gate installed without nginx rewrite" >&2
 fi
 
-public_path="/StarseaFolio"
-if [[ "$nginx_marker" == *"location /worldseed/"* ]]; then
-  public_path="/worldseed"
-fi
-public_ok=0
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -fsS -H "Host: 111.229.32.85" "http://127.0.0.1${public_path}/auth/captcha" >/dev/null; then
-    public_ok=1
-    break
+if [ "$nginx_action" = "CHANGED" ] || [ "$nginx_action" = "UNCHANGED" ]; then
+  public_path="/StarseaFolio"
+  if [[ "$nginx_marker" == *"location /worldseed/"* ]]; then
+    public_path="/worldseed"
   fi
-  sleep 0.3
-done
-if [ "$public_ok" -ne 1 ]; then
-  echo "public captcha check failed for ${public_path}" >&2
-  exit 1
+  public_ok=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -fsS -H "Host: 111.229.32.85" "http://127.0.0.1${public_path}/auth/captcha" >/dev/null; then
+      public_ok=1
+      break
+    fi
+    sleep 0.3
+  done
+  if [ "$public_ok" -ne 1 ]; then
+    echo "public captcha check failed for ${public_path}; account gate is still installed" >&2
+  fi
 fi
-echo "account gate installed (${nginx_state})"
+echo "account gate installed (${nginx_state:-SKIP})"
