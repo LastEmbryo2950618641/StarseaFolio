@@ -1,5 +1,6 @@
 #!/bin/bash
-# Install the web-only account gate and point /worldseed/ at it.
+# Install the web-only account gate and point the public web location at it.
+# Prefer /StarseaFolio/ (current), fall back to legacy /worldseed/.
 # The shared backend on 127.0.0.1:8787 stays in place; this process checks the account first.
 set -euo pipefail
 
@@ -70,16 +71,24 @@ fi
 
 nginx_state="$(python3 - <<'PY'
 from pathlib import Path
-path = Path("/etc/nginx/sites-available/worldseed")
+
+candidates = [
+    Path("/etc/nginx/sites-available/starseafolio"),
+    Path("/etc/nginx/sites-available/worldseed"),
+]
+markers = ["location /StarseaFolio/", "location /worldseed/"]
+path = next((item for item in candidates if item.exists()), None)
+if path is None:
+    raise SystemExit("missing nginx site config (starseafolio/worldseed)")
 text = path.read_text()
-marker = "location /worldseed/"
+marker = next((item for item in markers if item in text), None)
+if marker is None:
+    raise SystemExit("missing location /StarseaFolio/ or /worldseed/")
 start = text.find(marker)
-if start < 0:
-    raise SystemExit("missing location /worldseed/")
 start = text.rfind("\n", 0, start) + 1
 brace = text.find("{", start)
 if brace < 0:
-    raise SystemExit("worldseed location has no brace")
+    raise SystemExit(f"{marker} has no brace")
 depth = 0
 end = None
 for index, char in enumerate(text[brace:], brace):
@@ -91,7 +100,7 @@ for index, char in enumerate(text[brace:], brace):
             end = index + 1
             break
 if end is None:
-    raise SystemExit("worldseed location is not closed")
+    raise SystemExit(f"{marker} is not closed")
 block = text[start:end]
 updated = block.replace("127.0.0.1:8787", "127.0.0.1:8791")
 if "X-Real-Ip" not in updated and "proxy_pass" in updated:
@@ -101,38 +110,46 @@ if "X-Real-Ip" not in updated and "proxy_pass" in updated:
         1,
     )
 new_text = text[:start] + updated + text[end:]
+backup = Path(str(path) + ".bak-account-gate")
 if new_text == text:
-    print("UNCHANGED")
+    print(f"UNCHANGED\t{path}\t{marker}")
 else:
-    backup = Path("/etc/nginx/sites-available/worldseed.bak-account-gate")
     if not backup.exists():
         backup.write_text(text)
     path.write_text(new_text)
-    print("CHANGED")
+    print(f"CHANGED\t{path}\t{marker}")
 PY
 )"
 nginx_state="${nginx_state//$'\r'/}"
+nginx_action="${nginx_state%%$'\t'*}"
+nginx_rest="${nginx_state#*$'\t'}"
+nginx_path="${nginx_rest%%$'\t'*}"
+nginx_marker="${nginx_rest#*$'\t'}"
 
-if [ "$nginx_state" = "CHANGED" ]; then
+if [ "$nginx_action" = "CHANGED" ]; then
   if ! nginx -t; then
-    if [ -f /etc/nginx/sites-available/worldseed.bak-account-gate ]; then
-      cp /etc/nginx/sites-available/worldseed.bak-account-gate /etc/nginx/sites-available/worldseed
+    if [ -f "${nginx_path}.bak-account-gate" ]; then
+      cp "${nginx_path}.bak-account-gate" "$nginx_path"
     fi
     exit 1
   fi
   systemctl reload nginx
 fi
 
+public_path="/StarseaFolio"
+if [[ "$nginx_marker" == *"location /worldseed/"* ]]; then
+  public_path="/worldseed"
+fi
 public_ok=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -fsS -H "Host: 111.229.32.85" http://127.0.0.1/worldseed/auth/captcha >/dev/null; then
+  if curl -fsS -H "Host: 111.229.32.85" "http://127.0.0.1${public_path}/auth/captcha" >/dev/null; then
     public_ok=1
     break
   fi
   sleep 0.3
 done
 if [ "$public_ok" -ne 1 ]; then
-  echo "public captcha check failed" >&2
+  echo "public captcha check failed for ${public_path}" >&2
   exit 1
 fi
-echo "account gate installed"
+echo "account gate installed (${nginx_state})"
