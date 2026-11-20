@@ -640,6 +640,12 @@ export class BackendFacade {
           ...(payload.batchProceed === undefined ? {} : { batchProceed: payload.batchProceed }),
           ...(payload.proceedMode === undefined ? {} : { proceedMode: payload.proceedMode }),
           ...(payload.customProceedGates === undefined ? {} : { customProceedGates: payload.customProceedGates }),
+          ...(payload.noProgressGuardEnabled === undefined
+            ? {}
+            : { noProgressGuardEnabled: payload.noProgressGuardEnabled }),
+          ...(payload.noProgressGuardLimit === undefined
+            ? {}
+            : { noProgressGuardLimit: payload.noProgressGuardLimit }),
           ...(payload.agentMode === undefined ? {} : { agentMode: payload.agentMode }),
         })
         const assistant = [...result.messages].reverse().find((message) => message.role === "assistant")

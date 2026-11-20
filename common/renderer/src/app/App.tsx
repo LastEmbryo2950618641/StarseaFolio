@@ -174,6 +174,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       agentMode?: "auto" | "plan" | "accept_edits"
       proceedMode?: "precise" | "single" | "batch" | "custom"
       customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
+      noProgressGuardEnabled?: boolean
+      noProgressGuardLimit?: number
       autoContinued?: boolean
       setupAnswerTo?: string
     }>,
@@ -1578,6 +1580,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       agentMode?: "auto" | "plan" | "accept_edits"
       proceedMode?: "precise" | "single" | "batch" | "custom"
       customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
+      noProgressGuardEnabled?: boolean
+      noProgressGuardLimit?: number
       autoContinued?: boolean
       setupAnswerTo?: string
     }>,
@@ -1737,6 +1741,12 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         ...(options?.automation === undefined ? {} : { automation: options.automation }),
         ...(options?.proceedMode === undefined ? {} : { proceedMode: options.proceedMode }),
         ...(options?.customProceedGates === undefined ? {} : { customProceedGates: options.customProceedGates }),
+        ...(options?.noProgressGuardEnabled === undefined
+          ? {}
+          : { noProgressGuardEnabled: options.noProgressGuardEnabled }),
+        ...(options?.noProgressGuardLimit === undefined
+          ? {}
+          : { noProgressGuardLimit: options.noProgressGuardLimit }),
         ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
         ...(options?.setupAnswerTo === undefined || options?.autoContinued === true || options?.automation !== undefined
           ? {} : { setupAnswerTo: options.setupAnswerTo }),
@@ -1827,6 +1837,12 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
             ...(options?.proceedMode === undefined ? {} : { proceedMode: options.proceedMode }),
             ...(options?.customProceedGates === undefined ? {} : { customProceedGates: options.customProceedGates }),
+            ...(options?.noProgressGuardEnabled === undefined
+              ? {}
+              : { noProgressGuardEnabled: options.noProgressGuardEnabled }),
+            ...(options?.noProgressGuardLimit === undefined
+              ? {}
+              : { noProgressGuardLimit: options.noProgressGuardLimit }),
             autoContinued: true,
           })
         }, 1_500)

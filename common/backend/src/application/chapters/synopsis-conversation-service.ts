@@ -593,6 +593,13 @@ export class SynopsisConversationService {
     proceedMode?: DiscussProceedMode
     /** Per-stage auto gates when proceedMode is custom. */
     customProceedGates?: DiscussCustomProceedGates
+    /**
+     * Stop auto-continue after consecutive no-progress turns. Default true.
+     * When false, the fingerprint guard does not stop the pipeline.
+     */
+    noProgressGuardEnabled?: boolean
+    /** Consecutive no-progress turns before stop. Default DISCUSS_STEP_FAILURE_LIMIT (3). */
+    noProgressGuardLimit?: number
     /** Claude Code–style discuss mode. */
     agentMode?: import("@starseafolio/contracts").DiscussAgentMode
   }>): Promise<SynopsisConversationSendResult> {
@@ -1959,12 +1966,20 @@ export class SynopsisConversationService {
           await this.dependencies.conversation.listDiscussContextMessages(session.sessionId), fingerprint,
           initialProgressFingerprint ?? fingerprint,
         )
-        const progressExhausted = autoContinue !== undefined
-          && progress.consecutiveNoProgressTurns >= DISCUSS_STEP_FAILURE_LIMIT
+        const noProgressGuardEnabled = input.noProgressGuardEnabled !== false
+        const noProgressGuardLimit = Number.isSafeInteger(input.noProgressGuardLimit)
+          && (input.noProgressGuardLimit as number) >= 1
+          && (input.noProgressGuardLimit as number) <= 30
+          ? input.noProgressGuardLimit as number
+          : DISCUSS_STEP_FAILURE_LIMIT
+        const progressExhausted = noProgressGuardEnabled
+          && autoContinue !== undefined
+          && progress.consecutiveNoProgressTurns >= noProgressGuardLimit
         if (progressExhausted) {
           runtimeLog("warn", "synopsis-conversation", "discuss.no_progress_stop", {
             projectId: input.projectId, sessionId: session.sessionId,
             consecutiveNoProgressTurns: progress.consecutiveNoProgressTurns,
+            noProgressGuardLimit,
           })
         }
         await this.dependencies.conversation.appendDiscussContextMessages({
@@ -1980,7 +1995,9 @@ export class SynopsisConversationService {
           )
         }
         if (progressExhausted) {
-          throw new SynopsisInvalidStateError("当前步骤连续 3 次没有实际内容进展，已停止自动推进。已有内容和待办已保留，请检查阻塞原因。")
+          throw new SynopsisInvalidStateError(
+            `当前步骤连续 ${String(noProgressGuardLimit)} 次没有实际内容进展，已停止自动推进。已有内容和待办已保留，请检查阻塞原因。`,
+          )
         }
       }
       const { workDisplayName, workDescription } = await this.applyWorkMetadata(assist)

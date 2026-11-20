@@ -392,6 +392,13 @@ export const synopsisConversationSendPayloadSchema = projectSettingsReadPayloadS
   proceedMode: discussProceedModeSchema.optional(),
   /** Per-stage auto gates when proceedMode is custom (true = auto). */
   customProceedGates: discussCustomProceedGatesSchema.optional(),
+  /**
+   * When true (default), auto-continue stops after consecutive turns with no
+   * durable workspace fingerprint change. When false, the guard is disabled.
+   */
+  noProgressGuardEnabled: z.boolean().optional(),
+  /** Consecutive no-progress auto-continues before stop. Default 3; range 1–30. */
+  noProgressGuardLimit: z.number().int().min(1).max(30).optional(),
   /** Claude Code–style discuss mode: auto (default) | plan | accept_edits. */
   agentMode: z.enum(["auto", "plan", "accept_edits"]).optional(),
 })

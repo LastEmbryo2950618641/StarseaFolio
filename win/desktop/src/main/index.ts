@@ -18,9 +18,16 @@ const backend = new BackendProcess()
 
 const appDataDirectory = app.getPath("appData")
 const legacyUserDataPath = join(appDataDirectory, "WorldSeed")
-const userDataPath = join(appDataDirectory, "StarseaFolio")
+const userDataPath = process.env.WORLDSEED_ELECTRON_USER_DATA !== undefined
+  && process.env.WORLDSEED_ELECTRON_USER_DATA.trim().length > 0
+  ? resolve(process.env.WORLDSEED_ELECTRON_USER_DATA.trim())
+  : join(appDataDirectory, "StarseaFolio")
 
-if (existsSync(legacyUserDataPath) && !existsSync(userDataPath)) {
+if (
+  process.env.WORLDSEED_ELECTRON_USER_DATA === undefined
+  && existsSync(legacyUserDataPath)
+  && !existsSync(userDataPath)
+) {
   cpSync(legacyUserDataPath, userDataPath, { recursive: true, errorOnExist: true })
 }
 
