@@ -633,11 +633,11 @@ export class SynopsisConversationService {
     /** Per-stage auto gates when proceedMode is custom. */
     customProceedGates?: DiscussCustomProceedGates
     /**
-     * Stop auto-continue after consecutive no-progress turns. Default true.
-     * When false, the fingerprint guard does not stop the pipeline.
+     * UI「空转停跑保护」. Default off (`false`/omitted): do not hard-stop on idle loops.
+     * When true, Todo/tool/step idle and content-fingerprint idle share `noProgressGuardLimit`.
      */
     noProgressGuardEnabled?: boolean
-    /** Consecutive no-progress turns before stop. Default DISCUSS_STEP_FAILURE_LIMIT (3). */
+    /** Consecutive idle failures before stop when guard is on. Default 3; range 1–30. */
     noProgressGuardLimit?: number
     /** Claude Code–style discuss mode. */
     agentMode?: import("@starseafolio/contracts").DiscussAgentMode
@@ -2046,7 +2046,7 @@ export class SynopsisConversationService {
           await this.dependencies.conversation.listDiscussContextMessages(session.sessionId), fingerprint,
           initialProgressFingerprint ?? fingerprint,
         )
-        const noProgressGuardEnabled = input.noProgressGuardEnabled !== false
+        const noProgressGuardEnabled = input.noProgressGuardEnabled === true
         const noProgressGuardLimit = resolveDiscussNoProgressGuardLimit(input.noProgressGuardLimit)
         const progressExhausted = noProgressGuardEnabled
           && autoContinue !== undefined
@@ -2994,8 +2994,8 @@ export class SynopsisConversationService {
     let todoLoopRepairIssued = false
     let todoRequiredRepairs = 0
     let autoContinueBlocked = false
-    // UI「空转停跑保护」统管：内容指纹空转、Todo/工具空转、步骤连续失败硬停。
-    const noProgressGuardEnabled = input.noProgressGuardEnabled !== false
+    // UI「空转停跑保护」统管：内容指纹空转、Todo/工具空转、步骤连续失败硬停。默认关闭。
+    const noProgressGuardEnabled = input.noProgressGuardEnabled === true
     const noProgressGuardLimit = resolveDiscussNoProgressGuardLimit(input.noProgressGuardLimit)
     const recordStepOutcome = async (step: string, failure?: string): Promise<void> => {
       const saved = readDiscussStepFailures(

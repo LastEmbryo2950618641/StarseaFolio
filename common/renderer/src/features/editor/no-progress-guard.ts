@@ -1,7 +1,7 @@
 const ENABLED_KEY = "worldseed.creation-desk.no-progress-guard-enabled"
 const LIMIT_KEY = "worldseed.creation-desk.no-progress-guard-limit"
 
-export const DEFAULT_NO_PROGRESS_GUARD_ENABLED = true
+export const DEFAULT_NO_PROGRESS_GUARD_ENABLED = false
 export const DEFAULT_NO_PROGRESS_GUARD_LIMIT = 3
 export const MIN_NO_PROGRESS_GUARD_LIMIT = 1
 export const MAX_NO_PROGRESS_GUARD_LIMIT = 30
