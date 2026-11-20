@@ -526,7 +526,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       calls = call
       return call === 1 ? tool("todo_write") : tool("todo_write", "invoke", { todos, merge: true })
     }, async (_harness, send) => {
-      await expect(send()).rejects.toThrow(/todo_no_progress.*3.*停止/)
+      await expect(send({ noProgressGuardEnabled: true })).rejects.toThrow(/todo_no_progress.*3.*停止/)
       expect(calls).toBe(5)
     })
   })
@@ -550,7 +550,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       synopsisConversationStreamHub.setTodos(request.projectId, todos, Date.now())
       return tool("memory_write")
     }, async (_harness, send) => {
-      await expect(send()).rejects.toThrow(/memory_write.*describe_no_progress.*3.*停止/)
+      await expect(send({ noProgressGuardEnabled: true })).rejects.toThrow(/memory_write.*describe_no_progress.*3.*停止/)
       expect(calls).toBe(4)
     })
   })
@@ -563,7 +563,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       return call % 2 === 1 ? tool("memory_write") : { choices }
     }, async (_harness, send) => {
       for (let turn = 0; turn < 3; turn += 1) await send({ message: "检查记忆工具", batchProceed: false })
-      await expect(send({ message: "检查记忆工具", batchProceed: false }))
+      await expect(send({ message: "检查记忆工具", batchProceed: false, noProgressGuardEnabled: true }))
         .rejects.toThrow(/memory_write.*describe_no_progress.*3.*停止/)
       expect(calls).toBe(7)
     })
@@ -576,7 +576,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
       return call === 1 ? tool("memory_write") : tool("memory_write", "invoke", { invalid: call })
     }, async (_harness, send) => {
-      await expect(send({ message: "检查记忆工具" })).rejects.toThrow(/memory_write.*3.*停止/)
+      await expect(send({ message: "检查记忆工具", noProgressGuardEnabled: true })).rejects.toThrow(/memory_write.*3.*停止/)
       expect(calls).toBe(4)
     })
   })
@@ -589,7 +589,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       if (call % 3 === 1) return tool("memory_write")
       return call % 3 === 2 ? tool("memory_write", "invoke", { invalid: call }) : { choices }
     }, async (_harness, send) => {
-      const extra = { message: "检查记忆工具", batchProceed: false }
+      const extra = { message: "检查记忆工具", batchProceed: false, noProgressGuardEnabled: true }
       await send(extra)
       await send(extra)
       await expect(send(extra)).rejects.toThrow(/memory_write.*3.*停止/)
@@ -604,7 +604,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       if (call === 4) return tool("memory_write", "invoke", { target: "index", markdown: "# 记忆\n\n保留站台线索。" })
       return [2, 6, 8, 10].includes(call) ? tool("memory_write", "invoke", { invalid: call }) : { choices }
     }, async (_harness, send) => {
-      const extra = { message: "检查记忆工具", batchProceed: false }
+      const extra = { message: "检查记忆工具", batchProceed: false, noProgressGuardEnabled: true }
       for (let turn = 0; turn < 4; turn += 1) await send(extra)
       await expect(send(extra)).rejects.toThrow(/memory_write.*3.*停止/)
     })
@@ -633,7 +633,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       // Rewriting the same body keeps auto-continue via 入库 path, but fingerprint stalls.
       return { synopsisBody: stagnant, choices }
     }, async (_harness, send) => {
-      const extra = { message: "继续检查当前进度" }
+      const extra = { message: "继续检查当前进度", noProgressGuardEnabled: true }
       // First rewrite differs from harness seed → progress; later identical rewrites stall.
       expect((await send(extra)).autoContinue).toBeDefined()
       expect((await send(extra)).autoContinue).toBeDefined()
@@ -665,7 +665,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
         choices,
       }
     }, async (_harness, send) => {
-      const extra = { message: "继续完善当前章规划" }
+      const extra = { message: "继续完善当前章规划", noProgressGuardEnabled: true }
       for (let turn = 0; turn < 3; turn += 1) expect((await send(extra)).autoContinue).toBeDefined()
       await expect(send(extra)).rejects.toThrow(/3.*没有实际内容进展.*停止/)
     })
@@ -798,7 +798,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       calls = call
       throw Object.assign(new Error("DeepSeek response could not satisfy the phase contract: reason / selfReview missing"), { kind: "schema" })
     }, async (_harness, send) => {
-      await expect(send()).rejects.toThrow(/model_contract 连续失败 3 次.*reason \/ selfReview missing/)
+      await expect(send({ noProgressGuardEnabled: true })).rejects.toThrow(/model_contract 连续失败 3 次.*reason \/ selfReview missing/)
       expect(calls).toBe(3)
     })
   })
@@ -824,7 +824,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       calls = call
       return call === 1 ? tool("todo_write") : tool("todo_write", "invoke", { todos, merge: true })
     }, async (harness, send) => {
-      await expect(send()).rejects.toThrow(/todo_no_progress.*3.*停止/)
+      await expect(send({ noProgressGuardEnabled: true })).rejects.toThrow(/todo_no_progress.*3.*停止/)
       expect(calls).toBe(5)
       const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"), { readonly: true })
       try {
@@ -846,7 +846,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       if (repairing) return { chapterDraftProposal: draft, choices }
       return call === 1 ? tool("todo_write") : tool("todo_write", "invoke", { todos, merge: true })
     }, async (_harness, send) => {
-      const sent = await send()
+      const sent = await send({ noProgressGuardEnabled: true })
       expect(calls).toBeLessThanOrEqual(7)
       expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
       expect(sent.session.draftContentState).toBe("ai_written")
@@ -860,7 +860,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       calls = call
       return tool("todo_write")
     }, async (_harness, send) => {
-      await expect(send()).rejects.toThrow(/todo_write.*describe_no_progress.*3.*停止/)
+      await expect(send({ noProgressGuardEnabled: true })).rejects.toThrow(/todo_write.*describe_no_progress.*3.*停止/)
       expect(calls).toBe(4)
     })
   })
@@ -873,7 +873,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
         todos: [{ ...todos[0], content: `反复整理计划 ${String(call)}` }], merge: false,
       })
     }, async (_harness, send) => {
-      const sent = await send()
+      const sent = await send({ noProgressGuardEnabled: true })
       expect(calls).toBe(9)
       expect(sent.autoContinue).toBeUndefined()
     })
