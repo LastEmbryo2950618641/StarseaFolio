@@ -1746,7 +1746,7 @@ export class SynopsisConversationService {
             "confirm_synopsis", "confirm_arc_plan", "set_focus", "start_turn", "promote_draft_to_body",
           ].includes(choice.action))
         : workflowChoices
-      let persistedChoices = draftSaveBlocked
+      let persistedChoices: SynopsisConversationChoice[] | undefined = draftSaveBlocked
         ? [
             { label: "检查当前章节规划与阻塞原因", action: "continue_discuss" as const },
             { label: "修复阻塞后重试保存草稿", action: "continue_discuss" as const },
