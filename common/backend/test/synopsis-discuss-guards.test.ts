@@ -30,6 +30,9 @@ describe("synopsis discuss runtime guards", () => {
     expect(shouldStopTodoWriteLoop(TODO_NO_PROGRESS_LIMIT, true)).toBe(true)
     expect(shouldIssueTodoLoopRepair(0, false, 8)).toBe(true)
     expect(shouldStopTodoWriteLoop(0, true, 9)).toBe(true)
+    expect(shouldIssueTodoLoopRepair(4, false, 0, 5)).toBe(false)
+    expect(shouldIssueTodoLoopRepair(5, false, 0, 5)).toBe(true)
+    expect(shouldStopTodoWriteLoop(5, true, 0, 5)).toBe(true)
   })
 
   it("allows the discuss model budget grace only once", () => {

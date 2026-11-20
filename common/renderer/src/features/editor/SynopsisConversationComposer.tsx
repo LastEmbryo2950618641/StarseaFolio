@@ -1058,7 +1058,9 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
           }}
         />
       </label>
-      <p className="creation-desk-advanced-hint">自动续跑时，工作区连续无实质进展达到此次数后停止，防止烧 token。</p>
+      <p className="creation-desk-advanced-hint">
+        自动续跑时：工作区无实质进展、Todo/工具空转、步骤连续失败达到此次数后硬停。关闭后以上空转均不再硬停（预算上限仍生效）。
+      </p>
     </div>
     <p className="creation-desk-advanced-hint">先补齐剧情梗概与细纲，再开始正文</p>
     {props.chapterWorkflowEnabled !== true
