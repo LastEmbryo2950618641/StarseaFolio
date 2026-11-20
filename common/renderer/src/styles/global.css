@@ -8552,6 +8552,10 @@ a.project-rail-download {
 .chapter-draft-detail-body {
   margin-top: 8px;
   max-height: 52vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* Opaque so overflowing siblings never show through when max-height clips. */
+  background: var(--panel, var(--bg-primary));
 }
 .chapter-browse-hook-list {
   list-style: none;
