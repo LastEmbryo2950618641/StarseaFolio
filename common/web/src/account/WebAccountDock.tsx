@@ -4,7 +4,7 @@ import { User, X } from "lucide-react"
 
 import { loadWebSession } from "../bridge/session.js"
 import { defaultAvatars } from "./default-avatars.js"
-import { fetchCaptcha, loginWebAccount, logoutWebAccount, type CaptchaChallenge } from "./web-auth.js"
+import { fetchCaptcha, loginWebAccount, logoutWebAccount, registerWebAccount, type CaptchaChallenge } from "./web-auth.js"
 
 const firstAvatar = defaultAvatars[0]?.dataUrl ?? ""
 
@@ -13,9 +13,11 @@ export function WebAccountDock(): React.JSX.Element {
   const signedIn = saved.accountId !== undefined && saved.apiToken.length > 0
   const [open, setOpen] = useState(false)
   const [showForm, setShowForm] = useState(false)
+  const [mode, setMode] = useState<"login" | "register">("login")
   const [avatar, setAvatar] = useState(saved.avatarDataUrl ?? firstAvatar)
   const [account, setAccount] = useState(saved.accountName ?? "")
   const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [captchaCode, setCaptchaCode] = useState("")
   const [captcha, setCaptcha] = useState<CaptchaChallenge | undefined>()
   const [captchaNonce, setCaptchaNonce] = useState(0)
@@ -48,6 +50,7 @@ export function WebAccountDock(): React.JSX.Element {
 
   function openDock(): void {
     setShowForm(!signedIn)
+    setMode("login")
     setPassword("")
     setCaptchaCode("")
     setError("")
@@ -59,6 +62,7 @@ export function WebAccountDock(): React.JSX.Element {
 
   function openForm(): void {
     setShowForm(true)
+    setMode("login")
     setPassword("")
     setCaptchaCode("")
     setError("")
@@ -73,24 +77,26 @@ export function WebAccountDock(): React.JSX.Element {
       if (captcha === undefined) setError("请等待验证码")
       return
     }
-    if (!avatar.startsWith("data:image/")) {
-      setError("请选择头像")
+    if (mode === "register" && password !== confirmPassword) {
+      setError("两次输入的密码不一致")
       return
     }
     setPending(true)
     setError("")
     try {
-      await loginWebAccount({
+      const avatarDataUrl = mode === "register" ? await imageAsDataUrl(avatar) : avatar
+      const authenticate = mode === "register" ? registerWebAccount : loginWebAccount
+      await authenticate({
         apiBaseUrl: saved.apiBaseUrl,
         account,
         password,
         captchaId: captcha.id,
         captchaCode,
-        avatarDataUrl: avatar,
+        avatarDataUrl,
       })
       window.location.reload()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "登录失败")
+      setError(cause instanceof Error ? cause.message : mode === "register" ? "注册失败" : "登录失败")
       setCaptchaCode("")
       setCaptchaNonce((value) => value + 1)
       setPending(false)
@@ -117,14 +123,14 @@ export function WebAccountDock(): React.JSX.Element {
       <div className="web-account-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setOpen(false) }}>
         <div className="web-account-panel" role="dialog" aria-modal="true" aria-labelledby="web-account-title" onMouseDown={(event) => { event.stopPropagation() }}>
           <div className="web-account-heading">
-            <h2 id="web-account-title">{signedIn ? "切换账户" : "登录"}</h2>
+            <h2 id="web-account-title">{signedIn ? "切换账户" : mode === "register" ? "注册账户" : "登录"}</h2>
             <button type="button" className="web-account-icon-button" aria-label="关闭" onClick={() => { setOpen(false) }}><X size={16} /></button>
           </div>
           {cropFile !== undefined
             ? <AvatarCrop file={cropFile} onCancel={() => { setCropFile(undefined) }} onUse={(dataUrl) => { setAvatar(dataUrl); setCropFile(undefined); setShowAvatarChoices(false) }} />
             : (
               <form className="web-account-form" onSubmit={(event) => { void onSubmit(event) }}>
-                <div className="web-account-avatar-block">
+                {mode === "register" ? <div className="web-account-avatar-block">
                   <img className="web-account-preview" alt="" src={avatar} />
                   <button
                     type="button"
@@ -171,16 +177,17 @@ export function WebAccountDock(): React.JSX.Element {
                       setCropFile(file)
                     }}
                   />
-                </div>
-                <p className="web-account-hint">新账户会在验证通过后自动创建。书籍、封面和模型配置按账户分开。</p>
+                </div> : null}
+                <p className="web-account-hint">{mode === "register" ? "创建账户后，书籍、图谱与配置将独立保存。" : "登录后读取此账户的书籍和配置。"}</p>
                 <label className="web-account-field">
                   <span>账户</span>
                   <input id="web-account-name" name="username" autoComplete="username" maxLength={32} value={account} onChange={(event) => { setAccount(event.target.value) }} />
                 </label>
                 <label className="web-account-field">
                   <span>密码</span>
-                  <input id="web-account-password" name="password" type="password" autoComplete="current-password" maxLength={72} value={password} onChange={(event) => { setPassword(event.target.value) }} />
+                  <input id="web-account-password" name="password" type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} maxLength={72} value={password} onChange={(event) => { setPassword(event.target.value) }} />
                 </label>
+                {mode === "register" ? <label className="web-account-field"><span>确认密码</span><input name="confirm-password" type="password" autoComplete="new-password" maxLength={72} value={confirmPassword} onChange={(event) => { setConfirmPassword(event.target.value) }} /></label> : null}
                 <div className="web-account-captcha-row">
                   <label className="web-account-field">
                     <span>验证码</span>
@@ -191,7 +198,8 @@ export function WebAccountDock(): React.JSX.Element {
                   </button>
                 </div>
                 {error.length > 0 ? <p className="web-account-error" role="alert">{error}</p> : null}
-                <button type="submit" className="web-account-submit" data-testid="web-account-submit" disabled={pending}>{pending ? "登录中…" : "登录"}</button>
+                <button type="submit" className="web-account-submit" data-testid="web-account-submit" disabled={pending}>{pending ? "处理中…" : mode === "register" ? "注册并登录" : "登录"}</button>
+                {!signedIn ? <button type="button" className="web-account-secondary" onClick={() => { setMode((current) => current === "login" ? "register" : "login"); setError(""); setCaptchaCode(""); setConfirmPassword(""); setCaptchaNonce((value) => value + 1) }}>{mode === "register" ? "已有账户？登录" : "没有账户？注册"}</button> : null}
               </form>
             )}
         </div>
@@ -214,6 +222,19 @@ export function WebAccountDock(): React.JSX.Element {
     )
 
   return createPortal(<>{button}{dialog}</>, document.body)
+}
+
+async function imageAsDataUrl(source: string): Promise<string> {
+  const image = new Image()
+  image.src = source
+  await image.decode()
+  const canvas = document.createElement("canvas")
+  canvas.width = 128
+  canvas.height = 128
+  const context = canvas.getContext("2d")
+  if (context === null) throw new Error("图片无法解码")
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL("image/png")
 }
 
 function AvatarCrop({ file, onCancel, onUse }: Readonly<{ file: File, onCancel: () => void, onUse: (dataUrl: string) => void }>): React.JSX.Element {

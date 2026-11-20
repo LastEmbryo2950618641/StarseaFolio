@@ -20,7 +20,9 @@ pnpm --filter @starseafolio/web dev
 
 浏览器打开 `http://localhost:5173`。默认 API：`https://nikoniko.cn/worldseed`。已部署首页：`https://nikoniko.cn/StarseaFolio/`。
 
-网页左下角可以登录。选择默认头像，或上传后裁剪，再填写账户、密码和验证码。没有账户时会自动创建。书籍、封面和模型配置按账户隔离。桌面端和安卓端不登录。
+网页左下角可以登录或注册。注册时选择头像，或上传后裁剪，再填写账户、密码和验证码；登录现有账户不会改写头像。每个 Web 账户使用独立书库目录，书籍、设定集、图谱、书内配置、封面和模型配置按账户隔离。Windows 桌面端和安卓端不受此 Web 登录流程影响。
+
+预设头像来自 Twemoji，图像版权与许可见 [`AVATAR_ATTRIBUTION.md`](./AVATAR_ATTRIBUTION.md)。
 
 安卓工作台预览设置了 `VITE_WORLDSEED_API_BASE_URL`，连本机后端，不显示登录。
 

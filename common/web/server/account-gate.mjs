@@ -12,6 +12,7 @@ const FAILURE_WINDOW_MS = 10 * 60 * 1000
 const FAILURE_LIMIT = 20
 const LOGIN_BODY_LIMIT = 256 * 1024
 const RPC_BODY_LIMIT = 8 * 1024 * 1024
+const ACCOUNT_SCOPED_METHODS = new Set(["project.create", "project.list", "project.open", "project.validate", "workspace.list", "model.list"])
 
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body)
@@ -111,6 +112,8 @@ export function createAccountGate(options) {
   const captchas = options.captchas ?? createCaptchaStore()
   const store = options.store ?? createAccountStore(options.accountsFile)
   const failures = new Map()
+  const projectsByAccount = new Map()
+  const tasksByAccount = new Map()
   const upstream = new URL(options.upstream)
   if (upstream.protocol !== "http:") throw new Error("account gate upstream must be http")
 
@@ -171,7 +174,11 @@ export function createAccountGate(options) {
       return
     }
     if (req.method === "POST" && url.pathname === "/auth/login") {
-      await login(req, res)
+      await authenticate(req, res, false)
+      return
+    }
+    if (req.method === "POST" && url.pathname === "/auth/register") {
+      await authenticate(req, res, true)
       return
     }
     if (req.method === "POST" && url.pathname === "/rpc") {
@@ -181,7 +188,7 @@ export function createAccountGate(options) {
     sendJson(res, 404, { error: "not found" })
   }
 
-  async function login(req, res) {
+  async function authenticate(req, res, registering) {
     const ip = clientIp(req)
     if (tooManyFailures(ip)) throw new AccountInputError("尝试过于频繁，请稍后再试", 429)
     const body = JSON.parse((await readBody(req, LOGIN_BODY_LIMIT)).toString("utf8"))
@@ -191,10 +198,10 @@ export function createAccountGate(options) {
     }
     let result
     try {
-      result = await store.login({
+      result = await store[registering ? "register" : "login"]({
         account: body?.account,
         password: body?.password,
-        avatarDataUrl: body?.avatarDataUrl,
+        ...(registering ? { avatarDataUrl: body?.avatarDataUrl } : {}),
         booksRoot: options.booksRoot,
       })
     } catch (error) {
@@ -236,6 +243,22 @@ export function createAccountGate(options) {
       sendJson(res, 200, rpcFail(request.requestId, "书籍路径不属于当前账户"))
       return
     }
+    const accountProjects = projectsByAccount.get(session.accountId) ?? new Set()
+    const accountTasks = tasksByAccount.get(session.accountId) ?? new Set()
+    const projectIds = collectValues(request.payload, "projectId")
+    if (projectIds.some((id) => !accountProjects.has(id)) && request.method !== "project.create") {
+      sendJson(res, 200, rpcFail(request.requestId, "项目不属于当前账户"))
+      return
+    }
+    const taskIds = collectValues(request.payload, "taskId")
+    if (taskIds.some((id) => !accountTasks.has(id))) {
+      sendJson(res, 200, rpcFail(request.requestId, "任务不属于当前账户"))
+      return
+    }
+    if (!ACCOUNT_SCOPED_METHODS.has(request.method) && projectIds.length === 0 && taskIds.length === 0) {
+      sendJson(res, 200, rpcFail(request.requestId, "请求缺少账户范围"))
+      return
+    }
     const upstreamResult = await callUpstream({
       upstream: options.upstream,
       serviceToken: options.serviceToken,
@@ -243,11 +266,31 @@ export function createAccountGate(options) {
       path: urlPath(req),
       body: Buffer.from(JSON.stringify(request)),
     })
+    if (upstreamResult.status === 200) {
+      try {
+        const parsed = JSON.parse(upstreamResult.body.toString("utf8"))
+        if (parsed?.ok === true) {
+          if (request.method === "project.create" && typeof request.payload?.projectId === "string") {
+            accountProjects.add(request.payload.projectId)
+          }
+          if (request.method === "project.open" && typeof parsed.data?.projectId === "string") {
+            accountProjects.add(parsed.data.projectId)
+          }
+          for (const id of collectValues(parsed.data, "taskId")) accountTasks.add(id)
+          projectsByAccount.set(session.accountId, accountProjects)
+          tasksByAccount.set(session.accountId, accountTasks)
+        }
+      } catch {
+        // Keep the upstream body when it is not a JSON RPC envelope.
+      }
+    }
     if (request.method === "project.list" && upstreamResult.status === 200) {
       try {
         const parsed = JSON.parse(upstreamResult.body.toString("utf8"))
         if (parsed && parsed.ok === true) {
           parsed.data = filterAccountProjects(options.booksRoot, session.accountId, parsed.data)
+          for (const project of parsed.data?.projects ?? []) accountProjects.add(project.projectId)
+          projectsByAccount.set(session.accountId, accountProjects)
           upstreamResult.body = Buffer.from(JSON.stringify(parsed))
           upstreamResult.contentType = "application/json; charset=utf-8"
         }
@@ -264,6 +307,18 @@ export function createAccountGate(options) {
 function urlPath(req) {
   const url = new URL(req.url ?? "/", "http://127.0.0.1")
   return `${url.pathname}${url.search}`
+}
+
+function collectValues(value, key, found = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectValues(item, key, found)
+  } else if (value !== null && typeof value === "object") {
+    for (const [childKey, child] of Object.entries(value)) {
+      if (childKey === key && typeof child === "string") found.push(child)
+      else collectValues(child, key, found)
+    }
+  }
+  return found
 }
 
 function runningAsCli() {

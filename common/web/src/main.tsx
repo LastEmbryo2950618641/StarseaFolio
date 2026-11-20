@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { WebAccountDock } from "./account/WebAccountDock.js"
 import { installHttpWorldseedBridge } from "./bridge/http-worldseed.js"
 import { loadWebSession, webAccountsEnabled } from "./bridge/session.js"
+import { scopeWebAccountStorage } from "./bridge/account-storage.js"
 
 const mobileViewport = window.matchMedia("(max-width: 900px)")
 const subscribeViewport = (notify: () => void): (() => void) => {
@@ -15,6 +16,7 @@ const subscribeViewport = (notify: () => void): (() => void) => {
 
 async function boot(): Promise<void> {
   const session = loadWebSession()
+  if (webAccountsEnabled) scopeWebAccountStorage()
   // Must install before any renderer modules evaluate (they snapshot window.worldseed).
   installHttpWorldseedBridge(session)
   document.body.classList.add("starseafolio-web")

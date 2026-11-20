@@ -194,7 +194,7 @@ export function createAccountStore(filePath) {
   }
 
   return {
-    login(input) {
+    register(input) {
       return enqueue(async () => {
         const name = normalizeAccountName(input.account)
         assertPassword(input.password)
@@ -202,25 +202,44 @@ export function createAccountStore(filePath) {
         const accountId = accountIdFor(name)
         const state = await readState(filePath)
         const existing = state.accounts[accountId]
-        const created = existing === undefined
-        if (!created && !verifyPassword(input.password, existing.passwordHash)) {
-          throw new AccountInputError("密码不正确")
-        }
+        if (existing !== undefined) throw new AccountInputError("账户名已注册")
         const apiToken = randomBytes(32).toString("base64url")
         state.accounts[accountId] = {
           name,
-          passwordHash: created ? hashPassword(input.password) : existing.passwordHash,
+          passwordHash: hashPassword(input.password),
           avatarDataUrl: input.avatarDataUrl,
-          profiles: created ? structuredClone(DEFAULT_MODEL_PROFILES) : (existing.profiles ?? structuredClone(DEFAULT_MODEL_PROFILES)),
-          sessions: rememberSession(existing?.sessions, apiToken),
+          profiles: structuredClone(DEFAULT_MODEL_PROFILES),
+          sessions: rememberSession(undefined, apiToken),
         }
         await writeState(filePath, state)
         return {
-          created,
+          created: true,
           apiToken,
           accountId,
           accountName: name,
           avatarDataUrl: input.avatarDataUrl,
+          booksRoot: booksRootFor(input.booksRoot, accountId),
+        }
+      })
+    },
+    login(input) {
+      return enqueue(async () => {
+        const name = normalizeAccountName(input.account)
+        assertPassword(input.password)
+        const accountId = accountIdFor(name)
+        const state = await readState(filePath)
+        const existing = state.accounts[accountId]
+        if (existing === undefined) throw new AccountInputError("账户不存在")
+        if (!verifyPassword(input.password, existing.passwordHash)) throw new AccountInputError("密码不正确")
+        const apiToken = randomBytes(32).toString("base64url")
+        existing.sessions = rememberSession(existing.sessions, apiToken)
+        await writeState(filePath, state)
+        return {
+          created: false,
+          apiToken,
+          accountId,
+          accountName: name,
+          avatarDataUrl: existing.avatarDataUrl,
           booksRoot: booksRootFor(input.booksRoot, accountId),
         }
       })

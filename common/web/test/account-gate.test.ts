@@ -63,27 +63,30 @@ describe("web account gate", () => {
       if (code === undefined) throw new Error("missing captcha")
       return { id: body.id, code }
     }
-    const login = async (account: string, password: string, captcha: { id: string, code: string }): Promise<Response> => fetch(`${base}/auth/login`, {
+    const authenticate = async (route: "login" | "register", account: string, password: string, captcha: { id: string, code: string }): Promise<Response> => fetch(`${base}/auth/${route}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ account, password, captchaId: captcha.id, captchaCode: captcha.code, avatarDataUrl: avatar }),
     })
 
     const wrongCaptcha = await issued()
-    const rejectedCaptcha = await login("星海", "secret12", { ...wrongCaptcha, code: "ZZZZ" })
+    const rejectedCaptcha = await authenticate("register", "星海", "secret12", { ...wrongCaptcha, code: "ZZZZ" })
     expect(rejectedCaptcha.status).toBe(400)
     expect(await rejectedCaptcha.json()).toMatchObject({ error: "验证码不正确" })
 
     const captcha = await issued()
-    const createdResponse = await login("星海", "secret12", captcha)
+    const loginBeforeRegistration = await authenticate("login", "星海", "secret12", await issued())
+    expect(loginBeforeRegistration.status).toBe(400)
+    expect(await loginBeforeRegistration.json()).toMatchObject({ error: "账户不存在" })
+    const createdResponse = await authenticate("register", "星海", "secret12", captcha)
     const created = await createdResponse.json() as { created: boolean, apiToken: string, accountId: string, booksRoot: string, accountName: string }
     expect(createdResponse.status).toBe(200)
     expect(created.created).toBe(true)
     expect(created.accountName).toBe("星海")
     ownedRoot = created.booksRoot
     await access(ownedRoot)
-    expect((await login("星海", "secret12", captcha)).status).toBe(400)
-    expect(await (await login("星海", "nope123", await issued())).json()).toMatchObject({ error: "密码不正确" })
+    expect((await authenticate("register", "星海", "secret12", await issued())).status).toBe(400)
+    expect(await (await authenticate("login", "星海", "nope123", await issued())).json()).toMatchObject({ error: "密码不正确" })
 
     const callsBeforeList = upstreamCalls
     const listed = await (await fetch(`${base}/rpc`, {
@@ -94,6 +97,33 @@ describe("web account gate", () => {
     expect(lastAuthorization).toBe(`Bearer ${serviceToken}`)
     expect(upstreamCalls).toBe(callsBeforeList + 1)
     expect(listed.data.projects.map((project) => project.displayName)).toEqual(["mine"])
+
+    const workspaceListing = await (await fetch(`${base}/rpc`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${created.apiToken}` },
+      body: JSON.stringify({
+        protocolVersion: "worldseed.v1",
+        requestId: crypto.randomUUID(),
+        method: "workspace.list",
+        payload: { workspaceRootRef: join(ownedRoot, "amber") },
+      }),
+    })).json() as { ok: boolean }
+    expect(workspaceListing.ok).toBe(true)
+
+    const callsBeforeProjectReject = upstreamCalls
+    const foreignProject = await (await fetch(`${base}/rpc`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${created.apiToken}` },
+      body: JSON.stringify({
+        protocolVersion: "worldseed.v1",
+        requestId: crypto.randomUUID(),
+        method: "project.settings.read",
+        payload: { projectId: "00000000-0000-4000-8000-000000000002", workspaceRootRef: join(ownedRoot, "amber") },
+      }),
+    })).json() as { ok: boolean, error: { message: string } }
+    expect(foreignProject.ok).toBe(false)
+    expect(foreignProject.error.message).toBe("项目不属于当前账户")
+    expect(upstreamCalls).toBe(callsBeforeProjectReject)
 
     const callsBeforeReject = upstreamCalls
     const forbidden = await (await fetch(`${base}/rpc`, {
@@ -134,7 +164,7 @@ describe("web account gate", () => {
     expect(upstreamCalls).toBe(callsBeforeReject)
     expect(await readFile(accountsFile, "utf8")).not.toContain("should-not-store")
 
-    const other = await (await login("海星", "secret12", await issued())).json() as { apiToken: string }
+    const other = await (await authenticate("register", "海星", "secret12", await issued())).json() as { apiToken: string }
     const otherProfiles = await (await fetch(`${base}/rpc`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${other.apiToken}` },

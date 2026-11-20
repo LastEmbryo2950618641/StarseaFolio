@@ -19,7 +19,15 @@ export async function fetchCaptcha(apiBaseUrl: string): Promise<CaptchaChallenge
 }
 
 export async function loginWebAccount(input: LoginInput): Promise<WebSession> {
-  const response = await request(`${trimBase(input.apiBaseUrl)}/auth/login`, {
+  return authenticateWebAccount("login", input)
+}
+
+export async function registerWebAccount(input: LoginInput): Promise<WebSession> {
+  return authenticateWebAccount("register", input)
+}
+
+async function authenticateWebAccount(mode: "login" | "register", input: LoginInput): Promise<WebSession> {
+  const response = await request(`${trimBase(input.apiBaseUrl)}/auth/${mode}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -31,7 +39,7 @@ export async function loginWebAccount(input: LoginInput): Promise<WebSession> {
     }),
   })
   const body = await readBody(response)
-  if (!response.ok || !isLoginResult(body)) throw new Error(messageFrom(body, "登录失败"))
+  if (!response.ok || !isLoginResult(body)) throw new Error(messageFrom(body, mode === "register" ? "注册失败" : "登录失败"))
   const session: WebSession = {
     apiBaseUrl: trimBase(input.apiBaseUrl),
     apiToken: body.apiToken,
@@ -108,6 +116,6 @@ function isLoginResult(body: unknown): body is Readonly<{
     && typeof record.avatarDataUrl === "string" && record.avatarDataUrl.startsWith("data:image/")
     && typeof record.booksRoot === "string"
     && record.booksRoot.startsWith("/")
-    && record.booksRoot.includes(`/accounts/${record.accountId}`)
+    && record.booksRoot.endsWith(`/accounts/${record.accountId}`)
     && !record.booksRoot.includes("..")
 }
