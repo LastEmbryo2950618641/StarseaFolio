@@ -6148,11 +6148,29 @@ a.project-rail-download {
   font-size: 11px;
   color: var(--text-faint);
 }
+.creation-desk-load-earlier {
+  align-self: center;
+  margin: 4px 0 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  cursor: pointer;
+}
+.creation-desk-load-earlier:hover {
+  background: var(--bg-hover);
+  color: #ffffff;
+}
 .creation-desk-message {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+  /* Space-for-time: skip layout/paint for off-screen history bubbles. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
 }
 .creation-desk-message-avatar {
   width: 32px;

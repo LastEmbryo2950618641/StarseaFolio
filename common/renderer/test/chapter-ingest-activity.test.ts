@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { GraphRevisionTask } from "@starseafolio/contracts"
 
 import {
+  chapterIngestActivityEqual,
   formatChapterIngestDetail,
   resolveChapterIngestActivity,
 } from "../src/features/status/chapter-ingest-activity.js"
@@ -45,5 +46,23 @@ describe("chapter-ingest-activity", () => {
 
   it("ignores finished revision tasks", () => {
     expect(resolveChapterIngestActivity(taskFixture({ status: "completed" }))).toBeUndefined()
+  })
+
+  it("treats identical activity snapshots as equal for render gating", () => {
+    const left = resolveChapterIngestActivity(taskFixture())
+    const right = resolveChapterIngestActivity(taskFixture())
+    expect(chapterIngestActivityEqual(left, right)).toBe(true)
+    expect(chapterIngestActivityEqual(left, resolveChapterIngestActivity(taskFixture({
+      progress: {
+        phase: "graph_governance",
+        completed: 3,
+        total: 8,
+        phases: [
+          { phase: "settings_extraction", status: "completed", attempt: 1 },
+          { phase: "work_style_revision", status: "completed", attempt: 1 },
+          { phase: "graph_governance", status: "running", attempt: 1 },
+        ],
+      },
+    })))).toBe(false)
   })
 })

@@ -1,7 +1,10 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Bot, ChevronDown, ChevronRight, Ellipsis, FileText, Globe, ListTodo, Loader2, Play, Send, Settings2, Sparkles, Square, Terminal, UserRound } from "lucide-react"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
+import { CachedMarkdown } from "./CachedMarkdown.js"
+import {
+  truncateThinkingForLiveRender,
+  windowCreationDeskMessages,
+} from "./creation-desk-render-budget.js"
 import type {
   DiscussAgentMode,
   DiscussCustomProceedGates,
@@ -186,6 +189,10 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const [focusUnfilled, setFocusUnfilled] = useState(false)
   const [choicesRefreshing, setChoicesRefreshing] = useState(false)
   const [footerCollapse, setFooterCollapse] = useState<CreationDeskFooterCollapse>(() => loadCreationDeskFooterCollapse())
+  const [historyExpanded, setHistoryExpanded] = useState(false)
+  useEffect(() => {
+    setHistoryExpanded(false)
+  }, [props.session?.sessionId])
   useEffect(() => {
     if (writingSettingsOpen) setFooterCollapse("full")
   }, [writingSettingsOpen])
@@ -204,6 +211,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const isRail = props.layout === "rail"
   const showFooterToolbar = !isRail && footerCollapse === "full"
   const visibleMessages = props.messages.filter((message) => message.hidden !== true)
+  const windowedMessages = windowCreationDeskMessages(visibleMessages, historyExpanded)
   const streamPreview = extractAssistantPreview(props.stream?.content)
   // Stream can be "completed" while send() still persists; don't keep showing Stop.
   const discussPhase = resolveDiscussBusyPhase({
@@ -254,6 +262,11 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
       setChoicesRefreshing(false)
     }
   }, [choicesRefreshing, props.busy, props.onRefreshChoices])
+
+  // Stable across renders so memo(CreationDeskMessage) keeps skipping ReactMarkdown.
+  const focusComposer = useCallback((): void => {
+    composerInputRef.current?.focus()
+  }, [])
 
   useEffect(() => {
     if (!stickToLatestRef.current) return
@@ -437,7 +450,17 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   : null}
               </div>
             : <>
-                {visibleMessages.map((message) => <CreationDeskMessage
+                {windowedMessages.hiddenCount > 0
+                  ? <button
+                      type="button"
+                      className="creation-desk-load-earlier"
+                      data-testid="creation-desk-load-earlier"
+                      onClick={() => { setHistoryExpanded(true) }}
+                    >
+                      显示更早的 {String(windowedMessages.hiddenCount)} 条消息
+                    </button>
+                  : null}
+                {windowedMessages.visible.map((message) => <CreationDeskMessage
                   key={message.messageId}
                   message={message}
                   workspaceRootRef={props.workspaceRootRef}
@@ -452,7 +475,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   novelSubcategoryRules={props.novelSubcategoryRules}
                   proseRules={props.proseRules}
                   onRefreshChoices={refreshChoices}
-                  onFocusComposer={() => composerInputRef.current?.focus()}
+                  onFocusComposer={focusComposer}
                   {...(props.onOpenSettingsLineage === undefined
                     ? {}
                     : { onOpenSettingsLineage: props.onOpenSettingsLineage })}
@@ -756,6 +779,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
   useLayoutEffect(() => {
     const input = props.inputRef.current
     if (input === null) return
+    let frame = 0
     const fitContent = (): void => {
       // Reset before measuring so deleting text also shrinks the input.
       // CSS caps tall drafts while the footer remains anchored below the thread.
@@ -764,15 +788,26 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
       if (input.value.length > 0) input.style.height = `${String(input.scrollHeight)}px`
       input.style.overflowY = input.value.length > 0 && input.scrollHeight > input.clientHeight ? "auto" : "hidden"
     }
-    fitContent()
+    // Coalesce rapid keystrokes onto one layout pass so typing stays ahead of measure.
+    const scheduleFit = (): void => {
+      if (frame !== 0) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        fitContent()
+      })
+    }
+    scheduleFit()
     let width = input.clientWidth
     const observer = new ResizeObserver(() => {
       if (input.clientWidth === width) return
       width = input.clientWidth
-      fitContent()
+      scheduleFit()
     })
     observer.observe(input)
-    return () => { observer.disconnect() }
+    return () => {
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
   }, [draft, props.compact, props.footerCollapse, props.inputRef])
 
   useEffect(() => {
@@ -1063,10 +1098,36 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
   onOpenSettingsLineage?(): void
 }>): React.JSX.Element {
   const { message } = props
-  const choices = (message.choices ?? []).filter((choice) => (
-    (!props.focusLocked || choice.action !== "set_focus")
-    && (props.chapterWorkflowEnabled === true || choice.action !== "start_turn")
-  ))
+  const choices = useMemo(() => (
+    (message.choices ?? []).filter((choice) => (
+      (!props.focusLocked || choice.action !== "set_focus")
+      && (props.chapterWorkflowEnabled === true || choice.action !== "start_turn")
+    ))
+  ), [message.choices, props.chapterWorkflowEnabled, props.focusLocked])
+  const segments = useMemo(() => {
+    if (message.role !== "assistant") return []
+    return timelineFromMessage({
+      ...message,
+      reasoningContent: resolveThinkingDisplay(message.reasoningContent),
+      thinkingRounds: message.thinkingRounds?.map((round) => ({
+        round: round.round,
+        text: resolveThinkingDisplay(round.text) ?? round.text,
+      })),
+    })
+  }, [
+    message,
+    message.content,
+    message.messageId,
+    message.reasoningContent,
+    message.role,
+    message.searching,
+    message.thinkingRounds,
+    message.toolRuns,
+    message.editing,
+  ])
+  const onRefresh = useCallback((): void => {
+    void props.onRefreshChoices(message.messageId)
+  }, [message.messageId, props.onRefreshChoices])
   const ingestFailureSuperseded = message.role === "assistant"
     && props.chapterIngestActive === true
     && isChapterIngestFailureContent(message.content)
@@ -1083,14 +1144,7 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
         : null}
       {message.role === "assistant"
         ? <AgentStructuredBody
-            segments={timelineFromMessage({
-              ...message,
-              reasoningContent: resolveThinkingDisplay(message.reasoningContent),
-              thinkingRounds: message.thinkingRounds?.map((round) => ({
-                round: round.round,
-                text: resolveThinkingDisplay(round.text) ?? round.text,
-              })),
-            })}
+            segments={segments}
             {...(props.onOpenSettingsLineage === undefined
               ? {}
               : { onOpenSettingsLineage: props.onOpenSettingsLineage })}
@@ -1101,7 +1155,7 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
         : null}
       {message.role === "assistant"
         ? <SynopsisChoiceGroup
-            key={JSON.stringify([props.workspaceRootRef, message.projectId, message.sessionId, message.messageId])}
+            key={message.messageId}
             message={message}
             workspaceRootRef={props.workspaceRootRef}
             choices={choices}
@@ -1111,7 +1165,7 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
             novelMajorCategoryRules={props.novelMajorCategoryRules}
             novelSubcategoryRules={props.novelSubcategoryRules}
             proseRules={props.proseRules}
-            onRefresh={() => { void props.onRefreshChoices(message.messageId) }}
+            onRefresh={onRefresh}
             onFocusComposer={props.onFocusComposer}
           />
         : null}
@@ -1120,6 +1174,26 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
 })
 
 const PROCESS_SEGMENT_KINDS = new Set(["thinking", "searching", "running", "editing"])
+
+/** Closed by default; mount heavy children only after the user opens the panel. */
+function LazyOpenDetails(props: Readonly<{
+  className?: string
+  testId?: string
+  summary: ReactNode
+  children: ReactNode
+  defaultOpen?: boolean
+}>): React.JSX.Element {
+  const [open, setOpen] = useState(props.defaultOpen === true)
+  return <details
+    className={props.className}
+    data-testid={props.testId}
+    open={open}
+    onToggle={(event) => { setOpen(event.currentTarget.open) }}
+  >
+    <summary>{props.summary}</summary>
+    {open ? props.children : null}
+  </details>
+}
 
 const AgentStructuredBody = memo(function AgentStructuredBody({
   segments,
@@ -1153,11 +1227,10 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
   const showThinkingPlaceholder = !hasAny && streaming && !backgroundActive
   return <div className="agent-structured-body">
     {showProcessPanel
-      ? <details
+      ? <LazyOpenDetails
           className={`agent-stream-activity${processActive && streaming ? " is-live" : ""}`}
-          data-testid="agent-stream-activity"
-        >
-          <summary>
+          testId="agent-stream-activity"
+          summary={<>
             <ChevronRight size={14} aria-hidden="true" />
             <span className="agent-stream-activity-title">思考与工具</span>
             {processSummary.meta.length > 0
@@ -1168,7 +1241,8 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
               : processSummary.stepCount > 0
                 ? <span className="agent-stream-count">{processSummary.stepCount}</span>
                 : null}
-          </summary>
+          </>}
+        >
           <div className="agent-stream-activity-body">
             {processSegments.map((segment, index) => renderAgentProcessSegment({
               segment,
@@ -1179,7 +1253,7 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
             }))}
             {renderBackgroundActivityBlocks({ compacting, chapterIngest })}
           </div>
-        </details>
+        </LazyOpenDetails>
       : null}
     {outputSegments.map((segment, index) => {
       if (segment.kind === "resulting") {
@@ -1226,16 +1300,19 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
     })}
     {showThinkingPlaceholder
       ? <>
-          <details className="agent-stream-activity is-live" data-testid="agent-stream-activity">
-            <summary>
+          <LazyOpenDetails
+            className="agent-stream-activity is-live"
+            testId="agent-stream-activity"
+            summary={<>
               <ChevronRight size={14} aria-hidden="true" />
               <span className="agent-stream-activity-title">思考与工具</span>
               <em>进行中</em>
-            </summary>
+            </>}
+          >
             <div className="agent-stream-activity-body">
               <div className="agent-stream-block thinking muted"><span>thinking</span><p className="creation-desk-pending">深度思考中…</p></div>
             </div>
-          </details>
+          </LazyOpenDetails>
           <p className="creation-desk-pending">正在生成正式回复…</p>
         </>
       : null}
@@ -1342,19 +1419,22 @@ function renderAgentProcessSegment(input: Readonly<{
 }>): React.JSX.Element | null {
   const { segment, index, streaming, lastThinkingIndex, onOpenSettingsLineage } = input
   if (segment.kind === "thinking") {
-    return <details
+    const live = truncateThinkingForLiveRender(segment.text, streaming && index === lastThinkingIndex)
+    return <LazyOpenDetails
       key={`thinking-${String(segment.round)}-${String(index)}`}
       className="agent-stream-block thinking"
-    >
-      <summary>
+      summary={<>
         <ChevronRight size={14} aria-hidden="true" />
         thinking
         {streaming && index === lastThinkingIndex ? <em>流式</em> : null}
-      </summary>
-      <div className="agent-stream-thinking-markdown">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment.text}</ReactMarkdown>
-      </div>
-    </details>
+        {live.truncated ? <span className="agent-stream-count">仅保留尾部</span> : null}
+      </>}
+    >
+      {live.truncated
+        ? <p className="creation-desk-pending creation-desk-preview-note">长思考仅渲染尾部，展开后仍只保留最近片段以保持输入流畅。</p>
+        : null}
+      <CachedMarkdown className="agent-stream-thinking-markdown" text={live.text} />
+    </LazyOpenDetails>
   }
   if (segment.kind === "searching") {
     const active = segment.items.some((item) => item.status === "running")

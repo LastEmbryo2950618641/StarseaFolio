@@ -405,8 +405,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         workspaceRootRef: project.workspaceRootRef,
       }),
     ])
-    setUnpublishedDrafts(drafts)
-    setChapterSummaries(chapters)
+    // Non-urgent inventory refresh must not preempt composer keystrokes.
+    startTransition(() => {
+      setUnpublishedDrafts(drafts)
+      setChapterSummaries(chapters)
+    })
     // Tree surfaces prefer body > outline > synopsis among same-chapter siblings.
     // Use on-disk files only — registered-but-missing publish paths must not hide
     // current 梗概/细纲 after titles were renamed (e.g. 第三章 秤与约 → 北地来的信使).
@@ -417,7 +420,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       ...onDiskPaths,
       ...drafts.flatMap((draft) => draft.publishPath === undefined ? [] : [draft.publishPath]),
     ]
-    setWorkspaceFilePaths(filePaths)
+    startTransition(() => {
+      setWorkspaceFilePaths(filePaths)
+    })
     const chapterFiles = [
       ...drafts.flatMap((draft) => draft.publishPath === undefined ? [] : [{ path: draft.publishPath, kind: "file" as const }]),
       ...next.inventory.filter((entry) => (
@@ -470,7 +475,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       ...next.inventory.filter((entry) => !entry.path.startsWith("章节正文/") || entry.kind === "directory"),
       ...foldedChapterFiles,
     ].sort((left, right) => left.path.localeCompare(right.path, "zh-CN"))
-    setReport({ ...next, inventory })
+    startTransition(() => {
+      setReport({ ...next, inventory })
+    })
     const workspaceGateIssues = next.issues.filter((issue) => (
       issue.code === "invalid_synopsis_name"
       || issue.code === "chapter_missing_volume"
@@ -481,7 +488,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       return !dismissedWorkspaceIssueKeysRef.current.has(key)
     })
     if (visibleIssues.length > 0) {
-      setError(visibleIssues.map((issue) => `${issue.path}：${issue.message}`).join("\n"))
+      startTransition(() => {
+        setError(visibleIssues.map((issue) => `${issue.path}：${issue.message}`).join("\n"))
+      })
     }
     return filePaths
   }, [project])
@@ -1652,35 +1661,33 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
               await new Promise((resolve) => setTimeout(resolve, 200))
               continue
             }
-            setSynopsisStream((previous) => {
-              if (previous !== undefined && synopsisStreamPeekUnchanged(previous, peek)) return previous
-              return peek
+            // Stream chrome is secondary to composer typing; defer commit.
+            startTransition(() => {
+              setSynopsisStream((previous) => {
+                if (previous !== undefined && synopsisStreamPeekUnchanged(previous, peek)) return previous
+                return peek
+              })
+              if (peek.usage !== undefined) setSynopsisUsage(peek.usage)
+              if (peek.budgetAdvisory !== undefined) setSynopsisBudgetWarning(peek.budgetAdvisory)
             })
-            if (peek.usage !== undefined) {
-              setSynopsisUsage(peek.usage)
-            }
-            if (peek.budgetAdvisory !== undefined) {
-              setSynopsisBudgetWarning(peek.budgetAdvisory)
-            }
             // Keep peeking until send() sets pollStopped so post-discuss
             // staging search updates still reach the stream bubble.
           } else {
             observedRunningStream = true
-            setSynopsisStream((previous) => {
-              if (previous !== undefined && synopsisStreamPeekUnchanged(previous, peek)) return previous
-              return peek
+            startTransition(() => {
+              setSynopsisStream((previous) => {
+                if (previous !== undefined && synopsisStreamPeekUnchanged(previous, peek)) return previous
+                return peek
+              })
+              if (peek.usage !== undefined) setSynopsisUsage(peek.usage)
+              if (peek.budgetAdvisory !== undefined) setSynopsisBudgetWarning(peek.budgetAdvisory)
             })
-            if (peek.usage !== undefined) {
-              setSynopsisUsage(peek.usage)
-            }
-            if (peek.budgetAdvisory !== undefined) {
-              setSynopsisBudgetWarning(peek.budgetAdvisory)
-            }
           }
         } catch {
           // Peek is best-effort while the model streams.
         }
-        await new Promise((resolve) => setTimeout(resolve, 200))
+        // 200ms peeks flood React while long thinking markdown is on screen.
+        await new Promise((resolve) => setTimeout(resolve, 350))
       }
     }
     const pollTask = pollStream()

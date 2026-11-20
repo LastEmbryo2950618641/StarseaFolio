@@ -34,6 +34,21 @@ function taskSnapshotEqual(
       === (right.phaseRuns?.at(-1)?.finishedAtMs ?? right.phaseRuns?.at(-1)?.startedAtMs)
 }
 
+function graphRevisionActivityEqual(
+  left: GraphRevisionTask["activity"],
+  right: GraphRevisionTask["activity"],
+): boolean {
+  if (left === right) return true
+  if (left === undefined || right === undefined) return false
+  return left.phase === right.phase
+    && left.stage === right.stage
+    && left.attempt === right.attempt
+    && left.startedAtMs === right.startedAtMs
+    && left.lastActivityAtMs === right.lastActivityAtMs
+    && left.reasoningCharacters === right.reasoningCharacters
+    && left.contentCharacters === right.contentCharacters
+}
+
 function graphRevisionTasksEqual(
   left: readonly GraphRevisionTask[],
   right: readonly GraphRevisionTask[],
@@ -54,7 +69,7 @@ function graphRevisionTasksEqual(
       || a.canContinue !== b.canContinue
       || a.blocksTurn !== b.blocksTurn
       || a.heading !== b.heading
-      || JSON.stringify(a.activity) !== JSON.stringify(b.activity)
+      || !graphRevisionActivityEqual(a.activity, b.activity)
     ) {
       return false
     }
