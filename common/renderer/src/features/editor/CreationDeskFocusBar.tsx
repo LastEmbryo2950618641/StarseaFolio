@@ -12,6 +12,8 @@ import {
 type Props = Readonly<{
   session: SynopsisConversationSession
   chapters: readonly DiscussFocusChapterOption[]
+  /** Target chapter count for the active volume plan; omit to show only the in-volume index. */
+  volumeTargetChapterCount?: number
   onSelectChapter(sequence: number, focusKind: DiscussFocusKind): void
   onOpenFile(path: string): void
 }>
@@ -27,6 +29,23 @@ export function CreationDeskFocusBar(props: Props): React.JSX.Element {
     ?? (props.session.title.length > 0
       ? `第${String(props.session.chapterSequence)}章 ${props.session.title}`
       : `第${String(props.session.chapterSequence)}章`)
+  const volumeProgressLabel = useMemo(() => {
+    const volumeName = selected?.volumeFolderName
+    const volumeChapters = (volumeName === undefined
+      ? props.chapters
+      : props.chapters.filter((item) => item.volumeFolderName === volumeName)
+    ).slice().sort((a, b) => a.sequence - b.sequence)
+    const indexInVolume = volumeChapters.findIndex((item) => item.sequence === props.session.chapterSequence)
+    const current = indexInVolume >= 0 ? indexInVolume + 1 : props.session.chapterSequence
+    const total = props.volumeTargetChapterCount
+    if (total !== undefined && total > 0) return `第 ${String(current)}/${String(total)} 章`
+    return `第 ${String(current)} 章`
+  }, [
+    props.chapters,
+    props.session.chapterSequence,
+    props.volumeTargetChapterCount,
+    selected?.volumeFolderName,
+  ])
   const filtered = useMemo(() => {
     const needle = query.trim()
     if (needle.length === 0) return props.chapters
@@ -118,6 +137,13 @@ export function CreationDeskFocusBar(props: Props): React.JSX.Element {
           </div>
         : null}
     </div>
+    <span
+      className="creation-desk-volume-progress"
+      data-testid="creation-desk-volume-progress"
+      title="当前卷章节进度"
+    >
+      {volumeProgressLabel}
+    </span>
     {openPath === undefined
       ? null
       : <button

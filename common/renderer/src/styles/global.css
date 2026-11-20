@@ -6727,6 +6727,14 @@ a.project-rail-download {
   padding: 0 10px;
   white-space: nowrap;
 }
+.creation-desk-session-bar .creation-desk-volume-progress {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: visible;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .creation-desk-focus-combobox {
   position: relative;
   flex: 1 1 auto;

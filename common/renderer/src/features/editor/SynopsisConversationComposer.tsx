@@ -163,6 +163,8 @@ type Props = Readonly<{
   onOpenSynopsisFile?(path: string): void
   onSetFocus?(sequence: number, focusKind: DiscussFocusKind): void
   focusChapters?: readonly DiscussFocusChapterOption[]
+  /** Active volume plan target chapter count for focus-bar N/M progress. */
+  volumeTargetChapterCount?: number
   focusLocked?: boolean
   layout?: "desk" | "rail"
   onPromoteDraftToBody?(): Promise<void>
@@ -568,6 +570,9 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                 ? <CreationDeskFocusBar
                     session={props.session}
                     chapters={props.focusChapters ?? []}
+                    {...(props.volumeTargetChapterCount === undefined
+                      ? {}
+                      : { volumeTargetChapterCount: props.volumeTargetChapterCount })}
                     onSelectChapter={props.onSetFocus}
                     onOpenFile={(path) => { props.onOpenSynopsisFile?.(path); }}
                   />

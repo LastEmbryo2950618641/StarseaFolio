@@ -225,6 +225,36 @@ export const DISCUSS_PROCEED_STAGE_ORDER: readonly DiscussProceedStage[] = [
 ] as const
 
 /**
+ * Derive the creation-desk pipeline stage from durable materials on disk.
+ * Stage advances only when the corresponding artifact is入库 — not when the
+ * user is merely discussing within a stage.
+ */
+export function resolveDiscussPipelineStage(input: Readonly<{
+  synopsisReady: boolean
+  outlineReady: boolean
+  draftReady: boolean
+  /** Draft exists and is waiting for「草稿可以，发布正文」or body confirm. */
+  awaitingBodyConfirm?: boolean
+  /** Focus chapter already has committed body text. */
+  chapterPublished?: boolean
+}>): DiscussProceedStage {
+  if (!input.synopsisReady) return "chapter_requirements"
+  if (!input.outlineReady) return "synopsis_discuss"
+  if (!input.draftReady) return "outline_discuss"
+  if (input.chapterPublished === true || input.awaitingBodyConfirm === true) return "body_discuss"
+  return "draft_discuss"
+}
+
+/** Short Chinese labels for auto-continue copy (keep in sync with UI stage names). */
+export const DISCUSS_PIPELINE_STAGE_LABELS: Record<DiscussProceedStage, string> = {
+  chapter_requirements: "新章要求",
+  synopsis_discuss: "梗概",
+  outline_discuss: "细纲",
+  draft_discuss: "草稿",
+  body_discuss: "正文确认",
+}
+
+/**
  * Resolve proceedMode from new field or legacy batchProceed.
  * Default (absent) → single; legacy true → batch; legacy false → precise (old “逐关停等”).
  */
