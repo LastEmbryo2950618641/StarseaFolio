@@ -176,6 +176,111 @@ export type SynopsisConversationStreamRun = z.infer<typeof synopsisConversationS
 export const discussAgentModeSchema = z.enum(["auto", "plan", "accept_edits"])
 export type DiscussAgentMode = z.infer<typeof discussAgentModeSchema>
 
+/** Creation-desk chapter proceed mode (replaces the boolean 批量推进 toggle). */
+export const discussProceedModeSchema = z.enum(["precise", "single", "batch", "custom"])
+export type DiscussProceedMode = z.infer<typeof discussProceedModeSchema>
+
+/** Pipeline nodes that can stop for user input or auto-advance. */
+export const discussProceedStageSchema = z.enum([
+  "chapter_requirements",
+  "synopsis_discuss",
+  "outline_discuss",
+  "draft_discuss",
+  "body_discuss",
+])
+export type DiscussProceedStage = z.infer<typeof discussProceedStageSchema>
+
+/** Per-stage automation for custom proceed mode (true = auto / skip stop). */
+export const discussCustomProceedGatesSchema = z.object({
+  chapter_requirements: z.boolean(),
+  synopsis_discuss: z.boolean(),
+  outline_discuss: z.boolean(),
+  draft_discuss: z.boolean(),
+  body_discuss: z.boolean(),
+})
+export type DiscussCustomProceedGates = z.infer<typeof discussCustomProceedGatesSchema>
+
+/** Code-emitted proceed progress for the creation-desk stage bar. */
+export const discussProceedProgressSchema = z.object({
+  stage: discussProceedStageSchema,
+  status: z.enum(["waiting", "running", "done"]),
+})
+export type DiscussProceedProgress = z.infer<typeof discussProceedProgressSchema>
+
+/** Default custom gates mirror single-chapter stops (requirements + body confirm). */
+export const DEFAULT_CUSTOM_PROCEED_GATES: DiscussCustomProceedGates = {
+  chapter_requirements: false,
+  synopsis_discuss: true,
+  outline_discuss: true,
+  draft_discuss: true,
+  body_discuss: false,
+}
+
+export const DISCUSS_PROCEED_STAGE_ORDER: readonly DiscussProceedStage[] = [
+  "chapter_requirements",
+  "synopsis_discuss",
+  "outline_discuss",
+  "draft_discuss",
+  "body_discuss",
+] as const
+
+/**
+ * Resolve proceedMode from new field or legacy batchProceed.
+ * Default (absent) → single; legacy true → batch; legacy false → precise (old “逐关停等”).
+ */
+export function resolveDiscussProceedMode(input: Readonly<{
+  proceedMode?: DiscussProceedMode
+  batchProceed?: boolean
+}>): DiscussProceedMode {
+  if (input.proceedMode !== undefined) return input.proceedMode
+  if (input.batchProceed === true) return "batch"
+  if (input.batchProceed === false) return "precise"
+  return "single"
+}
+
+export function mergeCustomProceedGates(
+  partial?: Partial<DiscussCustomProceedGates> | null,
+): DiscussCustomProceedGates {
+  return {
+    ...DEFAULT_CUSTOM_PROCEED_GATES,
+    ...(partial ?? {}),
+  }
+}
+
+/**
+ * Whether a pipeline stage should auto-advance without waiting for the user.
+ * `agentMode=plan` always forces stops.
+ */
+export function resolveProceedAutonomy(input: Readonly<{
+  mode: DiscussProceedMode
+  stage: DiscussProceedStage
+  customGates?: Partial<DiscussCustomProceedGates> | null
+  agentMode?: DiscussAgentMode
+}>): boolean {
+  if (input.agentMode === "plan") return false
+  if (input.mode === "precise") return false
+  if (input.mode === "batch") return true
+  if (input.mode === "single") {
+    return input.stage === "synopsis_discuss"
+      || input.stage === "outline_discuss"
+      || input.stage === "draft_discuss"
+  }
+  return mergeCustomProceedGates(input.customGates)[input.stage] === true
+}
+
+/** Chapter-end auto-continue only in batch, or custom with every gate on. */
+export function resolveProceedNextChapterAutonomy(input: Readonly<{
+  mode: DiscussProceedMode
+  customGates?: Partial<DiscussCustomProceedGates> | null
+  agentMode?: DiscussAgentMode
+}>): boolean {
+  if (input.agentMode === "plan") return false
+  if (input.mode === "batch") return true
+  if (input.mode === "precise" || input.mode === "single") return false
+  const gates = mergeCustomProceedGates(input.customGates)
+  return DISCUSS_PROCEED_STAGE_ORDER.every((stage) => gates[stage] === true)
+}
+
 /** Claude Code–style TodoWrite items for the creation desk Todo panel. */
 export const synopsisConversationTodoStatusSchema = z.enum([
   "pending",
@@ -240,6 +345,8 @@ export const synopsisConversationStreamSnapshotSchema = z.object({
   todos: z.array(synopsisConversationTodoSchema).default([]),
   /** True while discuss context compaction is actively folding history. */
   compacting: z.boolean().default(false),
+  /** Latest code-level proceed stage (not model-reported). */
+  proceedProgress: discussProceedProgressSchema.optional(),
   usage: synopsisConversationStreamUsageSchema.optional(),
   budgetAdvisory: synopsisConversationBudgetAdvisorySchema.optional(),
   error: z.string().optional(),
@@ -323,6 +430,8 @@ export const synopsisConversationSendResultSchema = z.object({
   autoContinue: z.object({
     message: z.string().min(1).max(500),
   }).optional(),
+  /** Code-level proceed stage after this send. */
+  proceedProgress: discussProceedProgressSchema.optional(),
 })
 export type SynopsisConversationSendResult = z.infer<typeof synopsisConversationSendResultSchema>
 

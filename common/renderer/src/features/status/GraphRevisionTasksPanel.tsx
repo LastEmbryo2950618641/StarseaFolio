@@ -10,7 +10,7 @@ import { PhaseIoDetails, PhaseIoPending } from "./phase-io-details.js"
 import { RuntimeMonitor } from "./TaskCheckpointPrototype.js"
 
 const statuses: Record<string, string> = {
-  pending: "待同步", running: "同步中", completed: "已完成", failed: "待重试",
+  pending: "待入库", running: "入库中", completed: "已完成", failed: "待重试",
   cancelled: "已取消", interrupted: "已中断", retired: "已撤销",
 }
 const activityLabels = { waiting: "等待模型响应", thinking: "模型思考中", responding: "正在接收结果", repairing: "正在修正输出" }
@@ -180,12 +180,16 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
   const generation = useRef(0)
   const operations = useRef(new Set<string>())
   const dismissedRepairKeys = useRef(new Set<string>())
+  const previousBusyRef = useRef(false)
+  const onChangedRef = useRef(onChanged)
+  onChangedRef.current = onChanged
   useEffect(() => {
     const current = ++generation.current
     setTasks([])
     setLoading(true)
     setError(undefined)
     setLoadError(undefined)
+    previousBusyRef.current = false
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let lastKnownBusy = false
@@ -206,28 +210,31 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
             }>("folio.uiState.read", project).catch(() => undefined),
             invokeBackend<readonly GraphRevisionTask[]>("chapter.graphRevision.list", project),
           ])
-          // Folio is the shared panel source, but stage IO needs graphSyncTaskId from the
-          // authoritative list (older ui-state may have stripped it).
+          // Folio keeps panel order; authoritative list wins for live status/progress.
           const fromFolio = ui?.panels.graphRevision.tasks ?? []
           const listedById = new Map(listed.map((task) => [task.revisionTaskId, task]))
+          const mergedFromFolio = fromFolio.map((task) => {
+            const authority = listedById.get(task.revisionTaskId)
+            if (authority === undefined) return task
+            return {
+              ...task,
+              ...authority,
+              heading: authority.heading.length > 0 ? authority.heading : task.heading,
+            }
+          })
+          const folioIds = new Set(fromFolio.map((task) => task.revisionTaskId))
           const next = fromFolio.length > 0
-            ? fromFolio.map((task) => {
-              const authority = listedById.get(task.revisionTaskId)
-              return {
-                ...task,
-                chapterId: task.chapterId ?? authority?.chapterId ?? "",
-                blocksTurn: task.blocksTurn ?? authority?.blocksTurn ?? false,
-                canContinue: task.canContinue ?? authority?.canContinue ?? false,
-                ...(task.graphSyncTaskId === undefined && authority?.graphSyncTaskId !== undefined
-                  ? { graphSyncTaskId: authority.graphSyncTaskId }
-                  : {}),
-                ...(task.activity === undefined && authority?.activity !== undefined
-                  ? { activity: authority.activity }
-                  : {}),
-              }
-            })
+            ? [
+              ...mergedFromFolio,
+              ...listed.filter((task) => !folioIds.has(task.revisionTaskId)),
+            ]
             : listed
           lastKnownBusy = next.some((task) => task.status === "running" || task.status === "pending")
+          // When ingest finishes, refresh workspace so left progress leaves「章节入库中」.
+          if (previousBusyRef.current && !lastKnownBusy) {
+            void onChangedRef.current?.().catch(() => undefined)
+          }
+          previousBusyRef.current = lastKnownBusy
           if (!disposed && generation.current === current) {
             startTransition(() => {
               setTasks((previous) => graphRevisionTasksEqual(previous, next) ? previous : next)
@@ -328,7 +335,7 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
         <div className="graph-revision-title"><strong>{task.heading}</strong><span className={`graph-revision-status is-${task.status}`}>{statuses[task.status] ?? task.status}</span></div>
         <div className="graph-revision-progress" aria-live="polite">
           {task.status === "running" ? <Loader2 size={14} className="graph-revision-spinner" /> : task.status === "completed" ? <CheckCircle2 size={14} /> : null}
-          <span>{task.status === "completed" ? "同步完成" : phaseLabels[progress.phase ?? ""] ?? "等待图同步"}…（{current}/{progress.total ?? "待定"}）</span>
+          <span>{task.status === "completed" ? "入库完成" : phaseLabels[progress.phase ?? ""] ?? "等待章节入库"}…（{current}/{progress.total ?? "待定"}）</span>
         </div>
         {progress.total !== null && progress.total > 0 ? <progress aria-label={`${task.heading}同步进度`} max={progress.total} value={current} /> : null}
         {activity === undefined ? null : <div className="graph-revision-activity" role="status">
@@ -336,7 +343,7 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
           <span>本阶段已用 {elapsedText(activity.startedAtMs)} · {activity.reasoningCharacters + activity.contentCharacters === 0 ? `等待数据 ${elapsedText(activity.lastActivityAtMs)}` : `最近响应 ${elapsedText(activity.lastActivityAtMs)}前`}</span>
           {activity.reasoningCharacters + activity.contentCharacters === 0 ? null : <span>已接收思考 {activity.reasoningCharacters.toLocaleString("zh-CN")} 字符 · 结果 {activity.contentCharacters.toLocaleString("zh-CN")} 字符</span>}
         </div>}
-        {task.blocksTurn ? <p className="graph-revision-blocker">世界图尚未同步，暂不能开始新推演</p> : null}
+        {task.blocksTurn ? <p className="graph-revision-blocker">章节入库尚未完成，暂不能开始新推演</p> : null}
         {task.error === undefined ? null : <ExpandableErrorAlert message={task.error} className="graph-revision-error" title="章节入库任务错误" testId={`graph-revision-task-error-${task.revisionTaskId}`} />}
         {progress.phases.length > 0 ? <details className="graph-revision-stages">
           <summary>阶段记录</summary>
@@ -345,7 +352,13 @@ export function GraphRevisionTasksPanel({ project, model, monitorTask, onResetMe
         <footer><time dateTime={new Date(task.updatedAtMs).toISOString()}>{new Date(task.updatedAtMs).toLocaleString("zh-CN", { hour12: false })}</time><div>
           <button type="button" disabled={!task.canCancel || busy !== undefined} onClick={() => { void act(task, "cancel") }}><X size={12} aria-hidden="true" />{busy === "cancel" ? "取消中" : "取消"}</button>
           <button type="button" disabled={!task.canRetry || busy !== undefined} onClick={() => { void act(task, "rerun") }}><RotateCcw size={12} aria-hidden="true" />{busy === "rerun" ? "提交中" : "重跑"}</button>
-          <button type="button" disabled={!task.canContinue || busy !== undefined} onClick={() => { void act(task, "continue") }}><Play size={12} aria-hidden="true" />{busy === "continue" ? "提交中" : "继续"}</button>
+          <button
+            type="button"
+            disabled={!task.canContinue || task.status === "running" || busy !== undefined}
+            onClick={() => { void act(task, "continue") }}
+          >
+            <Play size={12} aria-hidden="true" />{busy === "continue" ? "提交中" : "继续"}
+          </button>
         </div></footer>
       </article>
     })}

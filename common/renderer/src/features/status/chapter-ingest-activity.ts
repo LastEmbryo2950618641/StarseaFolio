@@ -44,6 +44,7 @@ export function formatChapterIngestDetail(activity: ChapterIngestActivity): stri
 /** Poll running chapter-ingest (graph-revision) progress for the open project. */
 export function useChapterIngestActivity(
   project: Readonly<{ projectId: string; workspaceRootRef: string }> | undefined,
+  options?: Readonly<{ onSettled?: () => void | Promise<void> }>,
 ): ChapterIngestActivity | undefined {
   const [activity, setActivity] = useState<ChapterIngestActivity | undefined>(undefined)
 
@@ -55,6 +56,8 @@ export function useChapterIngestActivity(
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let busy = false
+    let wasBusy = false
+    const onSettled = options?.onSettled
     const poll = async (): Promise<void> => {
       try {
         if (typeof document !== "undefined" && document.visibilityState === "hidden") return
@@ -62,11 +65,16 @@ export function useChapterIngestActivity(
         if (disposed) return
         const running = listed.find((item) => item.status === "running" || item.status === "pending")
         busy = running !== undefined
+        if (wasBusy && !busy) {
+          void Promise.resolve(onSettled?.()).catch(() => undefined)
+        }
+        wasBusy = busy
         setActivity(resolveChapterIngestActivity(running))
       } catch {
         if (!disposed) {
           setActivity(undefined)
           busy = false
+          wasBusy = false
         }
       } finally {
         if (!disposed) {
@@ -80,7 +88,7 @@ export function useChapterIngestActivity(
       disposed = true
       clearTimeout(timer)
     }
-  }, [project?.projectId, project?.workspaceRootRef])
+  }, [options?.onSettled, project?.projectId, project?.workspaceRootRef])
 
   return activity
 }

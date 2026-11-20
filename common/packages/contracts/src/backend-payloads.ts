@@ -8,7 +8,11 @@ import {
   turnDeductionGoalBundleSchema,
 } from "./deduction-goals.js"
 import { projectSettingsSchema } from "./project-settings.js"
-import { discussFocusKindSchema } from "./synopsis.js"
+import {
+  discussCustomProceedGatesSchema,
+  discussFocusKindSchema,
+  discussProceedModeSchema,
+} from "./synopsis.js"
 
 import { idSchema } from "./ids.js"
 import { graphObjectIdSchema } from "./persistent-id.js"
@@ -377,11 +381,17 @@ export const synopsisConversationSendPayloadSchema = projectSettingsReadPayloadS
    */
   automation: synopsisConversationAutomationSchema.optional(),
   /**
-   * Creation-desk「批量推进」toggle:
-   * true = skip synopsis/outline/body confirmation stops and auto-continue to next chapter;
-   * false = stop after each of 梗概 / 细纲 / 正文 for user confirmation.
+   * @deprecated Prefer `proceedMode`. Kept for older clients:
+   * true → batch, false/absent → resolved via proceedMode default (single).
    */
   batchProceed: z.boolean().optional(),
+  /**
+   * Creation-desk proceed mode:
+   * precise | single (default) | batch | custom.
+   */
+  proceedMode: discussProceedModeSchema.optional(),
+  /** Per-stage auto gates when proceedMode is custom (true = auto). */
+  customProceedGates: discussCustomProceedGatesSchema.optional(),
   /** Claude Code–style discuss mode: auto (default) | plan | accept_edits. */
   agentMode: z.enum(["auto", "plan", "accept_edits"]).optional(),
 })

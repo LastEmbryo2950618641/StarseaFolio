@@ -8,7 +8,14 @@ import {
   type ChapterNarrativeIntent,
   type CharacterFieldValue,
   type CreationDeskSettingsUpdate,
+  type DiscussCustomProceedGates,
   type DiscussFocusKind,
+  type DiscussProceedMode,
+  type DiscussProceedProgress,
+  type DiscussProceedStage,
+  resolveDiscussProceedMode,
+  resolveProceedAutonomy,
+  resolveProceedNextChapterAutonomy,
   type SynopsisConversationListResult,
   type SynopsisConversationMessage,
   type SynopsisConversationSendResult,
@@ -579,19 +586,55 @@ export class SynopsisConversationService {
     /** ChapterPanel 批量推演：按章规划并允许同轮写梗概与细纲。 */
     automation?: "batch_chapter"
     /**
-     * Creation-desk「批量推进」：跳过阶段停步并自动连章。
-     * false/缺省 = 每步停等用户指令（阶段按钮只是便捷入口）。
+     * @deprecated Prefer proceedMode. Legacy true → batch.
      */
     batchProceed?: boolean
+    /** Creation-desk proceed mode (default single). */
+    proceedMode?: DiscussProceedMode
+    /** Per-stage auto gates when proceedMode is custom. */
+    customProceedGates?: DiscussCustomProceedGates
     /** Claude Code–style discuss mode. */
     agentMode?: import("@starseafolio/contracts").DiscussAgentMode
   }>): Promise<SynopsisConversationSendResult> {
     const focusLocked = input.focusLocked === true
     const batchAutomation = input.automation === "batch_chapter"
-    const batchProceed = input.batchProceed === true || batchAutomation
     const agentMode = input.agentMode ?? "auto"
-    // Autonomous gates only when 批量推进（或卷批量 automation）开启；Auto  alone no longer skips confirms.
-    const autonomous = batchProceed && (agentMode === "auto" || agentMode === "accept_edits")
+    const proceedMode: DiscussProceedMode = batchAutomation
+      ? "batch"
+      : resolveDiscussProceedMode({
+        ...(input.proceedMode === undefined ? {} : { proceedMode: input.proceedMode }),
+        ...(input.batchProceed === undefined ? {} : { batchProceed: input.batchProceed }),
+      })
+    const customGates = input.customProceedGates
+    const stageAuto = (stage: DiscussProceedStage): boolean => resolveProceedAutonomy({
+      mode: proceedMode,
+      stage,
+      ...(customGates === undefined ? {} : { customGates }),
+      agentMode,
+    })
+    const autonomousSynopsis = stageAuto("synopsis_discuss")
+    const autonomousOutline = stageAuto("outline_discuss")
+    const autonomousDraft = stageAuto("draft_discuss")
+    const autonomousBody = stageAuto("body_discuss")
+    const nextChapterAuto = resolveProceedNextChapterAutonomy({
+      mode: proceedMode,
+      ...(customGates === undefined ? {} : { customGates }),
+      agentMode,
+    })
+    const withinChapterAuto = autonomousSynopsis || autonomousOutline || autonomousDraft
+    const pipelineAuto = withinChapterAuto || autonomousBody || nextChapterAuto
+    /** Legacy flag: batch mode or volume automation (prompt / nested call sites). */
+    const batchProceed = proceedMode === "batch" || batchAutomation
+    const emitProceedProgress = (
+      stage: DiscussProceedStage,
+      status: DiscussProceedProgress["status"],
+    ): void => {
+      synopsisConversationStreamHub.setProceedProgress(
+        input.projectId,
+        { stage, status },
+        this.dependencies.now(),
+      )
+    }
     if (input.lockedChapterSequence !== undefined) {
       await this.setFocus({
         projectId: input.projectId,
@@ -676,7 +719,7 @@ export class SynopsisConversationService {
         session,
         message: input.message,
         model: input.model,
-        batchProceed: batchProceed && !batchAutomation,
+        autoContinueNextChapter: nextChapterAuto && !batchAutomation,
         ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
         ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
         ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
@@ -772,13 +815,16 @@ export class SynopsisConversationService {
           updatedAtMs: nowMs,
         })
       }
-      if ((confirmingSynopsis || autonomous || batchAutomation) && synopsisReady && synopsisConfirmedAtMs === undefined) {
+      if ((confirmingSynopsis || autonomousSynopsis || batchAutomation) && synopsisReady && synopsisConfirmedAtMs === undefined) {
         synopsisConfirmedAtMs = nowMs
         await this.dependencies.conversation.updateSession({
           sessionId: session.sessionId,
           synopsisConfirmedAtMs: nowMs,
           updatedAtMs: nowMs,
         })
+        if (autonomousSynopsis || batchAutomation) {
+          emitProceedProgress("synopsis_discuss", "done")
+        }
       }
       const synopsisConfirmed = synopsisConfirmedAtMs !== undefined
       const goalsSnapshot = await this.dependencies.goals.list(input.projectId)
@@ -799,11 +845,20 @@ export class SynopsisConversationService {
       const initialVolumePlanningState = await this.readVolumePlanningState(input.workspaceRootRef, initialVolume)
       const initialVolumePlanningContext = await this.readVolumePlanningContext(input.workspaceRootRef, initialVolume, initialVolumePlanningState)
       const volumePlanningGateWasReady = initialVolumePlanningContext.ready
-      const initialProgressFingerprint = autonomous ? await this.readDiscussProgressFingerprint({
+      const initialProgressFingerprint = pipelineAuto ? await this.readDiscussProgressFingerprint({
         projectId: input.projectId, workspaceRootRef: input.workspaceRootRef,
         chapterSequence: session.chapterSequence, draftVersionId: session.draftVersionId,
         styleStatus: styleGateState.status,
       }) : undefined
+      const focusKindForProgress = session.focusKind ?? "plot_synopsis"
+      emitProceedProgress(
+        focusKindForProgress === "plot_outline"
+          ? "outline_discuss"
+          : focusKindForProgress === "chapter_body"
+            ? "draft_discuss"
+            : "synopsis_discuss",
+        "running",
+      )
       const discussResult = await this.runSynopsisDiscuss({
         projectId: input.projectId,
         workspaceRootRef: input.workspaceRootRef,
@@ -822,7 +877,10 @@ export class SynopsisConversationService {
         userEditedOutlineSinceAgent,
         synopsisConfirmed,
         ...(batchAutomation ? { batchAutomation: true } : {}),
-        ...(batchProceed ? { batchProceed: true } : {}),
+        // Allows mid-chapter continueTurn / skip choice gate for single & partial custom.
+        ...((batchProceed || withinChapterAuto) ? { batchProceed: true } : {}),
+        proceedMode,
+        ...(customGates === undefined ? {} : { customProceedGates: customGates }),
         activeGoals,
         chapterProgress,
         hookScheduleAudit,
@@ -1391,13 +1449,17 @@ export class SynopsisConversationService {
 
       const wroteOutlineThisTurn = lastOutlineAgentDigest !== undefined
         && lastOutlineAgentDigest !== session.lastOutlineAgentDigest
-      if (synopsisReadyForOutline && wroteSynopsisBody && (batchAutomation || autonomous)) {
+      if (synopsisReadyForOutline && wroteSynopsisBody && (batchAutomation || autonomousSynopsis)) {
         nextSynopsisConfirmedAtMs = nowMs
+        emitProceedProgress("synopsis_discuss", "done")
       } else if (wroteSynopsisBody && !confirmingSynopsis) {
         nextSynopsisConfirmedAtMs = undefined
       }
-      if (synopsisReadyForOutline && (confirmingSynopsis || ((batchAutomation || autonomous) && wroteSynopsisBody))) {
+      if (synopsisReadyForOutline && (confirmingSynopsis || ((batchAutomation || autonomousSynopsis) && wroteSynopsisBody))) {
         nextSynopsisConfirmedAtMs = nextSynopsisConfirmedAtMs ?? nowMs
+      }
+      if (wroteSynopsisBody) {
+        emitProceedProgress("synopsis_discuss", autonomousSynopsis || batchAutomation ? "done" : "waiting")
       }
       // Draft services read the persisted gate, including changes made in this turn.
       await this.dependencies.conversation.updateSession({
@@ -1427,8 +1489,17 @@ export class SynopsisConversationService {
       // Every chapter must have a non-empty outline before a draft can be written.
       const bodyWriteAllowed = synopsisReadyForOutline
         && hasOutlineOnDisk
+      if (wroteOutlineThisTurn || hasOutlineOnDisk) {
+        emitProceedProgress(
+          "outline_discuss",
+          wroteOutlineThisTurn
+            ? (autonomousOutline || batchAutomation ? "done" : "waiting")
+            : "running",
+        )
+      }
       const mustStopAfterOutline = wroteOutlineThisTurn
-        && !autonomous
+        && !autonomousOutline
+        && !autonomousDraft
         && !batchAutomation
         && !isExplicitChapterDraftRequest(input.message)
       const blockBodyPipeline = !bodyWriteAllowed || mustStopAfterOutline
@@ -1454,7 +1525,7 @@ export class SynopsisConversationService {
             ? mergeConfirmOutlineChoice(assist.choices)
             : assist.choices,
         }
-      } else if (!autonomous && !batchAutomation) {
+      } else if (!autonomousDraft && !nextChapterAuto && !batchAutomation) {
         // Keep a requested focus action; the focus gate below distinguishes it from automatic progression.
         const { continueTurn: _stepContinue, ...assistWithoutJump } = assist
         draftAssist = assistWithoutJump
@@ -1563,8 +1634,12 @@ export class SynopsisConversationService {
           writeNotices.push("当前入口已锁定焦点，本轮 focusChange 未生效。")
         } else if (batchAutomation) {
           writeNotices.push("批量推演中焦点由系统推进，本轮 focusChange 未生效。")
-        } else if (!autonomous && !isCurrentUserFocusChange(draftAssist.focusChange, input.message)) {
-          writeNotices.push("批量推进已关闭且本轮未提供用户换章指令依据，焦点保持不变。用户明确要求换章时可直接执行，无需开启批量推进。")
+        } else if (
+          draftAssist.focusChange.chapterSequence !== session.chapterSequence
+          && !nextChapterAuto
+          && !isCurrentUserFocusChange(draftAssist.focusChange, input.message)
+        ) {
+          writeNotices.push("当前推进模式不允许自动换章，且本轮未提供用户换章指令依据，焦点保持不变。用户明确要求换章时可直接执行。")
         } else {
           const targetSequence = draftAssist.focusChange.chapterSequence
           const nextSequence = await this.waitForChapterSequenceGate(input.projectId, targetSequence)
@@ -1602,7 +1677,7 @@ export class SynopsisConversationService {
           synopsisReady: synopsisReadyForOutline,
           synopsisConfirmed,
           outlineReady: hasOutlineOnDisk,
-          offerSynopsisConfirmation: !autonomous
+          offerSynopsisConfirmation: !autonomousSynopsis
             && !batchAutomation
             && !volumePlanningNeedsFirstWrite
             && !volumeStoryNeedsUser
@@ -1639,9 +1714,10 @@ export class SynopsisConversationService {
         synopsisConversationStreamHub.peek(input.projectId, session.sessionId).todos,
       )
       const offeredChoices = persistedChoices ?? []
-      const waitingOnUser = (coldStartStyleNeedsChoice || volumeStoryNeedsUser || !autonomous) && offeredChoices.length > 0
-      const autoDecideChoices = autonomous && !coldStartStyleNeedsChoice && !volumeStoryNeedsUser
+      const waitingOnUser = (coldStartStyleNeedsChoice || volumeStoryNeedsUser || !withinChapterAuto) && offeredChoices.length > 0
+      const autoDecideChoices = withinChapterAuto && !coldStartStyleNeedsChoice && !volumeStoryNeedsUser
         && (workflowChoices?.length ?? 0) > 0
+        && !offeredChoices.some((choice) => choice.action === "promote_draft_to_body" && !autonomousBody)
 
       let assistantContent = volumePlanningNeedsFirstWrite && workStyleGateReadyAtStart
         ? buildVolumeFirstWriteGateReply(volumePlanningState, nextVolume, volumePlanningWasReady && !volumeStoryNeedsUser)
@@ -1806,14 +1882,18 @@ export class SynopsisConversationService {
       const savedDraft = draftApply.appended
       const savedDraftPublished = savedDraft !== undefined && this.dependencies.revisions !== undefined
         && (await this.dependencies.revisions.readRevision(savedDraft.revisionTaskId)).status === "completed"
-      const synopsisProgressCompleted = autonomous && wroteSynopsisBody && synopsisReadyForOutline
-      const outlineProgressCompleted = autonomous && wroteOutlineThisTurn && hasOutlineOnDisk
+      const synopsisProgressCompleted = autonomousSynopsis && wroteSynopsisBody && synopsisReadyForOutline
+      const outlineProgressCompleted = autonomousOutline && wroteOutlineThisTurn && hasOutlineOnDisk
+      if (savedDraft !== undefined) {
+        emitProceedProgress("draft_discuss", "done")
+        emitProceedProgress("body_discuss", autonomousBody ? "running" : "waiting")
+      }
       const userRequestedFocusTransition = isCurrentUserFocusChange(assist.focusChange, input.message)
         && assist.focusChange?.chapterSequence !== session.chapterSequence
       const continueRequestedFocusTask = userRequestedFocusTransition
         && appliedFocusSequence !== undefined && assist.continueTurn === true
-      // Batch proceed continues only after the state machine confirms each gate transition.
-      let autoContinue = discussResult.autoContinueBlocked !== true
+      // Proceed continues only after the state machine confirms each gate transition.
+      const shouldAutoContinue = discussResult.autoContinueBlocked !== true
         && !draftSaveBlocked
         && agentMode !== "plan" && !batchAutomation && !coldStartStyleNeedsChoice
         && (
@@ -1821,38 +1901,42 @@ export class SynopsisConversationService {
           || volumeStoryNeedsUser
           || continueRequestedFocusTask
           || (gateDeferred && !userRequestedFocusTransition)
-          || (autonomous && (
+          || (pipelineAuto && (
             styleSelectionCompleted
             || volumePlanningCompletedThisTurn
             || synopsisProgressCompleted
             || outlineProgressCompleted
-            || draftAssist.continueTurn === true
+            || (draftAssist.continueTurn === true && (withinChapterAuto || nextChapterAuto))
             || autoDecideChoices
             || (todosStillOpen && !waitingOnUser)
           ))
         )
-        ? {
-            message: continueRequestedFocusTask
-              ? `焦点已切换到第${String(appliedFocusSequence)}章。继续完成用户本次原始请求：\n${input.message}\n先读取当前焦点章的已保存材料，按梗概→细纲→草稿的前置内容顺序执行；只完成本次请求，不重复提交上一章，也不自动进入其它章。批量推进仍保持原设置。`
-              : styleSelectionCompleted
-                ? "继续：作品风格已由用户选定并通过审核，现在进入主角罗盘，逐项询问并等待用户确认核心设定，再询问本卷主线与支线。"
-                : volumeStoryNeedsUser
-                  ? "继续：当前卷必须先由用户确认主线与支线。请依次询问开场场景、一个或多个高潮、卷末结局及支线事件与时机，给出贴合主题的选项并等待用户发送。"
-                : volumePlanningCompletedThisTurn
-                  ? "继续：当前卷首次规划已通过写入门禁，从第一章剧情梗概开始，严格按梗概、细纲、草稿顺序推进。草稿确认后由宿主完成设定抽取、图治理和正文落盘。"
-                  : savedDraftPublished
-                    ? appliedFocusSequence !== undefined && appliedFocusSequence !== session.chapterSequence
-                      ? `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成，焦点已切换到第${String(appliedFocusSequence)}章。根据该焦点章的已保存状态，按当前卷规划推进未完成步骤；不要再次跳章或重复发布上一章。`
-                      : `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成。若当前卷仍有未完成章节，本轮只切换焦点到第${String(session.chapterSequence + 1)}章并设置 continueTurn=true，下一回合再写该章梗概；不要同轮向旧焦点写入新章材料，不要重复发布上一章。若当前卷已完成则结束任务。`
-                  : savedDraft !== undefined
-                    ? `继续：当前章草稿已保存（${savedDraft.draftLabel}）。请用户确认「草稿可以，发布正文」；确认前不要调用 publish_draft，也不要进入下一章。`
-                    : synopsisProgressCompleted
-                      ? `继续：第${String(session.chapterSequence)}章剧情梗概已写入并通过状态门禁。现在写入本章细纲与人物准备，之后再生成草稿；严格遵守梗概→细纲→草稿顺序。`
-                      : outlineProgressCompleted
-                        ? `继续：第${String(session.chapterSequence)}章细纲已写入并通过状态门禁。现在按本章梗概与细纲生成正文草稿。草稿保存后请用户确认「草稿可以，发布正文」，不要自行发布。`
-                        : "继续：根据已落盘状态推进当前章尚未完成的下一步，顺序为梗概→细纲→草稿。已有草稿时请用户确认「草稿可以，发布正文」，不要自行发布。上一轮 choices 是备选分支，只选择符合当前阶段的一条，不得将互斥选项全部执行，也不要自行反复润色已完成内容。",
-          }
-        : undefined
+      const autoContinueMessage = !shouldAutoContinue || (savedDraftPublished && !nextChapterAuto)
+        ? undefined
+        : continueRequestedFocusTask
+          ? `焦点已切换到第${String(appliedFocusSequence)}章。继续完成用户本次原始请求：\n${input.message}\n先读取当前焦点章的已保存材料，按梗概→细纲→草稿的前置内容顺序执行；只完成本次请求，不重复提交上一章，也不自动进入其它章。推进模式仍保持原设置。`
+          : styleSelectionCompleted
+            ? "继续：作品风格已由用户选定并通过审核，现在进入主角罗盘，逐项询问并等待用户确认核心设定，再询问本卷主线与支线。"
+            : volumeStoryNeedsUser
+              ? "继续：当前卷必须先由用户确认主线与支线。请依次询问开场场景、一个或多个高潮、卷末结局及支线事件与时机，给出贴合主题的选项并等待用户发送。"
+            : volumePlanningCompletedThisTurn
+              ? "继续：当前卷首次规划已通过写入门禁，从第一章剧情梗概开始，严格按梗概、细纲、草稿顺序推进。草稿确认后由宿主完成设定抽取、图治理和正文落盘。"
+              : savedDraftPublished && nextChapterAuto
+                ? appliedFocusSequence !== undefined && appliedFocusSequence !== session.chapterSequence
+                  ? `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成，焦点已切换到第${String(appliedFocusSequence)}章。根据该焦点章的已保存状态，按当前卷规划推进未完成步骤；不要再次跳章或重复发布上一章。`
+                  : `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成。若当前卷仍有未完成章节，本轮只切换焦点到第${String(session.chapterSequence + 1)}章并设置 continueTurn=true，下一回合再写该章梗概；不要同轮向旧焦点写入新章材料，不要重复发布上一章。若当前卷已完成则结束任务。`
+              : savedDraft !== undefined
+                ? autonomousBody
+                  ? `继续：当前章草稿已保存（${savedDraft.draftLabel}）。按当前推进模式继续正文确认流程；确认前不要进入下一章。`
+                  : `继续：当前章草稿已保存（${savedDraft.draftLabel}）。请用户确认「草稿可以，发布正文」；确认前不要调用 publish_draft，也不要进入下一章。`
+                : synopsisProgressCompleted
+                  ? `继续：第${String(session.chapterSequence)}章剧情梗概已写入并通过状态门禁。现在写入本章细纲与人物准备，之后再生成草稿；严格遵守梗概→细纲→草稿顺序。`
+                  : outlineProgressCompleted
+                    ? `继续：第${String(session.chapterSequence)}章细纲已写入并通过状态门禁。现在按本章梗概与细纲生成正文草稿。草稿保存后请用户确认「草稿可以，发布正文」，不要自行发布。`
+                    : "继续：根据已落盘状态推进当前章尚未完成的下一步，顺序为梗概→细纲→草稿。已有草稿时请用户确认「草稿可以，发布正文」，不要自行发布。上一轮 choices 是备选分支，只选择符合当前阶段的一条，不得将互斥选项全部执行，也不要自行反复润色已完成内容。"
+      let autoContinue: { message: string } | undefined = autoContinueMessage === undefined
+        ? undefined
+        : { message: autoContinueMessage }
       const publishableDraft = batchAutomation
         ? undefined
         : await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
@@ -1861,9 +1945,10 @@ export class SynopsisConversationService {
         if (!assistantContent.includes(DRAFT_PUBLISH_CONFIRMATION)) {
           assistantContent += "\n\n草稿已经写好。请确认「草稿可以，发布正文」；确认后会自动完成设定抽取、图治理并落入正文，中间不再询问。"
         }
-        autoContinue = undefined
+        emitProceedProgress("body_discuss", autonomousBody ? "running" : "waiting")
+        if (!autonomousBody) autoContinue = undefined
       }
-      if (autonomous) {
+      if (pipelineAuto) {
         const fingerprint = await this.readDiscussProgressFingerprint({
           projectId: input.projectId, workspaceRootRef: input.workspaceRootRef,
           chapterSequence: appliedFocusSequence ?? session.chapterSequence,
@@ -1956,7 +2041,7 @@ export class SynopsisConversationService {
               : { goalProposals: assist.stagingPromote.goalProposals }),
             ...(assist.stagingPromote.reason === undefined ? {} : { reason: assist.stagingPromote.reason }),
           })]
-      if (autonomous && pendingStagingPromotes.length > 0) {
+      if (pipelineAuto && pendingStagingPromotes.length > 0) {
         // Lineage records each promote, so Auto applies it instead of waiting for 采纳.
         try {
           await this.dependencies.stagingPromote.approve({
@@ -2004,6 +2089,7 @@ export class SynopsisConversationService {
       // Drop completed thinking/content so the next send cannot briefly re-show this turn.
       // Cumulative usage is retained for composer metrics (and persisted below).
       const usage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
+      const proceedProgress = synopsisConversationStreamHub.peek(input.projectId, session.sessionId).proceedProgress
       synopsisConversationStreamHub.clear(input.projectId)
       if (usage !== undefined) {
         await this.dependencies.conversation.saveDiscussUsage({
@@ -2029,6 +2115,7 @@ export class SynopsisConversationService {
         ...(rejectedCreationDeskRulePaths.length === 0 ? {} : { rejectedCreationDeskRulePaths }),
         ...(draftApply.appended === undefined ? {} : { appendedDraft: draftApply.appended }),
         ...(autoContinue === undefined ? {} : { autoContinue }),
+        ...(proceedProgress === undefined ? {} : { proceedProgress }),
       }
     } catch (error) {
       const cancelled = error instanceof SynopsisSendCancelledError || isSynopsisSendCancelled(input.projectId)
@@ -2497,8 +2584,10 @@ export class SynopsisConversationService {
     }>
     /** Injected by ChapterPanel 批量推演. */
     batchAutomation?: boolean
-    /** Creation-desk「批量推进」toggle. */
+    /** @deprecated Prefer proceedMode. */
     batchProceed?: boolean
+    proceedMode?: DiscussProceedMode
+    customProceedGates?: DiscussCustomProceedGates
     activeGoals: readonly DeductionGoal[]
     chapterProgress: readonly Readonly<{ goalId: string; chapterSequence: number; summary: string; status: "planned" | "achieved" | "partial" | "missed" | "superseded" }>[]
     hookScheduleAudit: HookScheduleAudit
@@ -2587,6 +2676,8 @@ export class SynopsisConversationService {
     const { discussAgentModePromptAppendix } = await import("./discuss-agent-mode.js")
     const modeAppendix = discussAgentModePromptAppendix(input.agentMode ?? "auto", {
       batchProceed: input.batchProceed === true || input.batchAutomation === true,
+      ...(input.proceedMode === undefined ? {} : { proceedMode: input.proceedMode }),
+      ...(input.customProceedGates === undefined ? {} : { customProceedGates: input.customProceedGates }),
     })
     const volumePlanningAppendix = buildVolumePlanningPromptAppendix(input.volumePlanning)
     const appendix = [intentAppendix, presentationAppendix, modeAppendix, workStyleGateAppendix, volumePlanningAppendix,
@@ -5277,7 +5368,7 @@ export class SynopsisConversationService {
     session: Awaited<ReturnType<SynopsisConversationService["ensureActiveSession"]>>
     message: string
     model: AIModelPort
-    batchProceed: boolean
+    autoContinueNextChapter: boolean
     chapterIntent?: ChapterNarrativeIntent
     presentation?: SynopsisToolContext["presentation"]
     deadlineMs?: number
@@ -5295,6 +5386,11 @@ export class SynopsisConversationService {
       content: input.message,
       createdAtMs: nowMs,
     })
+    synopsisConversationStreamHub.setProceedProgress(
+      input.projectId,
+      { stage: "body_discuss", status: "running" },
+      nowMs,
+    )
     let content: string
     let autoContinue: { message: string } | undefined
     let choices: SynopsisConversationChoice[] | undefined
@@ -5314,9 +5410,16 @@ export class SynopsisConversationService {
       })
       const done = published.status === "completed" && published.error === undefined
       content = done
-        ? `已确认草稿（${draft.draftLabel}）。设定抽取、图治理已完成，正文已落盘。`
+        ? `已确认草稿（${draft.draftLabel}）。设定抽取与章节入库已完成，正文已落盘。`
         : published.summary ?? published.error ?? "草稿已确认，但正文尚未落盘。"
-      if (done && input.batchProceed) {
+      if (done) {
+        synopsisConversationStreamHub.setProceedProgress(
+          input.projectId,
+          { stage: "body_discuss", status: "done" },
+          this.dependencies.now(),
+        )
+      }
+      if (done && input.autoContinueNextChapter) {
         autoContinue = { message: publishedChapterAutoContinueMessage(input.session.chapterSequence) }
       } else if (!done) {
         choices = withDraftConfirmationChoice(undefined, draft.draftLabel)
@@ -5334,6 +5437,10 @@ export class SynopsisConversationService {
       createdAtMs: nowMs + 1,
     })
     const usage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
+    const proceedProgress = synopsisConversationStreamHub.peek(
+      input.projectId,
+      input.session.sessionId,
+    ).proceedProgress
     synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), { content })
     synopsisConversationStreamHub.clear(input.projectId)
     const session = await this.dependencies.conversation.findSession(input.session.sessionId)
@@ -5343,6 +5450,7 @@ export class SynopsisConversationService {
       messages: [...await this.dependencies.conversation.listMessagesForProject(input.projectId)],
       ...(usage === undefined ? {} : { usage }),
       ...(autoContinue === undefined ? {} : { autoContinue }),
+      ...(proceedProgress === undefined ? {} : { proceedProgress }),
     }
   }
 

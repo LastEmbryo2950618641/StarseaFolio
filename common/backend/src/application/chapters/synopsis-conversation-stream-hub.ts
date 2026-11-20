@@ -1,4 +1,5 @@
 import type {
+  DiscussProceedProgress,
   SynopsisConversationStreamEdit,
   SynopsisConversationStreamRun,
   SynopsisConversationStreamSearch,
@@ -66,6 +67,7 @@ type MutableSnapshot = {
   /** Per-turn usage while a send is running. */
   usage: MutableUsage
   compacting: boolean
+  proceedProgress?: DiscussProceedProgress
   error?: string
   updatedAtMs: number
 }
@@ -189,6 +191,27 @@ export class SynopsisConversationStreamHub {
       return
     }
     current.compacting = compacting
+    current.updatedAtMs = nowMs
+  }
+
+  /** Code-emitted proceed stage for the creation-desk progress bar. */
+  public setProceedProgress(
+    projectId: string,
+    progress: DiscussProceedProgress,
+    nowMs: number,
+  ): void {
+    const current = this.byProject.get(projectId)
+    if (current === undefined || current.status === "failed") return
+    const previous = current.proceedProgress
+    if (
+      previous !== undefined
+      && previous.stage === progress.stage
+      && previous.status === progress.status
+    ) {
+      current.updatedAtMs = nowMs
+      return
+    }
+    current.proceedProgress = progress
     current.updatedAtMs = nowMs
   }
 
@@ -443,6 +466,7 @@ export class SynopsisConversationStreamHub {
       toolRuns: mapToolRuns(current.toolRuns),
       todos: current.todos.map((item) => ({ ...item })),
       compacting: current.compacting,
+      ...(current.proceedProgress === undefined ? {} : { proceedProgress: current.proceedProgress }),
       ...(current.error === undefined ? {} : { error: current.error }),
       ...(cumulative === undefined ? {} : { usage: cumulative }),
       updatedAtMs: current.updatedAtMs,

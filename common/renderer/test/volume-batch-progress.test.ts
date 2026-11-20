@@ -14,11 +14,23 @@ describe("volume batch progress", () => {
     { sequence: 4, label: "第四章" },
   ]
 
-  it("marks submitted chapters as publishing ahead of draft/body", () => {
+  it("prefers body on disk over stale publishing flags", () => {
     const rows = buildVolumeBatchProgress(chapters, new Set([3]), new Set([2]))
-    expect(rows.map((row) => row.stage)).toEqual(["body", "publishing", "draft", "empty"])
-    expect(rows.filter((row) => row.done)).toHaveLength(1)
-    expect(volumeBatchProgressStageLabel("publishing")).toBe("图修订中")
+    expect(rows.map((row) => row.stage)).toEqual(["body", "body", "draft", "empty"])
+    expect(rows.filter((row) => row.done)).toHaveLength(2)
+    expect(volumeBatchProgressStageLabel("publishing")).toBe("章节入库中")
+  })
+
+  it("marks chapters without body as publishing while ingest runs", () => {
+    const rows = buildVolumeBatchProgress(
+      [
+        { sequence: 1, label: "第一章" },
+        { sequence: 2, label: "第二章", outlinePath: "章节正文/卷一/第二章 [剧情细纲].md" },
+      ],
+      new Set([2]),
+      new Set([1]),
+    )
+    expect(rows.map((row) => row.stage)).toEqual(["publishing", "draft"])
   })
 
   it("treats graph sync statuses as publishing", () => {

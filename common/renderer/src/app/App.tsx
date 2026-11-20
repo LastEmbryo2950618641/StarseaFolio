@@ -172,7 +172,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     message: string,
     options?: Readonly<{
       agentMode?: "auto" | "plan" | "accept_edits"
-      batchProceed?: boolean
+      proceedMode?: "precise" | "single" | "batch" | "custom"
+      customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
       autoContinued?: boolean
       setupAnswerTo?: string
     }>,
@@ -632,12 +633,21 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     return [...listed, injected].sort((left, right) => left.sequence - right.sequence)
   }, [workspaceFilePaths, synopsisConversation.session])
 
-  const publishingSequences = useMemo(() => new Set(
-    unpublishedDrafts
-      .filter((draft) => PUBLISHING_REVISION_STATUSES.has(draft.status))
-      .map((draft) => draft.chapterSequence)
-      .filter((sequence): sequence is number => sequence !== undefined),
-  ), [unpublishedDrafts])
+  const publishingSequences = useMemo(() => {
+    const bodySequences = new Set(
+      discussFocusChapters
+        .filter((chapter) => chapter.bodyPath !== undefined)
+        .map((chapter) => chapter.sequence),
+    )
+    return new Set(
+      unpublishedDrafts
+        .filter((draft) => PUBLISHING_REVISION_STATUSES.has(draft.status))
+        .map((draft) => draft.chapterSequence)
+        .filter((sequence): sequence is number => (
+          sequence !== undefined && !bodySequences.has(sequence)
+        )),
+    )
+  }, [discussFocusChapters, unpublishedDrafts])
 
   // Discuss Agent touching chapters (draft writes, publish/workflow tools, auto-continued chain).
   const agentChapterActive = useMemo(() => {
@@ -680,10 +690,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     volumeBatchPlan,
   ])
 
-  // Keep chapter stages (draft → 图修订中 → 正文) live while the Agent works across chapters.
+  // Keep chapter stages (draft → 章节入库中 → 正文) live while Agent / ingest runs.
+  // Poll faster during入库 so left progress does not lag the right-rail task panel.
   useEffect(() => {
     if (!agentChapterActive && publishingSequences.size === 0) return
-    const timer = setInterval(() => { void refreshWorkspace().catch(() => undefined) }, 5_000)
+    const timer = setInterval(() => { void refreshWorkspace().catch(() => undefined) }, 1_500)
     return () => { clearInterval(timer) }
   }, [agentChapterActive, publishingSequences.size, refreshWorkspace])
 
@@ -692,7 +703,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     const sequence = synopsisConversation.session?.chapterSequence
     const publishing = [...publishingSequences].sort((left, right) => left - right)
     if (publishing.length > 0) {
-      return `第${publishing.join("、")}章图修订中…`
+      return `第${publishing.join("、")}章章节入库中…`
     }
     if (synopsisConversationBusy) {
       return sequence === undefined ? "Agent 推进中…" : `Agent 推进第${String(sequence)}章…`
@@ -1117,14 +1128,14 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           setChapterRevisionContent(current.proposedBody)
         }
         if (current.graphSyncStatus === "completed") {
-          setPostCommitNotice("图修订已完成，草稿已发布为正文。")
+          setPostCommitNotice("章节入库已完成，草稿已发布为正文。")
           if (isDisplayed) await openDraftWorkspace(revisionTaskId, { preserveView: true })
           await refreshWorkspace()
           await refreshHistory()
           return
         }
         if (current.graphSyncStatus === "failed") {
-          setError("草稿发布未完成，请在图修订任务中查看原因并重试。")
+          setError("草稿发布未完成，请在章节入库任务中查看原因并重试。")
           setPostCommitNotice("草稿已保留。")
           return
         }
@@ -1178,8 +1189,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     await refreshChapterDraftVersions(revision.revisionTaskId)
     await refreshWorkspace()
     setPostCommitNotice(revision.graphSyncStatus === "completed"
-      ? "图修订已完成，草稿已发布为正文。"
-      : "正在进行图修订，成功后将把所选草稿发布为正文。")
+      ? "章节入库已完成，草稿已发布为正文。"
+      : "正在进行章节入库，成功后将把所选草稿发布为正文。")
     if (revision.graphSyncStatus === "pending" || shouldMonitorChapterRevision(revision.graphSyncStatus)) {
       void monitorChapterRevision(revision.revisionTaskId).catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : String(cause))
@@ -1556,7 +1567,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       lockedChapterSequence?: number
       automation?: "batch_chapter"
       agentMode?: "auto" | "plan" | "accept_edits"
-      batchProceed?: boolean
+      proceedMode?: "precise" | "single" | "batch" | "custom"
+      customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
       autoContinued?: boolean
       setupAnswerTo?: string
     }>,
@@ -1716,7 +1728,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           ? {}
           : { lockedChapterSequence: options.lockedChapterSequence, lockedFocusKind: "chapter_body" as const }),
         ...(options?.automation === undefined ? {} : { automation: options.automation }),
-        ...(options?.batchProceed === undefined ? {} : { batchProceed: options.batchProceed }),
+        ...(options?.proceedMode === undefined ? {} : { proceedMode: options.proceedMode }),
+        ...(options?.customProceedGates === undefined ? {} : { customProceedGates: options.customProceedGates }),
         ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
         ...(options?.setupAnswerTo === undefined || options?.autoContinued === true || options?.automation !== undefined
           ? {} : { setupAnswerTo: options.setupAnswerTo }),
@@ -1727,10 +1740,10 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           synopsisActiveRequestRef.current = requestId
         },
         onWaitTimeout: (info) => new Promise<"continue" | "abandon">((resolve) => {
-          // Batch proceed / volume batch runs unattended; 停止 abandons.
+          // Batch / volume batch / auto-chain runs unattended; 停止 abandons.
           if (
             batchRunningRef.current
-            || options?.batchProceed === true
+            || options?.proceedMode === "batch"
             || options?.automation === "batch_chapter"
           ) {
             resolve("continue")
@@ -1783,7 +1796,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         })
         try {
           await openDraftWorkspace(sent.appendedDraft.revisionTaskId, { preserveView: true })
-          setPostCommitNotice(`已写入草稿 ${sent.appendedDraft.draftLabel}。发布时将进行图修订。`)
+          setPostCommitNotice(`已写入草稿 ${sent.appendedDraft.draftLabel}。发布时将进行章节入库。`)
         } catch {
           setPostCommitNotice(`已写入草稿 ${sent.appendedDraft.draftLabel}。确认后才会覆盖正式正文。`)
         }
@@ -1805,7 +1818,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         setTimeout(() => {
           void sendSynopsisMessageRef.current?.(continuation, {
             ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
-            ...(options?.batchProceed === undefined ? {} : { batchProceed: options.batchProceed }),
+            ...(options?.proceedMode === undefined ? {} : { proceedMode: options.proceedMode }),
+            ...(options?.customProceedGates === undefined ? {} : { customProceedGates: options.customProceedGates }),
             autoContinued: true,
           })
         }, 1_500)
@@ -2606,7 +2620,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
                   return
                 }
                 if (publishOutcome !== "completed") {
-                  pauseBatch(chapterSequence, "正文图修订失败")
+                  pauseBatch(chapterSequence, "章节入库失败")
                   return
                 }
               } else {
@@ -2637,7 +2651,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             activeVolumePlan.startSequence,
           )) {
             const incomplete = finalRows.find((item) => item.bodyPath === undefined)
-            pauseBatch(incomplete?.sequence ?? lastSequence, "卷目标章节尚未全部完成图修订")
+            pauseBatch(incomplete?.sequence ?? lastSequence, "卷目标章节尚未全部完成章节入库")
             return
           }
           updateBatchStatus("stopped", lastSequence)
@@ -2795,7 +2809,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
                 return
               }
               if (publishOutcome !== "completed") {
-                pauseBatch(sequence, "正文图修订失败")
+                pauseBatch(sequence, "章节入库失败")
                 return
               }
             } else {
@@ -3447,7 +3461,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             {...(synopsisConversation.session?.chapterSequence === undefined
               ? {}
               : { agentChapterSequence: synopsisConversation.session.chapterSequence })}
-            agentStatusLabel={agentChapterStatusLabel || (publishingSequences.size > 0 ? "图修订进行中…" : "")}
+            agentStatusLabel={agentChapterStatusLabel || (publishingSequences.size > 0 ? "章节入库进行中…" : "")}
             onStopAgent={() => { void stopSynopsisMessage() }}
             onPause={pauseBatchDeduction}
             onContinue={continueBatchDeduction}
@@ -3590,7 +3604,12 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
                     const snapshot = await invokeBackend<TaskSnapshot>("turn.status", { taskId })
                     setTask(snapshot)
                   }}
-                  onRefreshWorkspace={async () => { await refreshWorkspace() }}
+                  onRefreshWorkspace={async () => {
+                    await refreshWorkspace()
+                    await refreshSynopsisConversation().catch(() => undefined)
+                    setError(undefined)
+                    setPostCommitNotice("已从章节入库继续；请以右侧进度与对话最新回复为准。")
+                  }}
                 />}
         />
       </Panel>

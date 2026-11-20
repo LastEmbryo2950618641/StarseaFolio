@@ -144,7 +144,7 @@ export type VolumeBatchProgressRow = Readonly<{
   done: boolean
 }>
 
-/** Revision statuses that mean "submitted, graph revision / publication still running". */
+/** Revision statuses that mean "submitted, chapter ingest / publication still running". */
 export const PUBLISHING_REVISION_STATUSES: ReadonlySet<string> = new Set([
   "committing_content",
   "content_committed",
@@ -171,9 +171,12 @@ export function buildVolumeBatchProgress(
   publishingSequences: ReadonlySet<number> = new Set(),
 ): readonly VolumeBatchProgressRow[] {
   return chapters.map((chapter) => {
-    const stage = publishingSequences.has(chapter.sequence)
-      ? "publishing"
-      : resolveChapterStageForProgress(chapter, draftSequences.has(chapter.sequence))
+    // Body on disk wins: draft.list can lag behind chapter.graphRevision.list after ingest completes.
+    const stage = chapter.bodyPath !== undefined
+      ? "body"
+      : publishingSequences.has(chapter.sequence)
+        ? "publishing"
+        : resolveChapterStageForProgress(chapter, draftSequences.has(chapter.sequence))
     return {
       sequence: chapter.sequence,
       label: chapter.label,
@@ -188,7 +191,7 @@ export function volumeBatchProgressStageLabel(stage: VolumeBatchProgressRow["sta
   if (stage === "synopsis") return "梗概"
   if (stage === "outline") return "细纲"
   if (stage === "draft") return "草稿"
-  if (stage === "publishing") return "图修订中"
+  if (stage === "publishing") return "章节入库中"
   return "正文"
 }
 

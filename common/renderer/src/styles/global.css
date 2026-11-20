@@ -6023,6 +6023,19 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   font-size: 12px;
   line-height: 1.5;
 }
+.creation-desk-message.is-superseded {
+  opacity: 0.72;
+}
+.creation-desk-message-superseded {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated));
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .creation-desk-pending {
   color: var(--text-muted) !important;
   font-style: italic;
@@ -6626,15 +6639,71 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   color: var(--text);
 }
 .creation-desk-word-count.invalid input { border-color: var(--danger); background: var(--danger-soft); }
-.creation-desk-batch-proceed {
+.creation-desk-proceed-mode {
+  display: inline-flex;
+  align-items: center;
   height: 28px;
-  width: auto;
-  min-width: 96px;
   flex: 0 0 auto;
+}
+.creation-desk-proceed-mode select {
+  height: 28px;
+  min-width: 108px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 8px;
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--text);
+}
+.creation-desk-proceed-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px 0;
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+.creation-desk-proceed-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.creation-desk-proceed-stages.interactive .creation-desk-proceed-stage {
+  cursor: pointer;
+}
+.creation-desk-proceed-stages.interactive .creation-desk-proceed-stage.auto {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text);
+}
+.creation-desk-proceed-stages.interactive .creation-desk-proceed-stage.stop {
+  opacity: 0.85;
+}
+.creation-desk-proceed-stage.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+}
+.creation-desk-proceed-stage.active.status-waiting {
+  border-style: dashed;
+}
+.creation-desk-proceed-stage.active.status-done {
+  opacity: 0.75;
+}
+.creation-desk-proceed-stage-gate {
+  font-size: 10px;
+  opacity: 0.8;
 }
 @media (max-width: 560px) {
   .creation-desk-settings-heading { gap: 4px; }
-  .creation-desk-batch-proceed { min-width: 90px; }
+  .creation-desk-proceed-mode select { min-width: 96px; }
 }
 .creation-desk-composer {
   width: min(760px, 100%);

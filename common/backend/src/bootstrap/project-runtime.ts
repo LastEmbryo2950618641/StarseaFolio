@@ -247,7 +247,7 @@ export class ProjectRuntime {
           : live ? "running" : row.graph_sync_status === "running" || publishing ? "interrupted"
             : row.graph_sync_status === "failed" ? "failed" : "pending"
       let error: string | undefined
-      if (!complete && !live && publishing) error = "图修订已完成，章节发布尚未完成，请重试恢复。"
+      if (!complete && !live && publishing) error = "章节入库任务已结束，章节发布尚未完成，请重试恢复。"
       const errorJson = row.revision_error ?? row.error_json
       if (!complete && !retired && errorJson !== null) {
         const stored: unknown = JSON.parse(errorJson)
@@ -430,7 +430,7 @@ export class ProjectRuntime {
         chapterId: submitted.chapterId,
         draftVersionId: input.draftVersionId,
         status: submitted.status,
-        summary: "图修订完成，已发布为正式正文；可继续下一章。",
+        summary: "章节入库完成，已发布为正式正文；可继续下一章。",
       }
     }
     const waitMs = Math.max(0, (input.deadlineMs ?? 300_000) - 30_000)
@@ -443,7 +443,7 @@ export class ProjectRuntime {
     const graphTask = status === "completed" || !settled ? undefined
       : (await this.listGraphRevisionTasks()).find((task) => task.revisionTaskId === submitted.revisionTaskId)
     const error = graphTask !== undefined && ["failed", "interrupted", "cancelled"].includes(graphTask.status)
-      ? graphTask.error ?? `图治理执行未完成（${graphTask.status}）。`
+      ? graphTask.error ?? `章节入库未完成（${graphTask.status}）。`
       : undefined
     return {
       revisionTaskId: submitted.revisionTaskId,
@@ -453,12 +453,12 @@ export class ProjectRuntime {
       ...(latest === undefined ? {} : { graphSyncStatus: latest.graphSyncStatus }),
       ...(error === undefined ? {} : { error }),
       summary: status === "completed"
-        ? "图修订完成，已发布为正式正文；可继续下一章。"
+        ? "章节入库完成，已发布为正式正文；可继续下一章。"
         : error !== undefined
-          ? `图治理执行失败：${error} 本次未发布，草稿已保留，无需重复确认正文；请排查错误后重试图修订。`
+          ? `章节入库失败：${error} 本次未发布，草稿已保留，无需重复确认正文；请在右侧「章节入库」排查后点继续或重跑。`
           : settled
-            ? `图修订结束但未发布（${status}），请检查图修订任务。`
-            : "图同步仍在进行，本轮先等待；下一轮继续时会自动等它完成。",
+            ? `章节入库结束但未发布（${status}），请检查右侧章节入库任务。`
+            : "章节入库仍在进行，本轮先等待；下一轮继续时会自动等它完成。",
     }
   }
 
@@ -611,12 +611,12 @@ export class ProjectRuntime {
 
   public async retryGraphRevision(revisionTaskId: string, model: AIModelPort, mode: "rerun" | "continue" = "rerun"): Promise<ChapterRevision> {
     const revision = await new SqliteChapterRevisionRepository(this.database).find(revisionTaskId)
-    if (revision === undefined || revision.projectId !== this.projectId || revision.decision !== "submit") throw new Error("没有可重试的图修订任务")
+    if (revision === undefined || revision.projectId !== this.projectId || revision.decision !== "submit") throw new Error("没有可重试的章节入库任务")
     const review = revision.review ?? await this.createChapterRevisionService().review({ revisionTaskId, workspaceRootRef: this.workspaceRootRef }, model).then(async () => {
       const refreshed = await new SqliteChapterRevisionRepository(this.database).find(revisionTaskId)
       return refreshed?.review
     })
-    if (review === undefined) throw new Error("当前草稿审核未生成结果，不能重试图治理")
+    if (review === undefined) throw new Error("当前草稿审核未生成结果，不能重试章节入库")
     if (mode === "continue") {
       const oldTask = revision.graphSyncTaskId === undefined ? undefined : await this.taskScopes.findTask(revision.graphSyncTaskId)
       const resumable = oldTask !== undefined
@@ -624,11 +624,42 @@ export class ProjectRuntime {
         && (await this.listPhaseRuns(oldTask.taskId)).some((run) => run.status !== "superseded")
       if (!resumable) throw new Error("没有可继续的失败阶段，请重跑全部阶段")
     }
-    return this.submitChapterRevision({
+    const submitted = await this.submitChapterRevision({
       revisionTaskId, workspaceRootRef: this.workspaceRootRef, model,
       mode: "reviewed", forced: false, reviewId: review.reviewId,
       ...(mode === "continue" ? { resumeInterruptedGraphSync: true } : {}),
     })
+    await this.appendDiscussChapterIngestResumeNotice({
+      heading: revision.heading,
+      mode,
+    })
+    return submitted
+  }
+
+  /** Keep creation-desk chat in sync when the right-rail 章节入库 panel retries. */
+  private async appendDiscussChapterIngestResumeNotice(input: Readonly<{
+    heading: string
+    mode: "rerun" | "continue"
+  }>): Promise<void> {
+    try {
+      const conversation = new SqliteSynopsisConversationRepository(this.database)
+      const session = await conversation.findActiveSession(this.projectId)
+      if (session === undefined) return
+      const action = input.mode === "continue" ? "继续" : "重跑"
+      await conversation.appendMessage({
+        messageId: randomUUID(),
+        projectId: this.projectId,
+        sessionId: session.sessionId,
+        role: "assistant",
+        content: [
+          `已从右侧「章节入库」${action}：正在重新入库「${input.heading}」。`,
+          "上方若仍有失败气泡，那是历史记录；请以右侧章节入库进度与本条为准。",
+        ].join(""),
+        createdAtMs: Date.now(),
+      })
+    } catch {
+      // Best-effort: panel retry must not fail because discuss chat could not be notified.
+    }
   }
 
   public async cancelGraphRevision(revisionTaskId: string): Promise<void> {
@@ -1441,10 +1472,10 @@ export class ProjectRuntime {
           ...(latest === undefined ? {} : { graphSyncStatus: latest.graphSyncStatus }),
           ...(error === undefined ? {} : { error }),
           summary: done
-            ? "图修订完成，已发布为正式正文；可继续下一章。"
+            ? "章节入库完成，已发布为正式正文；可继续下一章。"
             : error !== undefined
-              ? `图治理执行失败：${error} 本次未发布，草稿已保留，无需重复确认正文；请排查错误后重试图修订。`
-              : `图修订结束但未发布（${status}），请检查图修订任务。`,
+              ? `章节入库失败：${error} 本次未发布，草稿已保留，无需重复确认正文；请在右侧「章节入库」排查后点继续或重跑。`
+              : `章节入库结束但未发布（${status}），请检查右侧章节入库任务。`,
         }
       },
       waitForPendingPublications: async (input) => this.waitForActiveRevisionJobs(input),

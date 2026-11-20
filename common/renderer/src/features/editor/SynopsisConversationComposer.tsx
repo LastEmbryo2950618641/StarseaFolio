@@ -4,7 +4,10 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type {
   DiscussAgentMode,
+  DiscussCustomProceedGates,
   DiscussFocusKind,
+  DiscussProceedMode,
+  DiscussProceedStage,
   SynopsisConversationMessage,
   SynopsisConversationSession,
   SynopsisConversationStreamSnapshot,
@@ -52,9 +55,14 @@ import {
   persistDiscussAgentMode,
 } from "./discuss-agent-mode.js"
 import {
-  loadBatchProceedEnabled,
-  persistBatchProceedEnabled,
-} from "./batch-proceed.js"
+  DISCUSS_PROCEED_STAGE_ORDER,
+  loadCustomProceedGates,
+  loadProceedMode,
+  persistCustomProceedGates,
+  persistProceedMode,
+  PROCEED_MODE_OPTIONS,
+  PROCEED_STAGE_LABELS,
+} from "./proceed-mode.js"
 import { CreationDeskTodoPopover } from "./CreationDeskTodoPopover.js"
 import {
   expandCreationDeskFooterCollapse,
@@ -129,7 +137,12 @@ type Props = Readonly<{
   draftRestore?: { text: string; token: number } | undefined
   running: boolean
   pendingStagingPromotes?: readonly SynopsisStagingPromoteProposal[]
-  onSend(message: string, options?: Readonly<{ agentMode?: DiscussAgentMode; batchProceed?: boolean; setupAnswerTo?: string }>): Promise<void>
+  onSend(message: string, options?: Readonly<{
+    agentMode?: DiscussAgentMode
+    proceedMode?: DiscussProceedMode
+    customProceedGates?: DiscussCustomProceedGates
+    setupAnswerTo?: string
+  }>): Promise<void>
   onStop?(): Promise<void>
   onRefreshChoices(messageId: string): Promise<void>
   onPromoteStaging(): Promise<void>
@@ -161,8 +174,15 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const [advancedMenuOpen, setAdvancedMenuOpen] = useState(false)
   const [todoOpen, setTodoOpen] = useState(false)
   const [agentMode, setAgentMode] = useState<DiscussAgentMode>(() => loadDiscussAgentMode())
-  const [batchProceed, setBatchProceed] = useState(() => loadBatchProceedEnabled())
+  const [proceedMode, setProceedMode] = useState<DiscussProceedMode>(() => loadProceedMode())
+  const [customProceedGates, setCustomProceedGates] = useState<DiscussCustomProceedGates>(() => loadCustomProceedGates())
+  const [lastProceedProgress, setLastProceedProgress] = useState<SynopsisConversationStreamSnapshot["proceedProgress"]>()
   const [goalsOpen, setGoalsOpen] = useState(false)
+  useEffect(() => {
+    if (props.stream?.proceedProgress !== undefined) {
+      setLastProceedProgress(props.stream.proceedProgress)
+    }
+  }, [props.stream?.proceedProgress])
   const [focusUnfilled, setFocusUnfilled] = useState(false)
   const [choicesRefreshing, setChoicesRefreshing] = useState(false)
   const [footerCollapse, setFooterCollapse] = useState<CreationDeskFooterCollapse>(() => loadCreationDeskFooterCollapse())
@@ -215,11 +235,13 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
     setShowJumpToLatest(false)
     const setupAnswerTo = latestSetupQuestionId(props.messages)
     await props.onSend(message, {
-      agentMode, batchProceed,
+      agentMode,
+      proceedMode,
+      ...(proceedMode === "custom" ? { customProceedGates } : {}),
       ...(setupAnswerTo === undefined ? {} : { setupAnswerTo }),
     })
     await goals.refresh()
-  }, [agentMode, batchProceed, goals.refresh, props.messages, props.onSend])
+  }, [agentMode, customProceedGates, goals.refresh, proceedMode, props.messages, props.onSend])
 
   const visibleTodos = resolveDiscussTodos(props.stream, props.messages)
 
@@ -409,9 +431,8 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   : "在对话框输入你对本书小小的构思，你的智能助手--结衣会帮助你的。"}</p>
                 {!isRail
                   ? <span className="creation-desk-empty-hint">
-                      {batchProceed
-                        ? "批量推进已开启：章节完成后会自动连续推进。关闭后，结衣会逐章引导你梳理每章内容。"
-                        : "批量推进已关闭：结衣会逐章引导你梳理每章内容；开启后，章节完成会自动连续推进。"}
+                      {PROCEED_MODE_OPTIONS.find((option) => option.value === proceedMode)?.hint
+                        ?? "选择推进模式后，结衣会按停点矩阵自动或停等。"}
                     </span>
                   : null}
               </div>
@@ -426,6 +447,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   isLatestChoiceMessage={message.messageId === latestChoiceMessageId}
                   focusLocked={props.focusLocked === true}
                   chapterWorkflowEnabled={props.chapterWorkflowEnabled === true}
+                  chapterIngestActive={chapterIngest !== undefined}
                   novelMajorCategoryRules={props.novelMajorCategoryRules}
                   novelSubcategoryRules={props.novelSubcategoryRules}
                   proseRules={props.proseRules}
@@ -520,6 +542,20 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                       <span>{props.session.synopsisPath}</span>
                     </div>
                   : null}
+              <ProceedStageBar
+                mode={proceedMode}
+                gates={customProceedGates}
+                activeStage={(props.stream?.proceedProgress ?? lastProceedProgress)?.stage}
+                activeStatus={(props.stream?.proceedProgress ?? lastProceedProgress)?.status}
+                interactive={proceedMode === "custom"}
+                onToggleGate={(stage) => {
+                  setCustomProceedGates((current) => {
+                    const next = { ...current, [stage]: !current[stage] }
+                    persistCustomProceedGates(next)
+                    return next
+                  })
+                }}
+              />
               <div className="creation-desk-settings-heading">
                 <details className="creation-desk-writing-settings" open={writingSettingsOpen} onToggle={(event) => {
                   useWorkbenchStore.getState().setWritingSettingsOpen(event.currentTarget.open)
@@ -600,26 +636,24 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   </label>
                 </div>
                 </details>
-                <UiTooltip label={batchProceed
-                  ? "已开启：一章写完自动下一章，梗概/细纲/正文不逐步停等确认"
-                  : "已关闭：AI 会逐章引导你讨论梗概、细纲和正文；每步由你确认后再继续"}>
-                  <button
-                    type="button"
-                    className={`model-toggle creation-desk-batch-proceed${batchProceed ? " enabled" : ""}`}
-                    data-testid="creation-desk-batch-proceed"
-                    aria-pressed={batchProceed}
-                    aria-label="批量推进"
-                    onClick={() => {
-                      setBatchProceed((current) => {
-                        const next = !current
-                        persistBatchProceedEnabled(next)
-                        return next
-                      })
-                    }}
-                  >
-                    <i aria-hidden="true" />
-                    <strong>批量推进</strong>
-                  </button>
+                <UiTooltip label={PROCEED_MODE_OPTIONS.find((option) => option.value === proceedMode)?.hint ?? "推进模式"}>
+                  <label className="creation-desk-proceed-mode">
+                    <span className="sr-only">推进模式</span>
+                    <select
+                      aria-label="推进模式"
+                      data-testid="creation-desk-proceed-mode"
+                      value={proceedMode}
+                      onChange={(event) => {
+                        const next = event.target.value as DiscussProceedMode
+                        setProceedMode(next)
+                        persistProceedMode(next)
+                      }}
+                    >
+                      {PROCEED_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
                 </UiTooltip>
               </div>
             </>
@@ -1006,6 +1040,10 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
   </div>
 }
 
+function isChapterIngestFailureContent(content: string): boolean {
+  return /章节入库失败|图治理执行失败|重试图修订|重试图治|请排查错误后重试/u.test(content)
+}
+
 const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
   message: SynopsisConversationMessage
   workspaceRootRef: string | undefined
@@ -1015,6 +1053,8 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
   isLatestChoiceMessage: boolean
   focusLocked: boolean
   chapterWorkflowEnabled?: boolean
+  /** Right-rail / background chapter ingest is currently running. */
+  chapterIngestActive?: boolean
   novelMajorCategoryRules: readonly string[]
   novelSubcategoryRules: readonly string[]
   proseRules: readonly string[]
@@ -1027,12 +1067,20 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
     (!props.focusLocked || choice.action !== "set_focus")
     && (props.chapterWorkflowEnabled === true || choice.action !== "start_turn")
   ))
-  return <article className={`creation-desk-message ${message.role}`}>
+  const ingestFailureSuperseded = message.role === "assistant"
+    && props.chapterIngestActive === true
+    && isChapterIngestFailureContent(message.content)
+  return <article className={`creation-desk-message ${message.role}${ingestFailureSuperseded ? " is-superseded" : ""}`}>
     <div className="creation-desk-message-avatar" aria-hidden="true">
       {message.role === "user" ? <UserRound size={16} /> : <Bot size={16} />}
     </div>
     <div className="creation-desk-message-body">
       <header>{message.role === "user" ? "你" : "Agent"}</header>
+      {ingestFailureSuperseded
+        ? <p className="creation-desk-message-superseded" role="status">
+            已从右侧「章节入库」继续重试；以下为历史失败记录，请以右侧进度与最新回复为准。
+          </p>
+        : null}
       {message.role === "assistant"
         ? <AgentStructuredBody
             segments={timelineFromMessage({
@@ -1460,6 +1508,58 @@ function resolveDiscussTodos(
     if (message.todos !== undefined && message.todos.length > 0) return message.todos
   }
   return []
+}
+
+function ProceedStageBar(props: Readonly<{
+  mode: DiscussProceedMode
+  gates: DiscussCustomProceedGates
+  activeStage?: DiscussProceedStage
+  activeStatus?: "waiting" | "running" | "done"
+  interactive: boolean
+  onToggleGate(stage: DiscussProceedStage): void
+}>): React.JSX.Element {
+  return (
+    <div
+      className={`creation-desk-proceed-stages${props.interactive ? " interactive" : " readonly"}`}
+      data-testid="creation-desk-proceed-stages"
+      data-mode={props.mode}
+      role="list"
+      aria-label={props.interactive ? "自定义推进节点" : "当前推进阶段"}
+    >
+      {DISCUSS_PROCEED_STAGE_ORDER.map((stage) => {
+        const auto = props.gates[stage]
+        const isActive = props.activeStage === stage
+        const status = isActive ? (props.activeStatus ?? "running") : undefined
+        if (props.interactive) {
+          return (
+            <button
+              key={stage}
+              type="button"
+              role="listitem"
+              className={`creation-desk-proceed-stage${auto ? " auto" : " stop"}${isActive ? ` active status-${status ?? "running"}` : ""}`}
+              data-testid={`creation-desk-proceed-stage-${stage}`}
+              aria-pressed={auto}
+              title={auto ? "自动：点击改为停等" : "停等：点击改为自动"}
+              onClick={() => { props.onToggleGate(stage) }}
+            >
+              <span className="creation-desk-proceed-stage-label">{PROCEED_STAGE_LABELS[stage]}</span>
+              <span className="creation-desk-proceed-stage-gate">{auto ? "自动" : "停等"}</span>
+            </button>
+          )
+        }
+        return (
+          <span
+            key={stage}
+            role="listitem"
+            className={`creation-desk-proceed-stage${isActive ? ` active status-${status ?? "running"}` : ""}`}
+            data-testid={`creation-desk-proceed-stage-${stage}`}
+          >
+            <span className="creation-desk-proceed-stage-label">{PROCEED_STAGE_LABELS[stage]}</span>
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 function resolveThinkingDisplay(thinking: string | undefined, phaseJson?: string): string | undefined {

@@ -122,7 +122,9 @@ export function RightRail({
 }: Props): React.JSX.Element {
   const [checkpointOpen, setCheckpointOpen] = useState(false)
   const [dismissedCheckpointKey, setDismissedCheckpointKey] = useState<string>()
-  const ingestActivity = useChapterIngestActivity(project)
+  const ingestActivity = useChapterIngestActivity(project, {
+    ...(onRefreshWorkspace === undefined ? {} : { onSettled: onRefreshWorkspace }),
+  })
   const tab = useWorkbenchStore((state) => state.rightTab)
   const setTab = useWorkbenchStore((state) => state.setRightTab)
   const visibleTab: RightTab = tab === "history" || tab === "process" ? "chapters" : tab

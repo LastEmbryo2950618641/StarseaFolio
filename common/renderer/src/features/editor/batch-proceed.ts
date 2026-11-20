@@ -1,21 +1,14 @@
-const STORAGE_KEY = "worldseed.creation-desk.batch-proceed"
+/**
+ * @deprecated Use proceed-mode.ts. Kept so accidental imports still compile during migration.
+ */
+import { loadProceedMode, persistProceedMode } from "./proceed-mode.js"
 
-/** When true: skip synopsis/outline/body confirmation stops and auto-advance chapters. */
+/** @deprecated Prefer loadProceedMode(); true only when mode is batch. */
 export function loadBatchProceedEnabled(): boolean {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (raw === "1" || raw === "true") return true
-    if (raw === "0" || raw === "false") return false
-  } catch {
-    // ignore
-  }
-  return false
+  return loadProceedMode() === "batch"
 }
 
+/** @deprecated Prefer persistProceedMode(). */
 export function persistBatchProceedEnabled(enabled: boolean): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, enabled ? "1" : "0")
-  } catch {
-    // ignore
-  }
+  persistProceedMode(enabled ? "batch" : "single")
 }

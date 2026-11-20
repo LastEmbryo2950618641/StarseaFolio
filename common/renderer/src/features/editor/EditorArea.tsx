@@ -158,7 +158,8 @@ type Props = Readonly<{
   pendingStagingPromotes?: readonly SynopsisStagingPromoteProposal[]
   onSynopsisSend(message: string, options?: Readonly<{
     agentMode?: "auto" | "plan" | "accept_edits"
-    batchProceed?: boolean
+    proceedMode?: "precise" | "single" | "batch" | "custom"
+    customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
     setupAnswerTo?: string
   }>): Promise<void>
   onSynopsisStop?(): Promise<void>

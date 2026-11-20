@@ -631,7 +631,7 @@ export function ChapterDraftDetailPanel(props: Readonly<{
                   </p>
                   <pre className="chapter-browse-markdown chapter-draft-detail-body">{candidate.body}</pre>
                   <p className="chapter-browse-muted">{isPublicationCandidate
-                    ? "对讨论 Agent 说“可以”后，将对这个正文候选执行图修订并覆盖正式正文。"
+                    ? "对讨论 Agent 说“可以”后，将对这个正文候选执行章节入库并覆盖正式正文。"
                     : "发布后草稿版本仍会保留。切换历史版本仅用于查看，不会更改当前正文。"}</p>
                 </>}
           </>}
