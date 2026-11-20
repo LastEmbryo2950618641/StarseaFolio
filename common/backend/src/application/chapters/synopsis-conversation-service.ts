@@ -129,7 +129,6 @@ import {
   computeDiscussBootstrapDigest,
   describeRequiredRetryStep,
   DISCUSS_PROGRESS_PROTOCOL,
-  DISCUSS_STEP_FAILURE_LIMIT,
   DISCUSS_STEP_FAILURE_PROTOCOL,
   findInvalidDiscussGateMessageIds,
   measureDiscussProgress,
@@ -171,6 +170,7 @@ import {
 } from "./synopsis-todo-gate.js"
 import {
   advanceTodoNoProgressStreak,
+  resolveDiscussNoProgressGuardLimit,
   shouldAllowDiscussBudgetGrace,
   shouldIssueTodoLoopRepair,
   shouldStopTodoWriteLoop,
@@ -805,6 +805,12 @@ export class SynopsisConversationService {
               ...(input.signal === undefined ? {} : { signal: input.signal }),
               maxModelCalls: Math.min(input.maxModelCalls ?? 3, 3),
               ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
+              ...(input.noProgressGuardEnabled === undefined
+                ? {}
+                : { noProgressGuardEnabled: input.noProgressGuardEnabled }),
+              ...(input.noProgressGuardLimit === undefined
+                ? {}
+                : { noProgressGuardLimit: input.noProgressGuardLimit }),
             })
             setupMetadata = await this.applyWorkMetadata(result)
             return result
@@ -936,6 +942,12 @@ export class SynopsisConversationService {
         ...((batchProceed || withinChapterAuto) ? { batchProceed: true } : {}),
         proceedMode,
         ...(customGates === undefined ? {} : { customProceedGates: customGates }),
+        ...(input.noProgressGuardEnabled === undefined
+          ? {}
+          : { noProgressGuardEnabled: input.noProgressGuardEnabled }),
+        ...(input.noProgressGuardLimit === undefined
+          ? {}
+          : { noProgressGuardLimit: input.noProgressGuardLimit }),
         activeGoals,
         chapterProgress,
         hookScheduleAudit,
@@ -2035,11 +2047,7 @@ export class SynopsisConversationService {
           initialProgressFingerprint ?? fingerprint,
         )
         const noProgressGuardEnabled = input.noProgressGuardEnabled !== false
-        const noProgressGuardLimit = Number.isSafeInteger(input.noProgressGuardLimit)
-          && (input.noProgressGuardLimit as number) >= 1
-          && (input.noProgressGuardLimit as number) <= 30
-          ? input.noProgressGuardLimit as number
-          : DISCUSS_STEP_FAILURE_LIMIT
+        const noProgressGuardLimit = resolveDiscussNoProgressGuardLimit(input.noProgressGuardLimit)
         const progressExhausted = noProgressGuardEnabled
           && autoContinue !== undefined
           && progress.consecutiveNoProgressTurns >= noProgressGuardLimit
@@ -2681,6 +2689,9 @@ export class SynopsisConversationService {
     batchProceed?: boolean
     proceedMode?: DiscussProceedMode
     customProceedGates?: DiscussCustomProceedGates
+    /** UI「空转停跑保护」；false 时不因 Todo/工具/步骤空转硬停。 */
+    noProgressGuardEnabled?: boolean
+    noProgressGuardLimit?: number
     activeGoals: readonly DeductionGoal[]
     chapterProgress: readonly Readonly<{ goalId: string; chapterSequence: number; summary: string; status: "planned" | "achieved" | "partial" | "missed" | "superseded" }>[]
     hookScheduleAudit: HookScheduleAudit
@@ -2983,6 +2994,9 @@ export class SynopsisConversationService {
     let todoLoopRepairIssued = false
     let todoRequiredRepairs = 0
     let autoContinueBlocked = false
+    // UI「空转停跑保护」统管：内容指纹空转、Todo/工具空转、步骤连续失败硬停。
+    const noProgressGuardEnabled = input.noProgressGuardEnabled !== false
+    const noProgressGuardLimit = resolveDiscussNoProgressGuardLimit(input.noProgressGuardLimit)
     const recordStepOutcome = async (step: string, failure?: string): Promise<void> => {
       const saved = readDiscussStepFailures(
         await this.dependencies.conversation.listDiscussContextMessages(input.sessionId),
@@ -3006,7 +3020,14 @@ export class SynopsisConversationService {
           input.sessionId, saved.obsoleteMessageIds, this.dependencies.now(),
         )
       }
-      if (attempts >= DISCUSS_STEP_FAILURE_LIMIT) {
+      if (attempts >= noProgressGuardLimit) {
+        if (!noProgressGuardEnabled) {
+          runtimeLog("info", "synopsis-conversation", "discuss.step_retry_exhausted_skipped", {
+            projectId: input.projectId, sessionId: input.sessionId, step, attempts, reason: failure,
+          })
+          storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
+          return
+        }
         const message = `${step} 连续失败 ${String(attempts)} 次，已停止自动推进。最后原因：${failure ?? "未知"}`
         synopsisConversationStreamHub.setContent(input.projectId, message, this.dependencies.now())
         runtimeLog("warn", "synopsis-conversation", "discuss.step_retry_exhausted", {
@@ -4007,17 +4028,27 @@ export class SynopsisConversationService {
               if (toolRequest.action === "invoke") {
                 await recordStepOutcome("todo_no_progress", todoNoProgressStreak > 0
                   ? "任务清单没有变化，未推进实际工作" : undefined)
-                if (todoNoProgressStreak === DISCUSS_STEP_FAILURE_LIMIT - 1) {
+                if (noProgressGuardEnabled && todoNoProgressStreak === noProgressGuardLimit - 1) {
                   todoLoopRepairIssued = true
                   autoContinueBlocked = true
                   await noteDiscussBlock("todo_no_progress", DISCUSS_TODO_NO_PROGRESS_HINT)
                 }
               }
             }
-            if (shouldStopTodoWriteLoop(todoNoProgressStreak, todoLoopRepairIssued, consecutiveTodoWrites)) {
+            if (
+              noProgressGuardEnabled
+              && shouldStopTodoWriteLoop(
+                todoNoProgressStreak, todoLoopRepairIssued, consecutiveTodoWrites, noProgressGuardLimit,
+              )
+            ) {
               return await stopDiscussLoop("任务清单连续重复更新，修复提示后仍未推进，已暂停自动推进。已保存结果与未完成任务均已保留，请检查阻塞原因后重试。")
             }
-            if (shouldIssueTodoLoopRepair(todoNoProgressStreak, todoLoopRepairIssued, consecutiveTodoWrites)) {
+            if (
+              noProgressGuardEnabled
+              && shouldIssueTodoLoopRepair(
+                todoNoProgressStreak, todoLoopRepairIssued, consecutiveTodoWrites, noProgressGuardLimit,
+              )
+            ) {
               todoLoopRepairIssued = true
               autoContinueBlocked = true
               await noteDiscussBlock("todo_no_progress", DISCUSS_TODO_NO_PROGRESS_HINT)

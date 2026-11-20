@@ -531,6 +531,18 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
+  it("does not hard-stop identical todo writes when no-progress guard is off", async () => {
+    let calls = 0
+    await withScript((call) => {
+      calls = call
+      return call === 1 ? tool("todo_write") : tool("todo_write", "invoke", { todos, merge: true })
+    }, async (_harness, send) => {
+      const sent = await send({ noProgressGuardEnabled: false, maxModelCalls: 6 })
+      expect(calls).toBeGreaterThanOrEqual(5)
+      expect(sent.messages.at(-1)?.content).toMatch(/调用预算|预算/)
+    })
+  })
+
   it("throws on the third repeated unchanged tool description", async () => {
     let calls = 0
     await withScript((call, request) => {
