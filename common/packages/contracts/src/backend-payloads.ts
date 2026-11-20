@@ -401,6 +401,11 @@ export const synopsisConversationSendPayloadSchema = projectSettingsReadPayloadS
   noProgressGuardLimit: z.number().int().min(1).max(30).optional(),
   /** Claude Code–style discuss mode: auto (default) | plan | accept_edits. */
   agentMode: z.enum(["auto", "plan", "accept_edits"]).optional(),
+  /**
+   * Write permission: full (default) auto-applies 设定集 staging promotes;
+   * settings_write_confirm keeps「确认落盘」gate.
+   */
+  writePermissionMode: z.enum(["full", "settings_write_confirm"]).optional(),
 })
 export const synopsisConversationRefreshChoicesPayloadSchema = projectSettingsReadPayloadSchema.extend({
   messageId: idSchema.optional(),

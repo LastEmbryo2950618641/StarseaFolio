@@ -174,6 +174,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       agentMode?: "auto" | "plan" | "accept_edits"
       proceedMode?: "precise" | "single" | "batch" | "custom"
       customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
+      writePermissionMode?: "full" | "settings_write_confirm"
       noProgressGuardEnabled?: boolean
       noProgressGuardLimit?: number
       autoContinued?: boolean
@@ -284,6 +285,33 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     setChapterSynopsis(undefined)
   }
 
+  const applyDiscussProceedProgress = useCallback((
+    progress: NonNullable<SynopsisConversationListResult["proceedProgress"]> | undefined,
+  ): void => {
+    if (progress === undefined) return
+    setSynopsisStream((previous) => {
+      if (previous !== undefined && previous.status === "running") {
+        return previous.proceedProgress?.stage === progress.stage
+          && previous.proceedProgress?.status === progress.status
+          ? previous
+          : { ...previous, proceedProgress: progress }
+      }
+      return {
+        status: "idle",
+        thinking: "",
+        thinkingRounds: [],
+        content: "",
+        searching: [],
+        editing: [],
+        toolRuns: [],
+        todos: [],
+        compacting: false,
+        proceedProgress: progress,
+        updatedAtMs: Date.now(),
+      }
+    })
+  }, [])
+
   const refreshSynopsisConversation = useCallback(async (): Promise<void> => {
     if (project === undefined) return
     const result = await invokeBackend<SynopsisConversationListResult>("synopsis.conversation.list", {
@@ -292,7 +320,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     })
     setSynopsisConversation(result)
     setSynopsisUsage(result.usage)
-  }, [project])
+    applyDiscussProceedProgress(result.proceedProgress)
+  }, [applyDiscussProceedProgress, project])
 
   const handleCoverChanged = useCallback((projectId: string, dataUrl: string): void => {
     setCoverByProjectId((current) => ({ ...current, [projectId]: dataUrl }))
@@ -310,10 +339,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       })
       setSynopsisConversation(focused)
       if (focused.usage !== undefined) setSynopsisUsage(focused.usage)
+      applyDiscussProceedProgress(focused.proceedProgress)
     } catch {
       // Opening a chapter file should still succeed if discuss focus cannot update.
     }
-  }, [project])
+  }, [applyDiscussProceedProgress, project])
 
   const refreshChapterSynopsis = useCallback(async (chapterId: string): Promise<void> => {
     if (project === undefined) return
@@ -592,11 +622,12 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       })
       setSynopsisConversation(focused)
       if (focused.usage !== undefined) setSynopsisUsage(focused.usage)
+      applyDiscussProceedProgress(focused.proceedProgress)
       await refreshWorkspace()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
-  }, [project, refreshWorkspace])
+  }, [applyDiscussProceedProgress, project, refreshWorkspace])
 
   const watchDiscussFocusAfterPublish = useCallback(async (publishedSequence: number): Promise<void> => {
     if (project === undefined) return
@@ -612,6 +643,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         if (watchId !== discussHandoffWatchRef.current) return
         setSynopsisConversation(result)
         if (result.usage !== undefined) setSynopsisUsage(result.usage)
+        applyDiscussProceedProgress(result.proceedProgress)
         if ((result.session?.chapterSequence ?? 0) > publishedSequence) {
           const openPath = selectedPathRef.current
           if (openPath !== undefined && openPath.startsWith("章节正文/")) {
@@ -628,7 +660,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000))
     }
-  }, [project, syncDiscussFocus])
+  }, [applyDiscussProceedProgress, project, syncDiscussFocus])
 
   const discussFocusChapters = useMemo(() => {
     const listed = listDiscussFocusChapters(workspaceFilePaths)
@@ -676,13 +708,47 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     const sessionVolume = discussFocusChapters
       .find((chapter) => chapter.sequence === synopsisConversation.session?.chapterSequence)
       ?.volumeFolderName
+      ?? synopsisConversation.session?.synopsisPath.split("/")[1]
     if (sessionVolume === undefined) return undefined
     const plan = volumeBatchPlan?.volumeFolderName === sessionVolume ? volumeBatchPlan : undefined
     return plan !== undefined && plan.targetChapterCount > 0 ? plan.targetChapterCount : undefined
   }, [
     discussFocusChapters,
     synopsisConversation.session?.chapterSequence,
+    synopsisConversation.session?.synopsisPath,
     volumeBatchPlan,
+  ])
+
+  useEffect(() => {
+    if (project === undefined) return
+    const sessionVolume = discussFocusChapters
+      .find((chapter) => chapter.sequence === synopsisConversation.session?.chapterSequence)
+      ?.volumeFolderName
+      ?? synopsisConversation.session?.synopsisPath.split("/")[1]
+    if (sessionVolume === undefined) return
+    if (volumeBatchPlan?.volumeFolderName === sessionVolume) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const read = await invokeBackend<{ content: string }>("workspace.read", {
+          projectId: project.projectId,
+          workspaceRootRef: project.workspaceRootRef,
+          relativePath: volumeBatchPlanPath(sessionVolume),
+        })
+        if (cancelled) return
+        const plan = parseVolumeBatchPlan(read.content)
+        if (plan !== undefined) setVolumeBatchPlan(plan)
+      } catch {
+        // No volume plan file yet — focus bar keeps「第 N 章」without M.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [
+    discussFocusChapters,
+    project,
+    synopsisConversation.session?.chapterSequence,
+    synopsisConversation.session?.synopsisPath,
+    volumeBatchPlan?.volumeFolderName,
   ])
 
   const batchProgressRows = useMemo(() => {
@@ -1593,6 +1659,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       agentMode?: "auto" | "plan" | "accept_edits"
       proceedMode?: "precise" | "single" | "batch" | "custom"
       customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
+      writePermissionMode?: "full" | "settings_write_confirm"
       noProgressGuardEnabled?: boolean
       noProgressGuardLimit?: number
       autoContinued?: boolean
@@ -1637,7 +1704,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     }))
     setSynopsisConversationBusy(true)
     synopsisStopDraftRef.current = message
-    setSynopsisStream({
+    setSynopsisStream((previous) => ({
       status: "running",
       thinking: "",
       thinkingRounds: [],
@@ -1647,8 +1714,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       toolRuns: [],
       todos: [],
       compacting: false,
+      ...(previous?.proceedProgress === undefined ? {} : { proceedProgress: previous.proceedProgress }),
       updatedAtMs: Date.now(),
-    })
+    }))
     setError(undefined)
     let pollStopped = false
     let observedRunningStream = false
@@ -1761,6 +1829,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           ? {}
           : { noProgressGuardLimit: options.noProgressGuardLimit }),
         ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
+        ...(options?.writePermissionMode === undefined
+          ? {}
+          : { writePermissionMode: options.writePermissionMode }),
         ...(options?.setupAnswerTo === undefined || options?.autoContinued === true || options?.automation !== undefined
           ? {} : { setupAnswerTo: options.setupAnswerTo }),
       }, {
@@ -1850,6 +1921,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             ...(options?.agentMode === undefined ? {} : { agentMode: options.agentMode }),
             ...(options?.proceedMode === undefined ? {} : { proceedMode: options.proceedMode }),
             ...(options?.customProceedGates === undefined ? {} : { customProceedGates: options.customProceedGates }),
+            ...(options?.writePermissionMode === undefined
+              ? {}
+              : { writePermissionMode: options.writePermissionMode }),
             ...(options?.noProgressGuardEnabled === undefined
               ? {}
               : { noProgressGuardEnabled: options.noProgressGuardEnabled }),

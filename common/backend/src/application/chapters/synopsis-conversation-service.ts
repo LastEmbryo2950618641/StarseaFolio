@@ -21,6 +21,7 @@ import {
   type SynopsisConversationListResult,
   type SynopsisConversationMessage,
   type SynopsisConversationSendResult,
+  type SynopsisConversationSession,
   type SynopsisConversationStartResult,
   type SynopsisConversationStreamEdit,
   type SynopsisConversationStreamSnapshot,
@@ -307,10 +308,16 @@ export class SynopsisConversationService {
       }
     }
     const reconciled = await this.reconcileSessionSynopsisPath(input.workspaceRootRef, session)
+    const proceedProgress = await this.syncProceedProgressFromMaterials({
+      projectId: input.projectId,
+      workspaceRootRef: input.workspaceRootRef,
+      session: reconciled,
+    })
     return {
       session: reconciled,
       messages: [...messages],
       ...(usage === undefined ? {} : { usage }),
+      proceedProgress,
     }
   }
 
@@ -331,10 +338,16 @@ export class SynopsisConversationService {
     if (existing !== undefined) {
       const messages = await this.dependencies.conversation.listMessagesForProject(input.projectId)
       const reconciled = await this.reconcileSessionSynopsisPath(input.workspaceRootRef, existing)
+      const proceedProgress = await this.syncProceedProgressFromMaterials({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        session: reconciled,
+      })
       return {
         session: reconciled,
         messages: [...messages],
         ...(usage === undefined ? {} : { usage }),
+        proceedProgress,
       }
     }
     const fromIndex = await this.dependencies.chapters.nextChapterSequence(input.projectId)
@@ -378,10 +391,16 @@ export class SynopsisConversationService {
       claimed: claimed !== undefined,
     })
     const messages = await this.dependencies.conversation.listMessagesForProject(input.projectId)
+    const proceedProgress = await this.syncProceedProgressFromMaterials({
+      projectId: input.projectId,
+      workspaceRootRef: input.workspaceRootRef,
+      session,
+    })
     return {
       session,
       messages: [...messages],
       ...(usage === undefined ? {} : { usage }),
+      proceedProgress,
     }
   }
 
@@ -405,10 +424,16 @@ export class SynopsisConversationService {
       const usage = await this.hydrateDiscussUsage(input.projectId)
       const messages = await this.dependencies.conversation.listMessagesForProject(input.projectId)
       const reconciled = await this.reconcileSessionSynopsisPath(input.workspaceRootRef, session)
+      const proceedProgress = await this.syncProceedProgressFromMaterials({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        session: reconciled,
+      })
       return {
         session: reconciled,
         messages: [...messages],
         ...(usage === undefined ? {} : { usage }),
+        proceedProgress,
       }
     }
     if (session.chapterSequence === chapterSequence) {
@@ -424,10 +449,16 @@ export class SynopsisConversationService {
         input.workspaceRootRef,
         focused ?? { ...session, focusKind },
       )
+      const proceedProgress = await this.syncProceedProgressFromMaterials({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        session: reconciled,
+      })
       return {
         session: reconciled,
         messages: [...messages],
         ...(usage === undefined ? {} : { usage }),
+        proceedProgress,
       }
     }
     const claimed = await this.findExistingSynopsisForSequence(input.workspaceRootRef, chapterSequence)
@@ -486,10 +517,16 @@ export class SynopsisConversationService {
       input.workspaceRootRef,
       focused ?? { ...session, chapterSequence, synopsisPath, focusKind },
     )
+    const proceedProgress = await this.syncProceedProgressFromMaterials({
+      projectId: input.projectId,
+      workspaceRootRef: input.workspaceRootRef,
+      session: reconciled,
+    })
     return {
       session: reconciled,
       messages: [...messages],
       ...(usage === undefined ? {} : { usage }),
+      proceedProgress,
     }
   }
 
@@ -604,10 +641,13 @@ export class SynopsisConversationService {
     noProgressGuardLimit?: number
     /** Claude Code–style discuss mode. */
     agentMode?: import("@starseafolio/contracts").DiscussAgentMode
+    /** full (default) auto-applies 设定集; settings_write_confirm keeps confirm gate. */
+    writePermissionMode?: import("@starseafolio/contracts").DiscussWritePermissionMode
   }>): Promise<SynopsisConversationSendResult> {
     const focusLocked = input.focusLocked === true
     const batchAutomation = input.automation === "batch_chapter"
     const agentMode = input.agentMode ?? "auto"
+    const writePermissionMode = input.writePermissionMode
     const proceedMode: DiscussProceedMode = batchAutomation
       ? "batch"
       : resolveDiscussProceedMode({
@@ -920,6 +960,7 @@ export class SynopsisConversationService {
             }
           : {}),
         agentMode,
+        ...(writePermissionMode === undefined ? {} : { writePermissionMode }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
         ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
@@ -1728,9 +1769,6 @@ export class SynopsisConversationService {
       )
       const offeredChoices = persistedChoices ?? []
       const waitingOnUser = (coldStartStyleNeedsChoice || volumeStoryNeedsUser || !withinChapterAuto) && offeredChoices.length > 0
-      const autoDecideChoices = withinChapterAuto && !coldStartStyleNeedsChoice && !volumeStoryNeedsUser
-        && (workflowChoices?.length ?? 0) > 0
-        && !offeredChoices.some((choice) => choice.action === "promote_draft_to_body" && !autonomousBody)
 
       let assistantContent = volumePlanningNeedsFirstWrite && workStyleGateReadyAtStart
         ? buildVolumeFirstWriteGateReply(volumePlanningState, nextVolume, volumePlanningWasReady && !volumeStoryNeedsUser)
@@ -1942,11 +1980,9 @@ export class SynopsisConversationService {
             || outlineProgressCompleted
             || savedDraftPublished
           ))
-          || (pipelineAuto && currentStageAutonomous && !waitingOnUser && (
-            autoDecideChoices
-            || (todosStillOpen && currentStageAutonomous)
-            || (draftAssist.continueTurn === true && currentStageAutonomous)
-          ))
+          // In-stage auto-continue only while todos remain open — not on bare
+          // continueTurn / choice-capable stages (those felt like forced 推进).
+          || (pipelineAuto && currentStageAutonomous && !waitingOnUser && todosStillOpen)
         )
       const stayInStageContinueMessage = buildStayInStageContinueMessage(pipelineStageAfterTurn)
       const autoContinueMessage = !shouldAutoContinue || (savedDraftPublished && !nextChapterAuto)
@@ -2090,8 +2126,9 @@ export class SynopsisConversationService {
               : { goalProposals: assist.stagingPromote.goalProposals }),
             ...(assist.stagingPromote.reason === undefined ? {} : { reason: assist.stagingPromote.reason }),
           })]
-      if (pipelineAuto && pendingStagingPromotes.length > 0) {
-        // Lineage records each promote, so Auto applies it instead of waiting for 采纳.
+      const { shouldAutoApproveStagingPromote } = await import("./discuss-write-permission.js")
+      // full permission (default): apply like Cursor/Codex Agent. settings_write_confirm: wait for 确认落盘.
+      if (shouldAutoApproveStagingPromote(writePermissionMode) && pendingStagingPromotes.length > 0) {
         try {
           await this.dependencies.stagingPromote.approve({
             projectId: input.projectId,
@@ -2099,6 +2136,13 @@ export class SynopsisConversationService {
             proposalIds: pendingStagingPromotes.map((proposal) => proposal.proposalId),
           })
           pendingStagingPromotes = []
+          if (persistedChoices !== undefined) {
+            persistedChoices = persistedChoices.filter((choice) => choice.action !== "promote_staging")
+            if (persistedChoices.length === 0) persistedChoices = undefined
+          }
+          if (!assistantContent.includes("设定已写入") && !assistantContent.includes("已落盘到设定集")) {
+            assistantContent += "\n\n设定集已按完全权限直接写入（无需再点确认落盘）。"
+          }
         } catch (error) {
           runtimeLog("warn", "synopsis-conversation", "staging_promote.auto_approve_failed", {
             projectId: input.projectId,
@@ -2655,6 +2699,7 @@ export class SynopsisConversationService {
     allowChapterWorkflowTools?: boolean
     volumePlanning?: VolumePlanningContext
     agentMode?: import("@starseafolio/contracts").DiscussAgentMode
+    writePermissionMode?: import("@starseafolio/contracts").DiscussWritePermissionMode
     signal?: AbortSignal
     maxModelCalls?: number
     deadlineMs?: number
@@ -2723,14 +2768,23 @@ export class SynopsisConversationService {
     const presentationAppendix = chapterPresentationPhaseAppendix(input.presentation, "synopsis_discuss")
     const workStyleGateAppendix = buildWorkStyleGatePromptAppendix(input.workStyleGate)
     const { discussAgentModePromptAppendix } = await import("./discuss-agent-mode.js")
+    const { discussWritePermissionPromptAppendix } = await import("./discuss-write-permission.js")
     const modeAppendix = discussAgentModePromptAppendix(input.agentMode ?? "auto", {
       batchProceed: input.batchProceed === true || input.batchAutomation === true,
       ...(input.proceedMode === undefined ? {} : { proceedMode: input.proceedMode }),
       ...(input.customProceedGates === undefined ? {} : { customProceedGates: input.customProceedGates }),
     })
+    const writePermissionAppendix = discussWritePermissionPromptAppendix(input.writePermissionMode)
     const volumePlanningAppendix = buildVolumePlanningPromptAppendix(input.volumePlanning)
-    const appendix = [intentAppendix, presentationAppendix, modeAppendix, workStyleGateAppendix, volumePlanningAppendix,
-      input.creativeSetup === undefined ? undefined : buildCreativeSetupPrompt(input.creativeSetup)]
+    const appendix = [
+      intentAppendix,
+      presentationAppendix,
+      modeAppendix,
+      writePermissionAppendix,
+      workStyleGateAppendix,
+      volumePlanningAppendix,
+      input.creativeSetup === undefined ? undefined : buildCreativeSetupPrompt(input.creativeSetup),
+    ]
       .filter((part): part is string => part !== undefined)
     const phasePrompt = appendix.length === 0
       ? basePhasePrompt
@@ -5501,6 +5555,65 @@ export class SynopsisConversationService {
       ...(autoContinue === undefined ? {} : { autoContinue }),
       ...(proceedProgress === undefined ? {} : { proceedProgress }),
     }
+  }
+
+  /** Derive and publish proceedProgress from on-disk materials for list/start/setFocus. */
+  private async syncProceedProgressFromMaterials(input: Readonly<{
+    projectId: ProjectId
+    workspaceRootRef: string
+    session: SynopsisConversationSession
+    proceedMode?: DiscussProceedMode
+    customProceedGates?: DiscussCustomProceedGates
+  }>): Promise<DiscussProceedProgress> {
+    const synopsisMarkdown = await this.readSynopsisFile(input.workspaceRootRef, input.session.synopsisPath)
+    const outlinePath = siblingPlanningMarkdownPath(input.session.synopsisPath, "outline")
+      ?? deriveOutlineMarkdownPath(
+        input.session.chapterSequence,
+        input.session.title,
+        extractVolumeFolderNameFromPath(input.session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME,
+      )
+    const outlineMarkdown = await this.readSynopsisFile(input.workspaceRootRef, outlinePath)
+    const chapterBodyMarkdown = await this.readFocusedCommittedBody(
+      input.projectId,
+      input.workspaceRootRef,
+      input.session.chapterSequence,
+    )
+    const latestDraftMarkdown = await this.readFocusedLatestDraft(
+      input.projectId,
+      input.session.chapterSequence,
+    )
+    const publishableDraft = await this.findPublishableFocusDraft(
+      input.projectId,
+      input.session.chapterSequence,
+    )
+    const synopsisReady = hasPlanningContent(synopsisMarkdown, true)
+    const outlineReady = hasPlanningContent(outlineMarkdown, false)
+    const draftReady = (latestDraftMarkdown?.trim().length ?? 0) > 0
+      || input.session.draftVersionId !== undefined
+    const chapterPublished = (chapterBodyMarkdown?.trim().length ?? 0) > 0
+    const stage = resolveDiscussPipelineStage({
+      synopsisReady,
+      outlineReady,
+      draftReady,
+      ...(publishableDraft !== undefined && !chapterPublished ? { awaitingBodyConfirm: true } : {}),
+      ...(chapterPublished ? { chapterPublished: true } : {}),
+    })
+    const proceedMode = input.proceedMode ?? "single"
+    const autonomous = resolveProceedAutonomy({
+      mode: proceedMode,
+      stage,
+      ...(input.customProceedGates === undefined ? {} : { customGates: input.customProceedGates }),
+    })
+    const progress: DiscussProceedProgress = {
+      stage,
+      status: autonomous ? "running" : "waiting",
+    }
+    synopsisConversationStreamHub.setProceedProgress(
+      input.projectId,
+      progress,
+      this.dependencies.now(),
+    )
+    return progress
   }
 
   private async findPublishableFocusDraft(
