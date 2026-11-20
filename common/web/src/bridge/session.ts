@@ -13,7 +13,7 @@ const STORAGE_KEY = "worldseed.web.session.v1"
 
 /** Logged-out web never falls back to the shared service token. */
 export const DEFAULT_WEB_SESSION: WebSession = {
-  apiBaseUrl: "http://111.229.32.85/worldseed",
+  apiBaseUrl: "https://nikoniko.cn/worldseed",
   apiToken: "",
 }
 

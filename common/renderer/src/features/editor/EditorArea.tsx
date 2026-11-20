@@ -37,6 +37,7 @@ import {
   type RevisionStage,
 } from "./chapter-workspace-types.js"
 import { UiTooltip } from "../../components/UiTooltip.js"
+import { MarkdownDocumentView } from "./MarkdownDocumentView.js"
 
 /** Space between text and scrollbar reserved for the floating toolbar (px). */
 const CHAPTER_EDITOR_TOOLBAR_LANE = 52
@@ -420,33 +421,11 @@ function MarkdownEditor(props: {
   readOnly: boolean
   onContentChange(value: string): void
 }): React.JSX.Element {
-  return <Editor
-        height="100%"
-        language="markdown"
-        theme={WORLDSEED_EDITOR_THEME}
-        value={props.content}
-        beforeMount={(monaco) => { ensureWorldseedEditorTheme(monaco); }}
-        onChange={(value: string | undefined) => { props.onContentChange(value ?? ""); }}
-        options={{
-          readOnly: props.readOnly,
-          minimap: { enabled: false },
-          fontSize: 14,
-          lineHeight: 23,
-          fontFamily: "JetBrains Mono, Cascadia Code, Consolas, monospace",
-          wordWrap: "on",
-          padding: { top: 20, bottom: 20 },
-          scrollBeyondLastLine: false,
-          renderLineHighlight: "gutter",
-          overviewRulerBorder: false,
-          // Novel Markdown uses fullwidth indent (U+3000) and CJK punctuation; Monaco's
-          // unicodeHighlight draws yellow boxes that look like editor bugs.
-          unicodeHighlight: {
-            ambiguousCharacters: false,
-            invisibleCharacters: false,
-            nonBasicASCII: false,
-          },
-        }}
-      />
+  return <MarkdownDocumentView
+    content={props.content}
+    readOnly={props.readOnly}
+    onContentChange={props.onContentChange}
+  />
 }
 
 type RevisionIssue = Readonly<{

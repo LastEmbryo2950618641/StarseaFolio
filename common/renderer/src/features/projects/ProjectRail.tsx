@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
-import { Library, RefreshCw } from "lucide-react"
+import { Download, Library, RefreshCw } from "lucide-react"
 
 import {
   getBookCover,
@@ -35,6 +35,11 @@ type Props = Readonly<{
 }>
 
 const RECENT_PROJECT_LIMIT = 5
+const DESKTOP_RELEASES_URL = "https://github.com/LastEmbryo2950618641/StarseaFolio/releases"
+
+function isWebHost(): boolean {
+  return typeof document !== "undefined" && document.body.classList.contains("starseafolio-web")
+}
 
 function formatOpenedAgo(lastOpenedAtMs: number, nowMs: number): string {
   const deltaMs = Math.max(0, nowMs - lastOpenedAtMs)
@@ -161,6 +166,22 @@ export function ProjectRail(props: Props): React.JSX.Element {
       </div>
 
       <div className="project-rail-footer">
+        {isWebHost() ? (
+          <UiTooltip label="下载桌面版 / 最新安装包">
+            <a
+              className="project-rail-item project-rail-action project-rail-download"
+              href={DESKTOP_RELEASES_URL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="下载桌面版"
+              data-testid="project-rail-download-release"
+            >
+              <span className="project-rail-icon project-rail-icon--download">
+                <Download size={17} strokeWidth={2.25} />
+              </span>
+            </a>
+          </UiTooltip>
+        ) : null}
         <div className="project-rail-separator" aria-hidden="true" />
         <UiTooltip label={canBrowseAll ? "浏览所有书籍" : "已在书籍浏览界面"}>
           <button

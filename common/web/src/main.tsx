@@ -17,6 +17,7 @@ async function boot(): Promise<void> {
   const session = loadWebSession()
   // Must install before any renderer modules evaluate (they snapshot window.worldseed).
   installHttpWorldseedBridge(session)
+  document.body.classList.add("starseafolio-web")
   if (webAccountsEnabled) document.body.classList.add("web-accounts")
 
   await import("@renderer/monaco.js")

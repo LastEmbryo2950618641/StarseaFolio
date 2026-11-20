@@ -15,13 +15,13 @@ describe("web account session", () => {
       removeItem: (key: string) => { memory.delete(key) },
     })
     localStorage.setItem("worldseed.web.session.v1", JSON.stringify({
-      apiBaseUrl: "http://111.229.32.85/worldseed",
+      apiBaseUrl: "https://nikoniko.cn/worldseed",
       apiToken: "shared-service-token",
     }))
-    expect(loadWebSession()).toEqual({ apiBaseUrl: "http://111.229.32.85/worldseed", apiToken: "" })
+    expect(loadWebSession()).toEqual({ apiBaseUrl: "https://nikoniko.cn/worldseed", apiToken: "" })
 
     saveWebSession({
-      apiBaseUrl: "http://111.229.32.85/worldseed/",
+      apiBaseUrl: "https://nikoniko.cn/worldseed/",
       apiToken: "account-session-token-value",
       accountId: "0123456789abcdef",
       accountName: "星海",
@@ -29,7 +29,7 @@ describe("web account session", () => {
       booksRoot: "/var/lib/worldseed/books/accounts/0123456789abcdef",
     })
     expect(loadWebSession()).toMatchObject({
-      apiBaseUrl: "http://111.229.32.85/worldseed",
+      apiBaseUrl: "https://nikoniko.cn/worldseed",
       accountId: "0123456789abcdef",
       accountName: "星海",
       booksRoot: "/var/lib/worldseed/books/accounts/0123456789abcdef",

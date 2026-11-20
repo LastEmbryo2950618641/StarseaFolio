@@ -1,8 +1,11 @@
 #!/bin/bash
-# Install the web-only account gate and point the public web location at it.
-# Prefer /StarseaFolio/ (current), fall back to legacy /worldseed/.
+# Install the web-only account gate and point the public API location at it.
+# API lives at location /worldseed/ (often inside an nginx snippet include).
+# /StarseaFolio/ is the static SPA root and must not be rewritten to the gate.
 # The shared backend on 127.0.0.1:8787 stays in place; this process checks the account first.
 set -euo pipefail
+
+PUBLIC_HOST="${PUBLIC_HOST:-nikoniko.cn}"
 
 if [ "$(id -u)" -ne 0 ]; then
   exec sudo -n bash "$0" "$@"
@@ -56,37 +59,58 @@ systemctl enable starseafolio-account-gate
 systemctl restart starseafolio-account-gate
 
 healthy=0
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -fsS http://127.0.0.1:8791/auth/health >/dev/null; then
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  if curl -fsS "http://127.0.0.1:8791/auth/health" >/dev/null; then
     healthy=1
     break
   fi
-  sleep 0.3
+  sleep 0.5
 done
 if [ "$healthy" -ne 1 ]; then
-  echo "account gate did not become healthy" >&2
+  echo "account gate did not become healthy on 127.0.0.1:8791" >&2
   journalctl -u starseafolio-account-gate -n 40 --no-pager >&2 || true
   exit 1
 fi
 
-nginx_state="$(python3 - <<'PY'
+nginx_state="$(PUBLIC_HOST="$PUBLIC_HOST" python3 - <<'PY'
 from pathlib import Path
+import os
 
-candidates = [
-    Path("/etc/nginx/sites-available/starseafolio"),
-    Path("/etc/nginx/sites-available/worldseed"),
-    *sorted(Path("/etc/nginx/sites-available").glob("*")),
-]
-markers = ["location /StarseaFolio/", "location /worldseed/"]
+public_host = os.environ.get("PUBLIC_HOST", "nikoniko.cn").strip() or "nikoniko.cn"
+candidates: list[Path] = []
+for root in (
+    Path("/etc/nginx/snippets"),
+    Path("/etc/nginx/sites-enabled"),
+    Path("/etc/nginx/sites-available"),
+    Path("/etc/nginx/conf.d"),
+):
+    if root.is_dir():
+        candidates.extend(sorted(root.glob("*.conf")))
+        candidates.extend(sorted(p for p in root.iterdir() if p.is_file() and p.suffix == ""))
+
+# Prefer the API location. Never rewrite the static SPA location /StarseaFolio/.
+markers = ["location /worldseed/"]
 seen: set[Path] = set()
 path = None
 text = ""
 marker = None
-for candidate in candidates:
+# Prefer files that already mention the public domain or the API location.
+ranked = sorted(
+    candidates,
+    key=lambda item: (
+        0 if "nikoniko" in item.name.lower() or "niko-home" in item.name.lower() else 1,
+        0 if item.parent.name == "snippets" else 1,
+        str(item),
+    ),
+)
+for candidate in ranked:
     if candidate in seen or not candidate.is_file():
         continue
     seen.add(candidate)
-    content = candidate.read_text()
+    try:
+        content = candidate.read_text()
+    except OSError:
+        continue
     found = next((item for item in markers if item in content), None)
     if found is None:
         continue
@@ -94,9 +118,11 @@ for candidate in candidates:
     text = content
     marker = found
     break
+
 if path is None or marker is None:
     print("SKIP\t\t")
     raise SystemExit(0)
+
 start = text.find(marker)
 start = text.rfind("\n", 0, start) + 1
 brace = text.find("{", start)
@@ -116,6 +142,7 @@ for index, char in enumerate(text[brace:], brace):
 if end is None:
     print(f"SKIP\t{path}\t{marker}")
     raise SystemExit(0)
+
 block = text[start:end]
 updated = block.replace("127.0.0.1:8787", "127.0.0.1:8791")
 if "X-Real-Ip" not in updated and "proxy_pass" in updated:
@@ -133,6 +160,32 @@ else:
         backup.write_text(text)
     path.write_text(new_text)
     print(f"CHANGED\t{path}\t{marker}")
+
+# Domain origin bridge usually lives in the site file, not the snippet.
+for site in (
+    Path("/etc/nginx/sites-available/worldseed"),
+    Path("/etc/nginx/sites-enabled/worldseed"),
+    Path("/etc/nginx/sites-available/starseafolio"),
+):
+    if not site.is_file() or "niko_library_origin" not in site.read_text():
+        continue
+    site_text = site.read_text()
+    https_line = f'    "https|https://{public_host}" "https://{public_host}";\n'
+    http_line = f'    "http|http://{public_host}" "http://{public_host}";\n'
+    if https_line.strip() in site_text and http_line.strip() in site_text:
+        break
+    needle = 'map "$scheme|$http_origin" $niko_library_origin {'
+    idx = site_text.find(needle)
+    if idx < 0:
+        continue
+    insert_at = site_text.find("\n", idx) + 1
+    extra = "".join(line for line in (https_line, http_line) if line.strip() not in site_text)
+    site_backup = Path(str(site) + ".bak-domain-origin")
+    if not site_backup.exists():
+        site_backup.write_text(site_text)
+    site.write_text(site_text[:insert_at] + extra + site_text[insert_at:])
+    print(f"ORIGIN\t{site}\t{public_host}", file=__import__("sys").stderr)
+    break
 PY
 )" || true
 nginx_state="${nginx_state//$'\r'/}"
@@ -151,24 +204,20 @@ if [ "$nginx_action" = "CHANGED" ]; then
     systemctl reload nginx
   fi
 elif [ "$nginx_action" = "SKIP" ]; then
-  echo "nginx location /StarseaFolio/ or /worldseed/ not found; account gate installed without nginx rewrite" >&2
+  echo "nginx location /worldseed/ not found; account gate installed without nginx rewrite" >&2
 fi
 
 if [ "$nginx_action" = "CHANGED" ] || [ "$nginx_action" = "UNCHANGED" ]; then
-  public_path="/StarseaFolio"
-  if [[ "$nginx_marker" == *"location /worldseed/"* ]]; then
-    public_path="/worldseed"
-  fi
   public_ok=0
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if curl -fsS -H "Host: 111.229.32.85" "http://127.0.0.1${public_path}/auth/captcha" >/dev/null; then
+    if curl -fsS -H "Host: ${PUBLIC_HOST}" "http://127.0.0.1/worldseed/auth/captcha" >/dev/null; then
       public_ok=1
       break
     fi
     sleep 0.3
   done
   if [ "$public_ok" -ne 1 ]; then
-    echo "public captcha check failed for ${public_path}; account gate is still installed" >&2
+    echo "public captcha check failed for https://${PUBLIC_HOST}/worldseed/; account gate is still installed" >&2
   fi
 fi
-echo "account gate installed (${nginx_state:-SKIP})"
+echo "account gate installed (${nginx_state:-SKIP}; host=${PUBLIC_HOST})"
