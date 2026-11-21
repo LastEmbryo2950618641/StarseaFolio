@@ -88,7 +88,7 @@ describe("current configuration", () => {
   it("accepts the centralized DeepSeek protocol configuration", () => {
     expect(deepSeekRuntimeConfigSchema.parse(defaultDeepSeekRuntimeConfig)).toEqual(defaultDeepSeekRuntimeConfig)
     expect(defaultDeepSeekRuntimeConfig.contextWindowTokens).toBe(1_000_000)
-    expect(defaultDeepSeekRuntimeConfig.jsonModeEnabled).toBe(false)
+    expect(defaultDeepSeekRuntimeConfig.jsonModeEnabled).toBe(true)
     expect(defaultDeepSeekRuntimeConfig.thinkingModeEnabled).toBe(true)
     expect(defaultDeepSeekRuntimeConfig.reasoningEffort).toBe("high")
     expect(defaultDeepSeekRuntimeConfig.timeoutMs).toBe(7_200_000)

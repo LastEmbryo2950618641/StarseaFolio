@@ -17,6 +17,7 @@ import { digest } from "../src/core/identity/digest.js"
 import {
   openChapterHarness,
   prepareChapterPlanning,
+  prepareVolumePlanning,
   seedCommittedChapter,
   waitForTask,
   type ChapterHarness,
@@ -34,6 +35,7 @@ async function withHarness(run: (harness: ChapterHarness) => Promise<void>): Pro
   const harness = await openChapterHarness("Synopsis Conversation Test")
   temporaryRoots.push(harness.root)
   try {
+    await prepareVolumePlanning(harness)
     await run(harness)
   } finally {
     await harness.container.close()
@@ -543,7 +545,7 @@ describe("synopsis conversation", () => {
         message: "按细纲写正文草稿",
       })
 
-      expect(calls).toBe(2)
+      expect(calls).toBe(3)
       expect(sent.appendedDraft).toBeUndefined()
       expect(sent.session.draftContentState).toBe("empty")
       expect(sent.messages.at(-1)?.content).toContain("正文没有写入草稿版本")
@@ -597,6 +599,7 @@ describe("synopsis conversation", () => {
     temporaryRoots.push(harness.root)
     try {
       const base = { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef }
+      await prepareVolumePlanning(harness)
       const sent = await invoke<{
         session: { synopsisPath: string; synopsisContentState: string }
       }>(harness, "synopsis.conversation.send", {
@@ -605,7 +608,7 @@ describe("synopsis conversation", () => {
         batchProceed: false,
       })
 
-      expect(calls).toBe(2)
+      expect(calls).toBe(3)
       expect(sent.session.synopsisContentState).toBe("ai_written")
       expect(readFileSync(join(harness.workspaceRootRef, sent.session.synopsisPath), "utf8"))
         .toContain("停电后，林序留守药房")
@@ -658,6 +661,7 @@ describe("synopsis conversation", () => {
     temporaryRoots.push(harness.root)
     try {
       const base = { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef }
+      await prepareVolumePlanning(harness)
       const started = await invoke<{ session: { synopsisPath: string } }>(harness, "synopsis.conversation.start", base)
       const synopsis = "# 第一章 断电的第一夜 剧情梗概\n\n停电后，林序收到妹妹被困医院的短信，必须安排药房交接后赶去救援。\n"
       await invoke(harness, "workspace.save", {
@@ -905,6 +909,7 @@ describe("synopsis conversation", () => {
         summary: "获得登记簿副本",
         status: "planned",
       })
+      await prepareChapterPlanning(harness)
 
       const begun = await invoke<{ taskId: string }>(harness, "synopsis.conversation.beginTurn", {
         ...base,
@@ -950,6 +955,7 @@ describe("synopsis conversation", () => {
         summary: "获得登记簿副本",
         status: "planned",
       })
+      await prepareChapterPlanning(harness)
 
       const begun = await invoke<{ taskId: string }>(harness, "synopsis.conversation.beginTurn", {
         ...base,
@@ -1071,6 +1077,7 @@ describe("synopsis conversation", () => {
           creationDesk: { ...settings.creationDesk, requireCompleteHookSchedules: true },
         },
       })
+      await prepareChapterPlanning(harness)
 
       const blocked = await harness.facade.handle({
         protocolVersion: PROTOCOL_VERSION,
@@ -1147,7 +1154,7 @@ describe("synopsis conversation", () => {
       })
       expect(focused.session.sessionId).toBe(started.session.sessionId)
       expect(focused.session.chapterSequence).toBe(2)
-      expect(focused.session.focusKind).toBe("plot_synopsis")
+      expect(focused.session.focusKind).toBe("chapter_body")
       expect(focused.messages.some((message) => message.role === "user" && message.content.includes("雨夜站台"))).toBe(true)
 
       const kinded = await invoke<{

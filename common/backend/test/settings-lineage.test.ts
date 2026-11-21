@@ -50,22 +50,22 @@ describe("settings lineage", () => {
         projectId: harness.projectId,
         workspaceRootRef: harness.workspaceRootRef,
       }
-      const dir = join(harness.workspaceRootRef, "设定集", "人物")
+      const dir = join(harness.workspaceRootRef, "设定集")
       mkdirSync(dir, { recursive: true })
-      writeFileSync(join(dir, "林照.md"), "# 林照\n\n凡人盐工。\n", "utf8")
+      writeFileSync(join(dir, "港城设定.md"), "# 港城设定\n\n凡人盐工。\n", "utf8")
 
       const paths = await invoke<SettingsLineagePathsResult>(harness, "settings.lineage.paths", base)
-      expect(paths.paths.some((path) => path.endsWith("林照.md") || path.includes("readme.md"))).toBe(true)
+      expect(paths.paths.some((path) => path.endsWith("港城设定.md") || path.includes("readme.md"))).toBe(true)
 
       await invoke(harness, "workspace.save", {
         ...base,
-        relativePath: "设定集/人物/林照.md",
+        relativePath: "设定集/港城设定.md",
         content: "# 林照\n\n觉醒血脉后的盐工。\n",
       })
 
       const listed = await invoke<SettingsLineageListResult>(harness, "settings.lineage.list", {
         ...base,
-        relativePath: "设定集/人物/林照.md",
+        relativePath: "设定集/港城设定.md",
       })
       expect(listed.entries.length).toBeGreaterThanOrEqual(1)
       expect(listed.entries[0]?.sourceKind).toBe("workspace_save")
@@ -85,21 +85,21 @@ describe("settings lineage", () => {
         projectId: harness.projectId,
         workspaceRootRef: harness.workspaceRootRef,
       }
-      const dir = join(harness.workspaceRootRef, "设定集", "人物")
+      const dir = join(harness.workspaceRootRef, "设定集")
       mkdirSync(dir, { recursive: true })
-      writeFileSync(join(dir, "林照.md"), "# 林照\n\n初版。\n", "utf8")
+      writeFileSync(join(dir, "港城设定.md"), "# 港城设定\n\n初版。\n", "utf8")
 
       await invoke(harness, "settings.lineage.paths", base)
 
       await invoke(harness, "workspace.save", {
         ...base,
-        relativePath: "设定集/人物/林照.md",
+        relativePath: "设定集/港城设定.md",
         content: "# 林照\n\n当前真相。\n",
       })
 
       const asOf = await invoke<SettingsLineageReadAsOfResult>(harness, "settings.lineage.readAsOf", {
         ...base,
-        relativePath: "设定集/人物/林照.md",
+        relativePath: "设定集/港城设定.md",
         chapterSequence: 1,
       })
       expect(asOf.markdown).toContain("当前真相")
@@ -113,10 +113,10 @@ describe("settings lineage", () => {
         projectId: harness.projectId,
         workspaceRootRef: harness.workspaceRootRef,
       }
-      const dir = join(harness.workspaceRootRef, "设定集", "人物")
+      const dir = join(harness.workspaceRootRef, "设定集")
       mkdirSync(dir, { recursive: true })
-      const path = join(dir, "林照.md")
-      writeFileSync(path, "# 林照\n\n账本版。\n", "utf8")
+      const path = join(dir, "港城设定.md")
+      writeFileSync(path, "# 港城设定\n\n账本版。\n", "utf8")
 
       await invoke(harness, "settings.lineage.paths", base)
 
@@ -124,11 +124,11 @@ describe("settings lineage", () => {
 
       const runtime = await harness.container.getRuntime(harness.projectId, harness.workspaceRootRef)
       const realigned = await runtime.createSettingsLineageService().realignAfterHistoryRestore("test-entry")
-      expect(realigned).toBe(1)
+      expect(realigned).toBe(2)
 
       const listed = await invoke<SettingsLineageListResult>(harness, "settings.lineage.list", {
         ...base,
-        relativePath: "设定集/人物/林照.md",
+        relativePath: "设定集/港城设定.md",
       })
       expect(listed.entries[0]?.sourceKind).toBe("history_restore")
       const commit = await invoke<SettingsLineageCommitResult>(harness, "settings.lineage.getCommit", {
@@ -153,18 +153,18 @@ describe("settings lineage", () => {
       // Ensure at least one lineage entry exists even if migration seed already ran.
       await invoke(harness, "workspace.save", {
         ...base,
-        relativePath: "设定集/人物/林照.md",
+        relativePath: "设定集/港城设定.md",
         content: "# 林照\n\n旧版设定。\n",
       })
       await invoke(harness, "workspace.save", {
         ...base,
-        relativePath: "设定集/人物/林照.md",
+        relativePath: "设定集/港城设定.md",
         content: "# 林照\n\n当前真相。\n",
       })
 
       const listed = await invoke<SettingsLineageListResult>(harness, "settings.lineage.list", {
         ...base,
-        relativePath: "设定集/人物/林照.md",
+        relativePath: "设定集/港城设定.md",
       })
       expect(listed.entries.length).toBeGreaterThanOrEqual(2)
 

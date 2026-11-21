@@ -14,7 +14,6 @@ import {
   initialCreativeSetupState,
   markCreativeSetupWritten,
   openCreativeSetupQuestion,
-  serializeProtagonistCreativeSetupMarkdown,
   type CreativeSetupState,
 } from "../../src/application/chapters/creative-setup-state.js"
 import {
@@ -40,7 +39,7 @@ export const confirmedVolumeStorylineFixture = Object.freeze({
     opening: "雨夜里，主角在旧站台发现失踪者留下的信。",
     climaxes: "追查信件时遭到阻拦，主角找到失踪者的真正去向。",
     ending: "主角解开旧站台的疑案，带着新的线索启程。",
-    subplots: "无支线",
+    subplots: "第二章前救下矿友；第四章矿友协助找回信物；第七章两人分别。",
   }),
   storylineConfirmedAtMs: 1,
 }) satisfies Pick<VolumePlanningState, "storyline" | "storylineConfirmedAtMs">
@@ -50,8 +49,16 @@ export type ChapterHarness = Readonly<{
   workspaceRootRef: string
   applicationDataRoot: string
   projectId: string
+  workspace: BackendContainerType["workspace"]
   container: BackendContainerType
   facade: BackendFacade
+}>
+
+export type VolumePlanningHarness = Readonly<{
+  workspaceRootRef: string
+  applicationDataRoot: string
+  projectId: string
+  workspace: BackendContainerType["workspace"]
 }>
 
 export async function openChapterHarness(
@@ -103,16 +110,42 @@ export async function openChapterHarness(
       database.close()
     }
   }
-  const harness = { root, workspaceRootRef, applicationDataRoot, projectId, container, facade }
+  const harness = { root, workspaceRootRef, applicationDataRoot, projectId, workspace: container.workspace, container, facade }
   if (options?.creativeSetupReady !== false) await seedCreativeSetup(harness)
   return harness
 }
 
-async function saveFixtureMarkdown(harness: ChapterHarness, path: string, markdown: string): Promise<string> {
-  await harness.container.workspace.saveUserMarkdown(harness.workspaceRootRef, path, markdown)
-  const saved = await harness.container.workspace.readMarkdown(harness.workspaceRootRef, path)
+async function saveFixtureMarkdown(harness: VolumePlanningHarness, path: string, markdown: string): Promise<string> {
+  await harness.workspace.saveUserMarkdown(harness.workspaceRootRef, path, markdown)
+  const saved = await harness.workspace.readMarkdown(harness.workspaceRootRef, path)
   if (digest(saved) !== digest(markdown)) throw new Error(`Fixture Markdown readback failed: ${path}`)
   return saved
+}
+
+async function seedVolumeCreativeSetup(
+  harness: VolumePlanningHarness,
+  volumeFolderName: string,
+  repository: SqliteCreativeSetupRepository,
+): Promise<void> {
+  const scope = `volume:${volumeFolderName}`
+  if ((await repository.find(harness.projectId, scope))?.status === "ready") return
+
+  const story = confirmedVolumeStorylineFixture.storyline
+  const volume = await answerFixtureQuestions(repository, harness.projectId, scope,
+    [story.opening, story.climaxes, story.ending, story.subplots])
+  const volumePath = `大纲/${volumeFolderName}.批量计划.md`
+  const volumeMarkdown = await saveFixtureMarkdown(harness, volumePath, serializeVolumePlanningState({
+    volumeFolderName,
+    startSequence: 1,
+    targetChapterCount: 0,
+    targetWordCount: 0,
+    synopsisWriteCount: 0,
+    outlineWriteCount: 0,
+    ...confirmedVolumeStorylineFixture,
+  }))
+  await repository.save(harness.projectId, markCreativeSetupWritten(volume, {
+    path: volumePath, digest: digest(volumeMarkdown), now: Date.now(),
+  }))
 }
 
 async function answerFixtureQuestions(
@@ -142,9 +175,18 @@ async function seedCreativeSetup(harness: ChapterHarness): Promise<void> {
       "找到失踪的故友并查明真相", "姓名林烬", "无",
     ])
     const protagonistPath = "设定集/人物/主角.json"
-    const protagonistMarkdown = await harness.container.workspace.updateCharacter!(harness.workspaceRootRef, {
+    const characterFields: readonly [string, string][] = [
+      ["性格爱好", "personality"], ["样貌", "appearance"], ["年龄", "age"],
+      ["身世背景", "background"], ["目标", "goal"], ["其他设定", "other"], ["备注", "remarks"],
+    ]
+    const characterOperations = characterFields.map(([field, key]) => {
+      const value = protagonist.answers[key]
+      if (value === undefined) throw new Error(`Missing protagonist fixture answer: ${key}`)
+      return { op: "set" as const, field, value }
+    })
+    const protagonistMarkdown = await harness.container.workspace.updateCharacter(harness.workspaceRootRef, {
       relativePath: protagonistPath, mode: "create", operations: [
-        ...[["性格爱好", "personality"], ["样貌", "appearance"], ["年龄", "age"], ["身世背景", "background"], ["目标", "goal"], ["其他设定", "other"], ["备注", "remarks"]].map(([field, key]) => ({ op: "set" as const, field: field!, value: protagonist.answers[key!]! })),
+        ...characterOperations,
         { op: "set", field: "姓名", value: "林烬" },
         { op: "set", field: "AI补充设定", value: "林烬善于辨认笔迹，与失踪的故友自幼相识。" },
       ],
@@ -153,28 +195,20 @@ async function seedCreativeSetup(harness: ChapterHarness): Promise<void> {
       path: protagonistPath, digest: digest(protagonistMarkdown), now: Date.now(),
     }))
 
-    const story = confirmedVolumeStorylineFixture.storyline
-    const volume = await answerFixtureQuestions(repository, harness.projectId, `volume:${DEFAULT_VOLUME_FOLDER_NAME}`,
-      [story.opening, story.climaxes, story.ending, story.subplots])
-    const volumePath = `大纲/${DEFAULT_VOLUME_FOLDER_NAME}.批量计划.md`
-    const volumeMarkdown = await saveFixtureMarkdown(harness, volumePath, serializeVolumePlanningState({
-      volumeFolderName: DEFAULT_VOLUME_FOLDER_NAME,
-      startSequence: 1,
-      targetChapterCount: 0,
-      targetWordCount: 0,
-      synopsisWriteCount: 0,
-      outlineWriteCount: 0,
-      ...confirmedVolumeStorylineFixture,
-    }))
-    await repository.save(harness.projectId, markCreativeSetupWritten(volume, {
-      path: volumePath, digest: digest(volumeMarkdown), now: Date.now(),
-    }))
+    await seedVolumeCreativeSetup(harness, DEFAULT_VOLUME_FOLDER_NAME, repository)
   } finally {
     await database.destroy()
   }
 }
 
-export async function prepareVolumePlanning(harness: ChapterHarness, volumeFolderName: string = DEFAULT_VOLUME_FOLDER_NAME): Promise<void> {
+export async function prepareVolumePlanning(harness: VolumePlanningHarness, volumeFolderName: string = DEFAULT_VOLUME_FOLDER_NAME): Promise<void> {
+  const database = await openProjectDatabase(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+  try {
+    await seedVolumeCreativeSetup(harness, volumeFolderName, new SqliteCreativeSetupRepository(database))
+  } finally {
+    await database.destroy()
+  }
+
   let plan: VolumePlanningState = {
     volumeFolderName, startSequence: 1, targetChapterCount: 8, targetWordCount: 24000,
     synopsisWriteCount: 0, outlineWriteCount: 0, ...confirmedVolumeStorylineFixture,

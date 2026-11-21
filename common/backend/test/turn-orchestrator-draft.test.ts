@@ -35,6 +35,17 @@ import {
   type TurnOrchestratorDependencies,
 } from "../src/application/index.js"
 import { ProjectRuntime } from "../src/bootstrap/project-runtime.js"
+import {
+  answerCreativeSetupQuestion,
+  initialCreativeSetupState,
+  markCreativeSetupWritten,
+  openCreativeSetupQuestion,
+} from "../src/application/chapters/creative-setup-state.js"
+import { digest } from "../src/core/identity/digest.js"
+import { deriveOutlineMarkdownPath, deriveSynopsisMarkdownPath } from "../src/core/chapters/synopsis-path.js"
+import { WORK_STYLE_RULE_PATH } from "../src/core/workspace/work-style-gate.js"
+import { SqliteCreativeSetupRepository } from "../src/infrastructure/sqlite/repositories/sqlite-creative-setup-repository.js"
+import { prepareVolumePlanning } from "./helpers/chapter-coordination-harness.js"
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -193,6 +204,86 @@ describe("TurnOrchestrator draft output", () => {
   it("connects runtime drafts to a revision chain and reuses the version after a lost completion", async () => {
     const fixture = await createFixture()
     const focusedInput = { ...fixture.input, chapterSequence: 1 }
+    const styleMarkdown = [
+      "# 作品风格",
+      "## 1. 语体笔风\n主锚：表现输出/笔风规则/仙侠.md。语气硬朗冷峻，描写密度适中，感官偏视觉。",
+      "## 2. 时代科技生活\n冷兵器与符箓并行；货币用灵石；机构写宗门与城卫，不写现代警察。",
+      "## 3. 规则称谓能力\n战力用境界名落笔；技能先效果后名称；称谓按辈分与阵营。",
+      "## 4. 命名\n人名双/三音节错开姓与偏旁；常同框禁止同姓墙。正例：林烬、沈砚。反例：凌寒与凌霜同批不合格。势力正派用宗门，商会用阁。",
+      "## 5. 角色声口\n主角短句、少形容词，示例：「先活下来再说。」配角谋士长句带停顿，示例：「若依我看……此局已半输。」",
+      "## 6. 尺度意象章钩\n暴力写后果不写虐杀展览；章末钩落在选择代价。",
+      "## 7. 人称指称\n第三人称限知，贴林烬；正文以姓名为主。示例句：林烬抬眼，没接话。",
+      "## 8. 句子与对话\n句长偏短；对白白话口语；禁对白乒乓，群戏按受损者到权力高位分层。正例：「滚。」反例：全员使用同一书面腔。",
+    ].join("\n\n")
+    await fixture.dependencies.workspace.saveUserMarkdown(fixture.input.workspaceRootRef, WORK_STYLE_RULE_PATH, styleMarkdown)
+    await fixture.database.insertInto("work_style_gate_states").values({
+      project_id: fixture.input.projectId,
+      status: "ready",
+      selected_prose_style_path: "表现输出/笔风规则/仙侠.md",
+      novel_major_category_rule_path: "表现输出/小说大类规则/奇幻.md",
+      novel_subcategory_rule_path: "表现输出/小说次大类规则/仙侠.md",
+      style_digest: digest(styleMarkdown),
+      updated_at_ms: Date.now(),
+    }).executeTakeFirstOrThrow()
+    const creativeSetup = new SqliteCreativeSetupRepository(fixture.database)
+    const answers = [
+      "谨慎坚韧，喜欢追查旧事",
+      "黑发灰眼，左手有旧伤",
+      "二十七岁",
+      "在旧站台长大的旅人，故友突然失踪",
+      "找到失踪的故友并查明真相",
+      "姓名林烬",
+      "无",
+    ]
+    let protagonist = initialCreativeSetupState("protagonist", Date.now())
+    for (const answer of answers) {
+      const questionId = randomUUID()
+      protagonist = openCreativeSetupQuestion(protagonist, questionId, Date.now())
+      protagonist = answerCreativeSetupQuestion(protagonist, { questionId, answer, now: Date.now() })
+    }
+    const protagonistPath = "设定集/人物/主角.json"
+    const characterFields: readonly [string, string][] = [
+      ["性格爱好", "personality"], ["样貌", "appearance"], ["年龄", "age"],
+      ["身世背景", "background"], ["目标", "goal"], ["其他设定", "other"], ["备注", "remarks"],
+    ]
+    const characterOperations = characterFields.map(([field, key]) => {
+      const value = protagonist.answers[key]
+      if (value === undefined) throw new Error(`Missing protagonist fixture answer: ${key}`)
+      return { op: "set" as const, field, value }
+    })
+    const protagonistMarkdown = await fixture.dependencies.workspace.updateCharacter(fixture.input.workspaceRootRef, {
+      relativePath: protagonistPath,
+      mode: "create",
+      operations: [
+        ...characterOperations,
+        { op: "set", field: "姓名", value: "林烬" },
+        { op: "set", field: "AI补充设定", value: "林烬善于辨认笔迹，与失踪的故友自幼相识。" },
+      ],
+    })
+    await creativeSetup.save(fixture.input.projectId, markCreativeSetupWritten(protagonist, {
+      path: protagonistPath,
+      digest: digest(protagonistMarkdown),
+      now: Date.now(),
+    }))
+    await prepareVolumePlanning({
+      workspaceRootRef: fixture.input.workspaceRootRef,
+      applicationDataRoot: fixture.applicationDataRoot,
+      projectId: fixture.input.projectId,
+      workspace: fixture.dependencies.workspace,
+    })
+    const synopsisPath = deriveSynopsisMarkdownPath(1, "运行时草稿恢复")
+    const outlinePath = deriveOutlineMarkdownPath(1, "运行时草稿恢复")
+    await fixture.dependencies.workspace.saveSynopsisMarkdown(
+      fixture.input.workspaceRootRef,
+      synopsisPath,
+      "# 第一章 运行时草稿恢复 剧情梗概\n\n主角在旧站台发现线索，必须决定是否继续追查失踪者。\n",
+    )
+    await fixture.dependencies.workspace.saveSynopsisMarkdown(
+      fixture.input.workspaceRootRef,
+      outlinePath,
+      "# 第一章 运行时草稿恢复 剧情细纲\n\n人物准备：林烬追查故友失踪。\n分场：发现线索、决定继续调查。\n",
+    )
+    fixture.captureWorkspaceBaseline()
     const runtime = await ProjectRuntime.open(
       fixture.input.projectId, fixture.input.workspaceRootRef, fixture.input.internalStore,
       fixture.internalStore, fixture.promptRoot,
@@ -230,7 +321,8 @@ async function createFixture() {
     return Promise.resolve()
   })
   const workspaceRootRef = join(root, "workspace")
-  const internalStore = new NodeInternalStoreAdapter(join(root, "application-data"))
+  const applicationDataRoot = join(root, "application-data")
+  const internalStore = new NodeInternalStoreAdapter(applicationDataRoot)
   const workspace = new NodeWorkspaceAdapter()
   const registry = await openRegistryDatabase(join(root, "registry.sqlite"))
   cleanups.push(() => registry.destroy())
@@ -250,7 +342,7 @@ async function createFixture() {
   })
   const database = await openProjectDatabase(created.internalStore.projectDatabaseRef)
   cleanups.push(() => database.destroy())
-  const initialFiles = readdirSync(workspaceRootRef, { recursive: true })
+  let initialFiles = readdirSync(workspaceRootRef, { recursive: true })
   const promptRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
   const fake = new FakeAiModelAdapter(randomUUID)
   const dependencies: TurnOrchestratorDependencies = {
@@ -265,7 +357,10 @@ async function createFixture() {
     idAllocator: new SqliteProjectIdAllocator(database), createId: randomUUID, now: Date.now,
   }
   return {
-    dependencies, database, promptRoot, internalStore,
+    dependencies, database, promptRoot, internalStore, root, applicationDataRoot,
+    captureWorkspaceBaseline() {
+      initialFiles = readdirSync(workspaceRootRef, { recursive: true })
+    },
     input: {
       outputMode: "draft" as const, projectId, workspaceRootRef, internalStore: created.internalStore,
       userInput: "Continue the focused chapter at the station.", chapterSequence: 7, taskId: randomUUID(),

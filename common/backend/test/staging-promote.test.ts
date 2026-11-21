@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 import type { SynopsisConversationSendResult, SynopsisStagingPromoteListResult } from "@starseafolio/contracts"
 
-import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { openChapterHarness, prepareVolumePlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 const temporaryRoots: string[] = []
 
@@ -21,6 +21,7 @@ async function withHarness(run: (harness: ChapterHarness) => Promise<void>): Pro
   const harness = await openChapterHarness("Staging Promote Test")
   temporaryRoots.push(harness.root)
   try {
+    await prepareVolumePlanning(harness)
     await run(harness)
   } finally {
     await harness.container.close()
@@ -49,6 +50,7 @@ describe("synopsis staging promote", () => {
       const prepared = await invoke<SynopsisConversationSendResult>(harness, "synopsis.conversation.send", {
         ...base,
         message: "确认落盘到设定集与目标",
+        writePermissionMode: "settings_write_confirm",
       })
       expect(prepared.pendingStagingPromotes?.length).toBeGreaterThan(0)
       const proposalId = prepared.pendingStagingPromotes?.[0]?.proposalId

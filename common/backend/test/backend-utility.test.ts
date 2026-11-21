@@ -15,6 +15,16 @@ import {
 import { afterEach, describe, expect, it } from "vitest"
 
 import {
+  answerCreativeSetupQuestion,
+  initialCreativeSetupState,
+  markCreativeSetupWritten,
+  openCreativeSetupQuestion,
+} from "../src/application/chapters/creative-setup-state.js"
+import { digest } from "../src/core/identity/digest.js"
+import { assessWorkStyleMarkdown, WORK_STYLE_RULE_PATH } from "../src/core/workspace/work-style-gate.js"
+import { openProjectDatabase } from "../src/infrastructure/sqlite/sqlite-database.js"
+import { SqliteCreativeSetupRepository } from "../src/infrastructure/sqlite/repositories/sqlite-creative-setup-repository.js"
+import {
   BackendContainer,
   BackendFacade,
   FakeAiModelAdapter,
@@ -22,9 +32,88 @@ import {
   UnavailableAiModelAdapter,
   type BackendMessagePort,
 } from "../src/index.js"
+import { prepareChapterPlanning, prepareVolumePlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 const temporaryDirectories: string[] = []
 const openFacades: BackendFacade[] = []
+
+async function prepareTurnPrerequisites(harness: Omit<ChapterHarness, "workspace">): Promise<void> {
+  const completeHarness: ChapterHarness = { ...harness, workspace: harness.container.workspace }
+  const styleMarkdown = [
+    "# 作品风格",
+    "## 1. 语体笔风\n主锚：表现输出/笔风规则/仙侠.md。语气硬朗冷峻，描写密度适中，感官偏视觉。",
+    "## 2. 时代科技生活\n冷兵器与符箓并行；货币用灵石；机构写宗门与城卫，不写现代警察。",
+    "## 3. 规则称谓能力\n战力用境界名落笔；技能先效果后名称；称谓按辈分与阵营。",
+    "## 4. 命名\n人名双/三音节错开姓与偏旁；常同框禁止同姓墙。正例：林烬、沈砚。反例：凌寒与凌霜同批不合格。势力正派用宗门，商会用阁。",
+    "## 5. 角色声口\n主角短句、少形容词，示例：「先活下来再说。」配角谋士长句带停顿，示例：「若依我看……此局已半输。」",
+    "## 6. 尺度意象章钩\n暴力写后果不写虐杀展览；章末钩落在选择代价。",
+    "## 7. 人称指称\n第三人称限知，贴林烬；正文以姓名为主。示例句：林烬抬眼，没接话。",
+    "## 8. 句子与对话\n句长偏短；对白白话口语；禁对白乒乓，群戏按受损者到权力高位分层。正例：「滚。」反例：全员使用同一书面腔。",
+  ].join("\n\n")
+  const styleAssessment = assessWorkStyleMarkdown(styleMarkdown)
+  if (!styleAssessment.complete) throw new Error("Test work style fixture is incomplete")
+  await harness.container.workspace.saveUserMarkdown(harness.workspaceRootRef, WORK_STYLE_RULE_PATH, styleMarkdown)
+
+  const database = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+  try {
+    database.prepare(`
+      INSERT INTO work_style_gate_states (
+        project_id, status, selected_prose_style_path, style_digest, updated_at_ms
+      ) VALUES (?, 'ready', ?, ?, ?)
+    `).run(harness.projectId, "表现输出/笔风规则/仙侠.md", digest(styleMarkdown), Date.now())
+  } finally {
+    database.close()
+  }
+
+  const projectDatabase = await openProjectDatabase(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+  try {
+    const repository = new SqliteCreativeSetupRepository(projectDatabase)
+    const answers = [
+      "谨慎坚韧，喜欢追查旧事",
+      "黑发灰眼，左手有旧伤",
+      "二十七岁",
+      "在旧站台长大的旅人，故友突然失踪",
+      "找到失踪的故友并查明真相",
+      "姓名林烬",
+      "无",
+    ]
+    let protagonist = initialCreativeSetupState("protagonist", Date.now())
+    for (const answer of answers) {
+      const questionId = randomUUID()
+      protagonist = openCreativeSetupQuestion(protagonist, questionId, Date.now())
+      protagonist = answerCreativeSetupQuestion(protagonist, { questionId, answer, now: Date.now() })
+    }
+    const protagonistPath = "设定集/人物/主角.json"
+    const characterFields: readonly [string, string][] = [
+      ["性格爱好", "personality"], ["样貌", "appearance"], ["年龄", "age"],
+      ["身世背景", "background"], ["目标", "goal"], ["其他设定", "other"], ["备注", "remarks"],
+    ]
+    const characterOperations = characterFields.map(([field, key]) => {
+      const value = protagonist.answers[key]
+      if (value === undefined) throw new Error(`Missing protagonist fixture answer: ${key}`)
+      return { op: "set" as const, field, value }
+    })
+    const protagonistMarkdown = await harness.container.workspace.updateCharacter(harness.workspaceRootRef, {
+      relativePath: protagonistPath,
+      mode: "create",
+      operations: [
+        ...characterOperations,
+        { op: "set", field: "姓名", value: "林烬" },
+        { op: "set", field: "AI补充设定", value: "林烬善于辨认笔迹，与失踪的故友自幼相识。" },
+      ],
+    })
+    await repository.save(harness.projectId, markCreativeSetupWritten(protagonist, {
+      path: protagonistPath,
+      digest: digest(protagonistMarkdown),
+      now: Date.now(),
+    }))
+  } finally {
+    await projectDatabase.destroy()
+  }
+
+  await prepareVolumePlanning(completeHarness)
+  await prepareChapterPlanning(completeHarness)
+}
 
 afterEach(async () => {
   for (const facade of openFacades.splice(0)) {
@@ -41,11 +130,12 @@ describe("backend utility runtime", () => {
     temporaryDirectories.push(root)
     const applicationDataRoot = join(root, "application-data")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const firstFacade = new BackendFacade(await BackendContainer.open({
+    const firstContainer = await BackendContainer.open({
       applicationDataRoot,
       promptPackageRoot,
       model: new FakeAiModelAdapter(randomUUID),
-    }))
+    })
+    const firstFacade = new BackendFacade(firstContainer)
     const saved = await firstFacade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -102,13 +192,15 @@ describe("backend utility runtime", () => {
   it("rejects a formal turn when DeepSeek is not configured", async () => {
     const root = mkdtempSync(join(tmpdir(), "worldseed-no-model-"))
     temporaryDirectories.push(root)
+    const applicationDataRoot = join(root, "application-data")
     const workspaceRootRef = join(root, "workspace")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const facade = new BackendFacade(await BackendContainer.open({
-      applicationDataRoot: join(root, "application-data"),
+    const container = await BackendContainer.open({
+      applicationDataRoot,
       promptPackageRoot,
       model: new UnavailableAiModelAdapter(),
-    }))
+    })
+    const facade = new BackendFacade(container)
     openFacades.push(facade)
     const projectId = randomUUID()
 
@@ -118,6 +210,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "No Model Test", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -136,13 +229,15 @@ describe("backend utility runtime", () => {
   it("creates a project, runs a turn asynchronously, and serves the same protocol over MessagePort", async () => {
     const root = mkdtempSync(join(tmpdir(), "worldseed-utility-"))
     temporaryDirectories.push(root)
+    const applicationDataRoot = join(root, "application-data")
     const workspaceRootRef = join(root, "workspace")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const facade = new BackendFacade(await BackendContainer.open({
-      applicationDataRoot: join(root, "application-data"),
+    const container = await BackendContainer.open({
+      applicationDataRoot,
       promptPackageRoot,
       model: new FakeAiModelAdapter(randomUUID),
-    }))
+    })
+    const facade = new BackendFacade(container)
     openFacades.push(facade)
     const projectId = randomUUID()
 
@@ -182,6 +277,7 @@ describe("backend utility runtime", () => {
     })
     expect(read.ok && read.data).toMatchObject({ content: "# 测试设定\n" })
 
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -406,13 +502,15 @@ describe("backend utility runtime", () => {
   it("resumes an interrupted turn through the backend protocol", async () => {
     const root = mkdtempSync(join(tmpdir(), "worldseed-resume-"))
     temporaryDirectories.push(root)
+    const applicationDataRoot = join(root, "application-data")
     const workspaceRootRef = join(root, "workspace")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const facade = new BackendFacade(await BackendContainer.open({
-      applicationDataRoot: join(root, "application-data"),
+    const container = await BackendContainer.open({
+      applicationDataRoot,
       promptPackageRoot,
       model: new FakeAiModelAdapter(randomUUID),
-    }))
+    })
+    const facade = new BackendFacade(container)
     openFacades.push(facade)
     const projectId = randomUUID()
 
@@ -422,6 +520,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "Resume Test", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -461,13 +560,15 @@ describe("backend utility runtime", () => {
   it("commits a user chapter revision without mutating the original source", async () => {
     const root = mkdtempSync(join(tmpdir(), "worldseed-chapter-revision-"))
     temporaryDirectories.push(root)
+    const applicationDataRoot = join(root, "application-data")
     const workspaceRootRef = join(root, "workspace")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const facade = new BackendFacade(await BackendContainer.open({
-      applicationDataRoot: join(root, "application-data"),
+    const container = await BackendContainer.open({
+      applicationDataRoot,
       promptPackageRoot,
       model: new FakeAiModelAdapter(randomUUID),
-    }), { automaticEvolutionEnabled: false })
+    })
+    const facade = new BackendFacade(container, { automaticEvolutionEnabled: false })
     openFacades.push(facade)
     const projectId = randomUUID()
 
@@ -477,6 +578,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "Chapter Revision", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -565,7 +667,7 @@ describe("backend utility runtime", () => {
     expect((current.data as { content: string }).content).toBe(revisedContent)
     expect(current.data).toMatchObject({
       heading: "第一章 灯火新生",
-      publishPath: published.publishPath.replace("第一章 世界种子.md", "第一章 灯火新生.md"),
+      publishPath: published.publishPath.replace(/[^/]+$/u, "第一章 灯火新生.md"),
     })
     expect((current.data as { sourceId: string }).sourceId).not.toBe(chapter.sourceId)
     expect(existsSync(join(workspaceRootRef, published.publishPath))).toBe(false)
@@ -666,7 +768,7 @@ describe("backend utility runtime", () => {
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
     const fake = new FakeAiModelAdapter(randomUUID)
     let failRevisionGraph = false
-    const facade = new BackendFacade(await BackendContainer.open({
+    const container = await BackendContainer.open({
       applicationDataRoot,
       promptPackageRoot,
       model: {
@@ -692,7 +794,8 @@ describe("backend utility runtime", () => {
           return execution
         },
       },
-    }), { automaticEvolutionEnabled: false })
+    })
+    const facade = new BackendFacade(container, { automaticEvolutionEnabled: false })
     openFacades.push(facade)
     const projectId = randomUUID()
     await facade.handle({
@@ -701,6 +804,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "Chapter Revision Recovery", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -810,12 +914,14 @@ describe("backend utility runtime", () => {
     const root = mkdtempSync(join(tmpdir(), "worldseed-runtime-metrics-"))
     temporaryDirectories.push(root)
     const workspaceRootRef = join(root, "workspace")
+    const applicationDataRoot = join(root, "application-data")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const facade = new BackendFacade(await BackendContainer.open({
-      applicationDataRoot: join(root, "application-data"),
+    const container = await BackendContainer.open({
+      applicationDataRoot,
       promptPackageRoot,
       model: new FakeAiModelAdapter(randomUUID),
-    }))
+    })
+    const facade = new BackendFacade(container)
     openFacades.push(facade)
     const projectId = randomUUID()
 
@@ -825,6 +931,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "Runtime Metrics", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -884,17 +991,22 @@ describe("backend utility runtime", () => {
     const applicationDataRoot = join(root, "application-data")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
     const projectId = randomUUID()
-    const firstFacade = new BackendFacade(await BackendContainer.open({
+    const firstContainer = await BackendContainer.open({
       applicationDataRoot,
       promptPackageRoot,
       model: new FakeAiModelAdapter(randomUUID),
-    }))
+    })
+    const firstFacade = new BackendFacade(firstContainer)
 
     await firstFacade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
       method: "project.create",
       payload: { projectId, displayName: "Rehydrate Test", workspaceRootRef },
+    })
+    await prepareTurnPrerequisites({
+      root, applicationDataRoot, workspaceRootRef, projectId,
+      container: firstContainer, facade: firstFacade,
     })
     const started = await firstFacade.handle({
       protocolVersion: PROTOCOL_VERSION,
@@ -956,7 +1068,7 @@ describe("backend utility runtime", () => {
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
     const projectId = randomUUID()
     const fake = new FakeAiModelAdapter(randomUUID)
-    const firstFacade = new BackendFacade(await BackendContainer.open({
+    const firstContainer = await BackendContainer.open({
       applicationDataRoot,
       promptPackageRoot,
       model: {
@@ -966,7 +1078,8 @@ describe("backend utility runtime", () => {
           return fake.execute(request)
         },
       },
-    }))
+    })
+    const firstFacade = new BackendFacade(firstContainer)
 
     await firstFacade.handle({
       protocolVersion: PROTOCOL_VERSION,
@@ -1018,7 +1131,7 @@ describe("backend utility runtime", () => {
     const projectId = randomUUID()
     const fake = new FakeAiModelAdapter(randomUUID)
     const modelGate = new Promise<void>(() => {})
-    const firstFacade = new BackendFacade(await BackendContainer.open({
+    const firstContainer = await BackendContainer.open({
       applicationDataRoot,
       promptPackageRoot,
       model: {
@@ -1028,13 +1141,18 @@ describe("backend utility runtime", () => {
           return fake.execute(request)
         },
       },
-    }))
+    })
+    const firstFacade = new BackendFacade(firstContainer)
 
     await firstFacade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
       method: "project.create",
       payload: { projectId, displayName: "Stale Running Test", workspaceRootRef },
+    })
+    await prepareTurnPrerequisites({
+      root, applicationDataRoot, workspaceRootRef, projectId,
+      container: firstContainer, facade: firstFacade,
     })
     const started = await firstFacade.handle({
       protocolVersion: PROTOCOL_VERSION,
@@ -1093,8 +1211,9 @@ describe("backend utility runtime", () => {
     const fake = new FakeAiModelAdapter(randomUUID)
     let releaseModel: (() => void) | undefined
     const modelGate = new Promise<void>((resolve) => { releaseModel = resolve })
-    const facade = new BackendFacade(await BackendContainer.open({
-      applicationDataRoot: join(root, "application-data"),
+    const applicationDataRoot = join(root, "application-data")
+    const container = await BackendContainer.open({
+      applicationDataRoot,
       promptPackageRoot,
       model: {
         info: fake.info,
@@ -1103,7 +1222,8 @@ describe("backend utility runtime", () => {
           return fake.execute(request)
         },
       },
-    }))
+    })
+    const facade = new BackendFacade(container)
     openFacades.push(facade)
     const projectId = randomUUID()
     await facade.handle({
@@ -1112,6 +1232,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "Status Race", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -1147,8 +1268,9 @@ describe("backend utility runtime", () => {
     let observedSignal: AbortSignal | undefined
     let modelCalls = 0
     const modelGate = new Promise<void>((resolve) => { releaseModel = resolve })
-    const facade = new BackendFacade(await BackendContainer.open({
-      applicationDataRoot: join(root, "application-data"),
+    const applicationDataRoot = join(root, "application-data")
+    const container = await BackendContainer.open({
+      applicationDataRoot,
       promptPackageRoot,
       model: {
         info: fake.info,
@@ -1159,7 +1281,8 @@ describe("backend utility runtime", () => {
           return fake.execute(request)
         },
       },
-    }))
+    })
+    const facade = new BackendFacade(container)
     openFacades.push(facade)
     const projectId = randomUUID()
     await facade.handle({
@@ -1168,6 +1291,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "Cancel Running", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -1204,8 +1328,9 @@ describe("backend utility runtime", () => {
     let releaseModel: (() => void) | undefined
     let observedSignal: AbortSignal | undefined
     const modelGate = new Promise<void>((resolve) => { releaseModel = resolve })
-    const facade = new BackendFacade(await BackendContainer.open({
-      applicationDataRoot: join(root, "application-data"),
+    const applicationDataRoot = join(root, "application-data")
+    const container = await BackendContainer.open({
+      applicationDataRoot,
       promptPackageRoot,
       model: {
         info: fake.info,
@@ -1215,7 +1340,8 @@ describe("backend utility runtime", () => {
           return fake.execute(request, options)
         },
       },
-    }))
+    })
+    const facade = new BackendFacade(container)
     openFacades.push(facade)
     const projectId = randomUUID()
     await facade.handle({
@@ -1224,6 +1350,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "Pause Running", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -1263,11 +1390,12 @@ describe("backend utility runtime", () => {
     const applicationDataRoot = join(root, "application-data")
     const workspaceRootRef = join(root, "workspace")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const facade = new BackendFacade(await BackendContainer.open({
+    const container = await BackendContainer.open({
       applicationDataRoot,
       promptPackageRoot,
       model: new FakeAiModelAdapter(randomUUID),
-    }))
+    })
+    const facade = new BackendFacade(container)
     openFacades.push(facade)
     const projectId = randomUUID()
     await facade.handle({
@@ -1276,6 +1404,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "Automatic Evolution", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
@@ -1308,11 +1437,12 @@ describe("backend utility runtime", () => {
     const applicationDataRoot = join(root, "application-data")
     const workspaceRootRef = join(root, "workspace")
     const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const facade = new BackendFacade(await BackendContainer.open({
+    const container = await BackendContainer.open({
       applicationDataRoot,
       promptPackageRoot,
       model: new FakeAiModelAdapter(randomUUID),
-    }), { automaticEvolutionEnabled: false })
+    })
+    const facade = new BackendFacade(container, { automaticEvolutionEnabled: false })
     openFacades.push(facade)
     const projectId = randomUUID()
     await facade.handle({
@@ -1321,6 +1451,7 @@ describe("backend utility runtime", () => {
       method: "project.create",
       payload: { projectId, displayName: "No Automatic Evolution", workspaceRootRef },
     })
+    await prepareTurnPrerequisites({ root, applicationDataRoot, workspaceRootRef, projectId, container, facade })
     const started = await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),

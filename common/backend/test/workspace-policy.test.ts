@@ -93,10 +93,10 @@ describe("workspace policy", () => {
       .toThrow(WorkspacePolicyError)
   })
 
-  it("allows creating user markdown and blocks platform / immutable deletes", () => {
-    expect(assertUserCanCreateMarkdown("设定集/人物/顾青衡.md")).toBe("设定集/人物/顾青衡.md")
+  it("blocks direct character-file creation and platform / immutable deletes", () => {
+    expect(() => assertUserCanCreateMarkdown("设定集/人物/顾青衡.md")).toThrow(/人物字段接口/)
     expect(assertUserCanCreateMarkdown("表现输出/本作品描写/压抑氛围.md")).toBe("表现输出/本作品描写/压抑氛围.md")
-    expect(assertUserCanDeleteMarkdown("设定集/人物/顾青衡.md")).toBe("设定集/人物/顾青衡.md")
+    expect(() => assertUserCanDeleteMarkdown("设定集/人物/顾青衡.md")).toThrow(/人物字段接口/)
     expect(() => assertUserCanDeleteMarkdown("设定集/readme.md")).toThrow(/固定脚手架/)
     expect(() => assertUserCanDeleteMarkdown("世界推演规则/基础规则/base-rules.md")).toThrow(/平台只读/)
     expect(() => assertUserCanCreateMarkdown("世界推演规则/基础规则/extra.md")).toThrow(/平台只读/)
@@ -107,7 +107,7 @@ describe("workspace policy", () => {
 
   it("allows creating folders under writable roots and volume folders under chapters", () => {
     expect(assertUserCanCreateDirectory("表现输出/笔风规则/自定义")).toBe("表现输出/笔风规则/自定义")
-    expect(assertUserCanCreateDirectory("设定集/人物")).toBe("设定集/人物")
+    expect(() => assertUserCanCreateDirectory("设定集/人物")).toThrow(/固定脚手架目录/)
     expect(assertUserCanCreateDirectory("章节正文/第一卷 潮水退去时")).toBe("章节正文/第一卷 潮水退去时")
     expect(() => assertUserCanCreateDirectory("设定集")).toThrow(/固定脚手架/)
     expect(() => assertUserCanCreateDirectory("暂存区/子目录")).toThrow(/不允许/)

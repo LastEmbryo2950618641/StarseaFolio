@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { existsSync, rmSync } from "node:fs"
 import { join } from "node:path"
-import { fileURLToPath } from "node:url"
 
 import Database from "better-sqlite3"
 import { afterEach, describe, expect, it } from "vitest"
@@ -10,15 +8,14 @@ import { afterEach, describe, expect, it } from "vitest"
 import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 
 import {
-  BackendContainer,
-  BackendFacade,
   ChapterContextResolver,
   NodeInternalStoreAdapter,
   SqliteDocumentRepository,
   SqliteTurnPersistence,
   openProjectDatabase,
 } from "../src/index.js"
-import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
+import type { BackendFacade } from "../src/index.js"
+import { openChapterHarness, prepareChapterPlanning } from "./helpers/chapter-coordination-harness.js"
 
 const temporaryDirectories: string[] = []
 
@@ -30,27 +27,20 @@ afterEach(() => {
 
 describe("chapter coordination trace", () => {
   it("tracks index, revision metadata, hydration supersession, and graph-sync blocking", async () => {
-    const root = mkdtempSync(join(tmpdir(), "worldseed-chapter-trace-"))
-    temporaryDirectories.push(root)
-    const workspaceRootRef = join(root, "workspace")
-    const applicationDataRoot = join(root, "application-data")
-    const promptPackageRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
-    const projectId = randomUUID()
-    const container = await BackendContainer.open({
-      applicationDataRoot,
-      promptPackageRoot,
-      model: new FakeAiModelAdapter(randomUUID),
-    })
-    const facade = new BackendFacade(container)
+    const harness = await openChapterHarness("Trace Test")
+    temporaryDirectories.push(harness.root)
+    const { workspaceRootRef, applicationDataRoot, projectId, container, facade } = harness
     try {
+    await prepareChapterPlanning(harness)
+
+    const firstPublicationTaskId = await runTurn(facade, projectId, workspaceRootRef, "雨夜里，旧站台尽头亮起一盏无人认领的灯。", 1)
     await facade.handle({
       protocolVersion: PROTOCOL_VERSION,
       requestId: randomUUID(),
-      method: "project.create",
-      payload: { projectId, displayName: "Trace Test", workspaceRootRef },
+      method: "synopsis.conversation.setFocus",
+      payload: { projectId, workspaceRootRef, chapterSequence: 2, focusKind: "plot_synopsis" },
     })
-
-    const firstPublicationTaskId = await runTurn(facade, projectId, workspaceRootRef, "雨夜里，旧站台尽头亮起一盏无人认领的灯。", 1)
+    await prepareChapterPlanning(harness)
     await runTurn(facade, projectId, workspaceRootRef, "旅人循着灯光走进雾气弥漫的月台。", 2)
 
     const listed = await facade.handle({
@@ -148,6 +138,13 @@ describe("chapter coordination trace", () => {
     })
     expect((resolved.data as { committed: { body: string } }).committed.body).toContain("修订痕迹：灯芯换成了蓝色。")
 
+    await facade.handle({
+      protocolVersion: PROTOCOL_VERSION,
+      requestId: randomUUID(),
+      method: "synopsis.conversation.setFocus",
+      payload: { projectId, workspaceRootRef, chapterSequence: 3, focusKind: "plot_synopsis" },
+    })
+    await prepareChapterPlanning(harness)
     await runTurn(facade, projectId, workspaceRootRef, "第三夜，蓝灯照见了站台尽头被封存的旧信箱。", 3)
 
     const databasePath = join(applicationDataRoot, "projects", projectId, "project.sqlite")
@@ -220,8 +217,8 @@ async function runTurn(
     method: "turn.start",
     payload: { projectId, workspaceRootRef, userInput, chapterSequence },
   })
-  expect(started.ok).toBe(true)
   if (!started.ok) throw new Error(started.error.message)
+  expect(started.ok).toBe(true)
   const taskId = (started.data as { taskId: string }).taskId
   await waitForTask(facade, taskId)
   const status = await facade.handle({

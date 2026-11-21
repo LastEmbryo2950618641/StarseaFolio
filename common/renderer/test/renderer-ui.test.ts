@@ -386,7 +386,7 @@ describe("renderer workbench UI contract", () => {
     expect(html).not.toContain("data-testid=\"creation-desk-jump-latest\"")
   })
 
-  it("collapses thinking, search, and edit stream blocks by default", () => {
+  it("keeps thinking, search, and edit details unmounted while collapsed", () => {
     const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({
       synopsisMessages: [{
         messageId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -418,11 +418,12 @@ describe("renderer workbench UI contract", () => {
     expect(html).toContain("data-testid=\"agent-stream-activity\"")
     expect(html).toContain("思考与工具")
     expect(html).toContain("thinking · run 1 · searched 1 · edited 1")
-    expect(html).toContain("agent-stream-block thinking")
-    expect(html).toContain("agent-stream-block searching")
-    expect(html).toContain("agent-stream-block running")
-    expect(html).toContain("run(&quot;dir /b&quot;)")
-    expect(html).toContain("agent-stream-block editing")
+    expect(html).not.toContain("agent-stream-activity-body")
+    expect(html).not.toContain("先想检索范围。")
+    expect(html).not.toContain("Sakura 词条")
+    expect(html).not.toContain("dir /b")
+    expect(html).not.toContain("已写入梗概")
+    expect(html).toContain("正式输出正文。")
     expect(html).not.toMatch(/agent-stream-activity[^>]*\sopen/)
     expect(html).not.toMatch(/agent-stream-block (?:thinking|searching|running|editing|resulting)[^>]*\sopen/)
   })
@@ -432,8 +433,10 @@ describe("renderer workbench UI contract", () => {
       synopsisBusy: true,
     })))
 
-    expect(html).toContain("深度思考中…")
     expect(html).toMatch(/<details class="agent-stream-activity is-live" data-testid="agent-stream-activity">/)
+    expect(html).toContain("进行中")
+    expect(html).not.toContain("agent-stream-activity-body")
+    expect(html).not.toContain("深度思考中…")
     expect(html).not.toMatch(/agent-stream-activity[^>]*\sopen/)
   })
 
@@ -1157,16 +1160,18 @@ describe("renderer workbench UI contract", () => {
     })).toBe(true)
   })
 
-  it("renders non-chapter Markdown through a read-only aware editor", () => {
+  it("renders non-chapter Markdown in rendered view by default", () => {
     const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({
       selectedPath: "世界推演规则/基础规则/base-rules.md",
       content: "# 基础规则",
       readOnly: true,
     })))
 
-    expect(html).toContain("mock-monaco-editor")
-    expect(html).toContain("data-readonly=\"true\"")
-    expect(html).toContain("# 基础规则")
+    expect(html).toContain('data-testid="md-document-view"')
+    expect(html).toContain('data-mode="render"')
+    expect(html).toContain('data-testid="md-view-mode-source"')
+    expect(html).toContain("<h1>基础规则</h1>")
+    expect(html).not.toContain("mock-monaco-editor")
   })
 
   it("exposes persisted thinking strength and JSON protocol controls per model", () => {
@@ -1192,11 +1197,13 @@ describe("renderer workbench UI contract", () => {
       onSave: vi.fn(),
     }))
 
-    // List view is the default; open detail is covered by control presence in markup when detail mounts.
     expect(html).toContain("模型配置")
+    expect(html).toContain('data-view="list"')
+    expect(html).toContain('data-testid="model-configuration-list"')
     expect(html).toContain("DeepSeek Flash")
-    expect(html).toContain("Chat Completions 协议")
-    expect(html).toContain("Responses 协议")
+    expect(html).toContain("OpenAI 接口形态")
+    expect(html).toContain("Chat Completions")
+    expect(html).toContain("Responses")
     expect(html).toContain("深度思考")
     expect(html).toContain("思考强度")
     expect(html).toContain("value=\"low\"")

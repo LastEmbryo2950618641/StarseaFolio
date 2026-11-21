@@ -8,7 +8,7 @@ import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 import { synopsisDiscussArtifactSchema } from "@starseafolio/prompt-contracts"
 
 import { applySearchReplace } from "../src/application/chapters/markdown-search-replace.js"
-import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { openChapterHarness, prepareVolumePlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 const temporaryRoots: string[] = []
 
@@ -22,6 +22,7 @@ async function withHarness(run: (harness: ChapterHarness) => Promise<void>): Pro
   const harness = await openChapterHarness("Outline Body Edits Test")
   temporaryRoots.push(harness.root)
   try {
+    await prepareVolumePlanning(harness)
     await run(harness)
   } finally {
     await harness.container.close()

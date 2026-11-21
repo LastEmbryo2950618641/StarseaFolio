@@ -17,7 +17,7 @@ vi.mock("../src/features/status/chapter-ingest-activity.js", async (importOrigin
 
 vi.mock("../src/features/editor/use-deduction-goals.js", () => ({
   useDeductionGoals: () => ({
-    snapshot: { goals: [], proposals: [] },
+    snapshot: { goals: [], progress: [], pendingProposals: [] },
     refresh: async () => undefined,
     addGoal: async () => undefined,
     updateGoal: async () => undefined,
@@ -82,9 +82,11 @@ describe("synopsis chapter_ingest stream blocks", () => {
       onCausalityFocusChange: () => undefined,
     }))
 
-    expect(html).toContain("data-testid=\"agent-stream-chapter-ingest\"")
-    expect(html).toContain("chapter_ingest")
-    expect(html).toContain("准备修订与证据 · 3/8 · 第十九章")
+    expect(html).toContain("data-testid=\"agent-stream-activity\"")
+    expect(html).toContain("agent-stream-activity-meta\">chapter_ingest")
+    expect(html).toContain("进行中")
+    expect(html).not.toContain("agent-stream-chapter-ingest")
+    expect(html).not.toContain("准备修订与证据 · 3/8 · 第十九章")
     expect(html).not.toContain("深度思考中…")
   })
 
@@ -149,9 +151,10 @@ describe("synopsis chapter_ingest stream blocks", () => {
       onCausalityFocusChange: () => undefined,
     }))
 
-    expect(html).toContain("data-testid=\"agent-stream-compression\"")
-    expect(html).toContain("compression")
-    expect(html).toContain("上下文压缩中")
-    expect(html).toContain("chapter_ingest")
+    expect(html).toContain("data-testid=\"agent-stream-activity\"")
+    expect(html).toContain("agent-stream-activity-meta\">compression · chapter_ingest")
+    expect(html).not.toContain("agent-stream-compression")
+    expect(html).not.toContain("上下文压缩中")
+    expect(html).not.toContain("agent-stream-chapter-ingest")
   })
 })

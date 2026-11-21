@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { PROTOCOL_VERSION, type DeductionTask } from "@starseafolio/contracts"
 
 import { deductionTaskProgress } from "../src/application/turns/deduction-task-progress.js"
-import { openChapterHarness, waitForTask } from "./helpers/chapter-coordination-harness.js"
+import { openChapterHarness, prepareChapterPlanning, waitForTask } from "./helpers/chapter-coordination-harness.js"
 
 const temporaryRoots: string[] = []
 
@@ -48,6 +48,7 @@ describe("turn.list", () => {
       return response.data as T
     }
     try {
+      await prepareChapterPlanning(harness)
       expect(await call<DeductionTask[]>("turn.list")).toEqual([])
       const first = await call<{ taskId: string }>("turn.start", {
         chapterSequence: 1,

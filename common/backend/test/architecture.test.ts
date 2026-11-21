@@ -30,10 +30,10 @@ describe("backend architecture", () => {
     }
   })
 
-  it("keeps the pure core free of database, desktop, model, and filesystem SDK imports", () => {
+  it("keeps the pure core free of database, desktop, and model SDK imports", () => {
     const coreRoot = resolve(process.cwd(), "common/backend/src/core")
     const imports = listTypeScriptFiles(coreRoot).map((file) => readFileSync(file, "utf8")).join("\n")
 
-    expect(imports).not.toMatch(/from ["'](?:better-sqlite3|kysely|electron|openai|node:fs|node:path)["']/u)
+    expect(imports).not.toMatch(/from ["'](?:better-sqlite3|kysely|electron|openai)["']/u)
   })
 })

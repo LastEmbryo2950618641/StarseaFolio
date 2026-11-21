@@ -139,25 +139,25 @@ describe("ModelConfigurationDialog", () => {
       baseUrl: "https://api.deepseek.com",
       apiProtocol: "openai_chat_completions",
       thinkingModeEnabled: true,
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
     })
     expect(createProfileFromPreset("zhipu")).toMatchObject({
       name: "智谱",
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
       apiProtocol: "openai_chat_completions",
       thinkingModeEnabled: false,
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
     })
     expect(createProfileFromPreset("anthropic")).toMatchObject({
       name: "Anthropic",
       baseUrl: "https://api.anthropic.com",
       apiProtocol: "anthropic_messages",
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
     })
     expect(createProfileFromPreset("custom")).toMatchObject({
       name: "自定义服务",
       apiProtocol: "openai_chat_completions",
-      jsonModeEnabled: false,
+      jsonModeEnabled: true,
       thinkingModeEnabled: false,
     })
   })
