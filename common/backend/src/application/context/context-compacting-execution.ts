@@ -102,8 +102,7 @@ export function stripReplayedPayload(requestInput: unknown, hiddenContents: read
     })
     if (kept.length !== next.readEvidence.length) {
       changed = true
-      if (kept.length === 0) delete next.readEvidence
-      else next.readEvidence = kept
+      next.readEvidence = kept
     }
   }
   const discuss = asRecord(next.synopsisDiscuss)

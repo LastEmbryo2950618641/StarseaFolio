@@ -75,6 +75,7 @@ describe("TurnOrchestrator", () => {
     let failedMessageCount = 0
     const model: AIModelPort = {
       info: { ...fake.info, contextWindowTokens: 1_000_000 },
+      compressContext: (input) => fake.compressContext(input),
       execute: async (request, options) => {
         if (secondTurn && request.phase === "interpret" && mode === "overflow") {
           if (!rejected) {
@@ -198,7 +199,7 @@ describe("TurnOrchestrator", () => {
     expect(context?.segments.some((segment) => segment.kind === "presentation_rules")).toBe(true)
   })
 
-  it("loads default presentation rules when automatic presentation is selected", async () => {
+  it("loads the automatic dispatcher and baselines without scene cards", async () => {
     const fixture = await createFixture()
     await fixture.workspace.saveUserMarkdown(
       fixture.workspaceRoot,
@@ -232,20 +233,16 @@ describe("TurnOrchestrator", () => {
       "表现输出/描写规则/自动.md",
       "表现输出/描写规则/感官描写.md",
       "表现输出/描写规则/去AI味.md",
-      "表现输出/描写规则/默认描写规则.md",
-      "表现输出/描写规则/近景跟随.md",
       "表现输出/笔风规则/默认笔风规则.md",
     ]))
+    expect(autoOwnerIds).not.toContain("表现输出/描写规则/默认描写规则.md")
+    expect(autoOwnerIds).not.toContain("表现输出/描写规则/近景跟随.md")
     expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/描写规则/自动.md")?.semanticText)
       .toContain("【描写·自动调度】")
     expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/描写规则/感官描写.md")?.semanticText)
       .toContain("【描写·感官基线·本轮始终生效】")
     expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/描写规则/去AI味.md")?.semanticText)
       .toContain("【描写·去AI味基线·本轮始终生效】")
-    expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/描写规则/近景跟随.md")?.semanticText)
-      .toContain("【描写场面卡】")
-    expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/描写规则/默认描写规则.md")?.ownerKind)
-      .toBe("workspace:presentation")
   })
 
   it("injects this-work description overlay after selected presentation rules", async () => {
@@ -288,7 +285,7 @@ describe("TurnOrchestrator", () => {
     ]))
     const overlay = interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/本作品描写/压抑氛围.md")
     expect(overlay?.semanticText).toContain("【本作品描写·附加层】")
-    expect(overlay?.semanticText).toContain("以选中文件为准")
+    expect(overlay?.semanticText).toContain("不能抢下拉选中的机位或文类预设")
     expect(overlay?.semanticText).toContain("整部作品保持持续的压抑空气")
     const dropdownIndex = ownerIds.indexOf("表现输出/描写规则/默认描写规则.md")
     const overlayIndex = ownerIds.indexOf("表现输出/本作品描写/压抑氛围.md")
@@ -3937,7 +3934,9 @@ describe("TurnOrchestrator", () => {
 
     expect(chains).toHaveLength(1)
     expect(new Set(observedRequests.map((request) => request.chainId))).toEqual(new Set([chains[0]?.id]))
-    expect(firstRequest?.messages.map((message) => message.kind)).toEqual(["system_rules"])
+    expect(firstRequest?.messages.map((message) => message.kind)).toEqual(["system_rules", "phase_instruction"])
+    expect(firstRequest?.messages.find((message) => message.kind === "phase_instruction")?.content)
+      .toContain('"protocol":"context-budget-v1"')
     expect(secondRequest?.messages.filter((message) => message.kind === "system_rules")).toHaveLength(1)
     expect(secondRequest?.messages.find((message) => message.kind === "canonical_chapter")?.content)
       .toContain("第一章 世界种子")
@@ -4228,6 +4227,7 @@ describe("TurnOrchestrator", () => {
     let secondInterpretInput: TurnPhaseInput | undefined
     const compactingModel: AIModelPort = {
       info: secondModel.info,
+      compressContext: (input) => fake.compressContext(input),
       execute: (request, options) => {
         if (request.phase === "interpret") secondInterpretInput = request.input as TurnPhaseInput
         return secondModel.execute(request, options)
@@ -4329,7 +4329,7 @@ describe("TurnOrchestrator", () => {
     })
 
     expect(result).toMatchObject({ kind: "evolution", graphMutationCount: 0 })
-    expect(observedPhases).toEqual(["settings_extraction", "graph_governance"])
+    expect(observedPhases).toEqual(["settings_extraction", "work_style_revision", "graph_governance"])
     expect(await fixture.database.selectFrom("tasks").select("status").where("id", "=", result.taskId).executeTakeFirstOrThrow())
       .toEqual({ status: "completed" })
   })
@@ -4401,7 +4401,7 @@ describe("TurnOrchestrator", () => {
     })
 
     expect(result).toMatchObject({ kind: "evolution", graphMutationCount: 0 })
-    expect(observedPhases).toEqual(["settings_extraction", "graph_governance"])
+    expect(observedPhases).toEqual(["settings_extraction", "work_style_revision", "graph_governance"])
     expect(graphArtifacts?.settings_extraction).toMatchObject({ summary: "本章新增旧桥。" })
     expect(readFileSync(join(fixture.workspaceRoot, "设定集/地点/旧桥.md"), "utf8")).toContain("城外的石桥")
     expect(readFileSync(join(fixture.workspaceRoot, "设定集/readme.md"), "utf8")).toContain("设定集/地点/旧桥.md")

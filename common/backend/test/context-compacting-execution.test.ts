@@ -449,4 +449,13 @@ describe("AI fold context compaction", () => {
     expect(next.synopsisDiscuss.synopsisMarkdown).toBeUndefined()
     expect(next.synopsisDiscuss.chapterBodyMarkdown).toBe("当前章")
   })
+
+  it("keeps readEvidence as an empty array when compaction removes every replayed item", () => {
+    const next = stripReplayedPayload(
+      { readEvidence: [{ ownerId: "设定集/人物/旧角色.json" }] },
+      ['{"ownerId":"设定集/人物/旧角色.json"}'],
+    ) as { readEvidence?: unknown[] }
+
+    expect(next.readEvidence).toEqual([])
+  })
 })
