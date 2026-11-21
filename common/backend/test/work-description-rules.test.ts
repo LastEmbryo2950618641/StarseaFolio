@@ -59,8 +59,12 @@ describe("work description overlay rules", () => {
   it("wraps overlay evidence and rejects oversized files and write batches", () => {
     const wrapped = formatWorkDescriptionRuleEvidence(`${WORK_DESCRIPTION_RULES_DIR}/压抑氛围.md`, "# 压抑\n")
     expect(wrapped).toContain("【本作品描写·附加层】")
-    expect(wrapped).toContain("以选中文件为准")
+    expect(wrapped).toContain("作品风格.md")
     expect(wrapped).toContain("# 压抑")
+    const styleWrapped = formatWorkDescriptionRuleEvidence(`${WORK_DESCRIPTION_RULES_DIR}/作品风格.md`, "# 作品风格\n")
+    expect(styleWrapped).toContain("【本作品描写·作品风格·硬约束】")
+    expect(styleWrapped).toContain("以本文件为准")
+    expect(styleWrapped).not.toContain("以选中文件为准")
     expect(() => assertWorkDescriptionCharLimit(
       `${WORK_DESCRIPTION_RULES_DIR}/过长.md`,
       "字".repeat(WORK_DESCRIPTION_MAX_CHARS + 1),
