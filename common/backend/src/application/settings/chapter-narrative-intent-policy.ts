@@ -98,7 +98,7 @@ export function chapterPresentationPhaseAppendix(
     "- 可用 `request_read` + `sourceKinds: [\"rule\"]` 读取 `表现输出/描写规则/`、`表现输出/笔风规则/` 与 `表现输出/本作品描写/`（可先 `list` 再全文/片段）；",
     "- 下拉选中的描写/笔风是可编辑预设；需要 AI 调整时用 `creationDeskSettings` 返回真实路径，**禁止**用 `presentationWrites` 改写预设文件；",
     "- 只把整部作品持续生效的呈现约束写入 `表现输出/本作品描写/*.md`（`mode: create|update`）；系统立即落盘；单文件不超过 4000 字、最多 8 个文件；",
-    "- 单章氛围写梗概/细纲；与选中描写/笔风冲突时以下拉文件为准；不要放进 `stagingPromote`。",
+    "- 单章氛围写梗概/细纲；机位/文类以下拉为准，句长密度以 `作品风格.md` 为准；不要放进 `stagingPromote`。",
   )
   return lines.join("\n")
 }
