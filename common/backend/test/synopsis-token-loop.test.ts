@@ -398,6 +398,8 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
       return { synopsisBody }
     }, async (harness, send) => {
+      // Start from empty planning so stage reflects synopsis 入库 only (not a pre-seeded outline).
+      await clearChapterPlanningMaterials(harness)
       const sent = await send({ message: "继续推进第一章", batchProceed: true })
       expect(calls).toBe(1)
       expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, sent.session.synopsisPath))

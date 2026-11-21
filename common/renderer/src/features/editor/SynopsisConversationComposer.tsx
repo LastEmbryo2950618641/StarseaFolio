@@ -1806,7 +1806,8 @@ function ProceedStageBar(props: Readonly<{
             ? " is-done"
             : " is-todo"
         const label = PROCEED_STAGE_LABELS[stage]
-        const gateText = isActive ? "当前" : auto ? "自动" : "停等"
+        // Past materials show 完成; current shows 当前; future shows gate mode.
+        const gateText = isActive ? "当前" : isDone ? "完成" : auto ? "自动" : "停等"
         const content = <>
           <span className="creation-desk-proceed-stage-label">{label}</span>
           <span className="creation-desk-proceed-stage-gate">{gateText}</span>

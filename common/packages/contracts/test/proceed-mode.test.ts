@@ -117,11 +117,18 @@ describe("discuss proceed mode contracts", () => {
       outlineReady: true,
       draftReady: true,
     })).toBe("draft_discuss")
+    // Draft waiting for publish confirm stays on draft — not body confirm yet.
     expect(resolveDiscussPipelineStage({
       synopsisReady: true,
       outlineReady: true,
       draftReady: true,
       awaitingBodyConfirm: true,
+    })).toBe("draft_discuss")
+    expect(resolveDiscussPipelineStage({
+      synopsisReady: true,
+      outlineReady: true,
+      draftReady: true,
+      bodyIngestStarted: true,
     })).toBe("body_discuss")
     expect(resolveDiscussPipelineStage({
       synopsisReady: true,

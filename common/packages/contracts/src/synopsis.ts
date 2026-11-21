@@ -236,20 +236,32 @@ export const DISCUSS_PROCEED_STAGE_ORDER: readonly DiscussProceedStage[] = [
  * Derive the creation-desk pipeline stage from durable materials on disk.
  * Stage advances only when the corresponding artifact is入库 — not when the
  * user is merely discussing within a stage.
+ *
+ * - 梗概入库 → synopsis_discuss
+ * - 细纲入库 → outline_discuss
+ * - 草稿入库 → draft_discuss（仍停在草稿，等待用户确认发布）
+ * - 章节入库开始 / 正文已落盘 → body_discuss
+ * - 焦点到下一章且尚无梗概 → chapter_requirements
  */
 export function resolveDiscussPipelineStage(input: Readonly<{
   synopsisReady: boolean
   outlineReady: boolean
   draftReady: boolean
-  /** Draft exists and is waiting for「草稿可以，发布正文」or body confirm. */
+  /**
+   * @deprecated No longer moves the stage to body_discuss.
+   * Draft waiting for「草稿可以，发布正文」stays on draft_discuss.
+   * Prefer `bodyIngestStarted` when the publish/入库 pipeline is running.
+   */
   awaitingBodyConfirm?: boolean
+  /** Chapter body 入库 / publish pipeline is actively running. */
+  bodyIngestStarted?: boolean
   /** Focus chapter already has committed body text. */
   chapterPublished?: boolean
 }>): DiscussProceedStage {
   if (!input.synopsisReady) return "chapter_requirements"
   if (!input.outlineReady) return "synopsis_discuss"
   if (!input.draftReady) return "outline_discuss"
-  if (input.chapterPublished === true || input.awaitingBodyConfirm === true) return "body_discuss"
+  if (input.chapterPublished === true || input.bodyIngestStarted === true) return "body_discuss"
   return "draft_discuss"
 }
 

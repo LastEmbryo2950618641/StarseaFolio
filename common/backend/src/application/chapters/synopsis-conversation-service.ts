@@ -1954,18 +1954,14 @@ export class SynopsisConversationService {
         synopsisReady: synopsisReadyForOutline,
         outlineReady: hasOutlineOnDisk,
         draftReady: draftReadyAfterTurn,
-        ...(savedDraft !== undefined && !savedDraftPublished ? { awaitingBodyConfirm: true } : {}),
         ...(chapterPublishedAfterTurn ? { chapterPublished: true } : {}),
       })
-      if (savedDraft !== undefined) {
-        emitProceedProgress("draft_discuss", "done")
-        emitProceedProgress("body_discuss", autonomousBody ? "running" : "waiting")
-      } else if (!wroteSynopsisBody && !wroteOutlineThisTurn) {
-        emitProceedProgress(
-          pipelineStageAfterTurn,
-          stageAuto(pipelineStageAfterTurn) ? "running" : "waiting",
-        )
-      }
+      // Always refresh the stage bar from materials: 梗概/细纲/草稿入库各自停在对应阶段；
+      // 正文确认只在章节入库开始（publish）或正文已落盘时进入。
+      emitProceedProgress(
+        pipelineStageAfterTurn,
+        stageAuto(pipelineStageAfterTurn) ? "running" : "waiting",
+      )
       const currentStageAutonomous = stageAuto(pipelineStageAfterTurn)
       const materialIngestThisTurn = wroteSynopsisBody || wroteOutlineThisTurn || savedDraft !== undefined
         || savedDraftPublished
@@ -2012,9 +2008,7 @@ export class SynopsisConversationService {
                   ? `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成，焦点已切换到第${String(appliedFocusSequence)}章。进入该章新章要求阶段；先对齐本章要写什么，梗概入库前不要写入细纲或草稿。`
                   : `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成。若当前卷仍有未完成章节，本轮只切换焦点到第${String(session.chapterSequence + 1)}章并设置 continueTurn=true，下一回合从新章要求阶段开始；不要同轮向旧焦点写入新章材料。若当前卷已完成则结束任务或开新卷。`
               : savedDraft !== undefined
-                ? autonomousBody
-                  ? `继续：当前章草稿已入库（${savedDraft.draftLabel}），进入正文确认阶段。按当前推进模式继续确认流程；确认前不要进入下一章。`
-                  : `继续：当前章草稿已入库（${savedDraft.draftLabel}），进入正文确认阶段。请用户确认「草稿可以，发布正文」；确认前不要调用 publish_draft，也不要进入下一章。`
+                ? `继续：当前章草稿已入库（${savedDraft.draftLabel}），进入草稿阶段。请用户确认「草稿可以，发布正文」后才开始章节入库（正文确认）；确认前不要调用 publish_draft，也不要进入下一章。`
                 : synopsisProgressCompleted
                   ? `继续：第${String(session.chapterSequence)}章剧情梗概已入库，进入梗概阶段。先针对已落盘梗概讨论；若推进模式允许自动，再写入细纲入库以进入细纲阶段——未细纲入库前不要写草稿。`
                   : outlineProgressCompleted
@@ -2031,8 +2025,8 @@ export class SynopsisConversationService {
         if (!assistantContent.includes(DRAFT_PUBLISH_CONFIRMATION)) {
           assistantContent += "\n\n草稿已经写好。请确认「草稿可以，发布正文」；确认后会自动完成设定抽取、图治理并落入正文，中间不再询问。"
         }
-        emitProceedProgress("body_discuss", autonomousBody ? "running" : "waiting")
-        // Body confirm always waits for the explicit「草稿可以，发布正文」user event.
+        // Stay on draft_discuss until the user starts 章节入库 (publish confirm).
+        emitProceedProgress("draft_discuss", "waiting")
         autoContinue = undefined
       }
       if (pipelineAuto) {
@@ -5622,12 +5616,12 @@ export class SynopsisConversationService {
     const outlineReady = hasPlanningContent(outlineMarkdown, false)
     const draftReady = (latestDraftMarkdown?.trim().length ?? 0) > 0
       || input.session.draftVersionId !== undefined
+      || publishableDraft !== undefined
     const chapterPublished = (chapterBodyMarkdown?.trim().length ?? 0) > 0
     const stage = resolveDiscussPipelineStage({
       synopsisReady,
       outlineReady,
       draftReady,
-      ...(publishableDraft !== undefined && !chapterPublished ? { awaitingBodyConfirm: true } : {}),
       ...(chapterPublished ? { chapterPublished: true } : {}),
     })
     const proceedMode = input.proceedMode ?? "single"
