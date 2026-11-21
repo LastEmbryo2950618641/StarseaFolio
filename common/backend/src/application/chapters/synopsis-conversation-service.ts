@@ -2619,14 +2619,16 @@ export class SynopsisConversationService {
       )
     const outlineMarkdown = await this.readSynopsisFile(workspaceRootRef, outlinePath)
     const synopsisMarkdown = await this.readSynopsisFile(workspaceRootRef, session.synopsisPath)
+    const messages = await this.dependencies.conversation.listMessages(session.sessionId)
+    const userDirectivesAppendix = formatUserCreativeDirectivesAppendix(messages)
 
     if (outlineMarkdown.trim().length > 0) {
-      const appendix = synopsisMarkdown.trim().length > 0
-        ? `\n\n---\n\n## 剧情梗概（附录·冲突以细纲为准）\n\n${synopsisMarkdown.trim()}\n`
+      const synopsisAppendix = synopsisMarkdown.trim().length > 0
+        ? `\n\n---\n\n## 剧情梗概（附录·冲突以细纲为准，用户合同仍须覆盖）\n\n${synopsisMarkdown.trim()}\n`
         : ""
       return {
         chapterSequence: session.chapterSequence,
-        userInput: `${outlineMarkdown.trim()}${appendix}`,
+        userInput: `${outlineMarkdown.trim()}${synopsisAppendix}${userDirectivesAppendix}`,
         source: "outline_file",
         synopsisPath: session.synopsisPath,
       }
@@ -2635,13 +2637,12 @@ export class SynopsisConversationService {
     if (synopsisMarkdown.trim().length > 0) {
       return {
         chapterSequence: session.chapterSequence,
-        userInput: synopsisMarkdown,
+        userInput: `${synopsisMarkdown.trim()}${userDirectivesAppendix}`,
         source: "synopsis_file",
         synopsisPath: session.synopsisPath,
       }
     }
 
-    const messages = await this.dependencies.conversation.listMessages(session.sessionId)
     if (messages.length > 0) {
       return {
         chapterSequence: session.chapterSequence,
@@ -3072,9 +3073,9 @@ export class SynopsisConversationService {
       repairHints.push(
         "当前剧情梗概缺失或仍是占位内容：本轮只写 synopsisBody，不得输出 outlineBody/bodyEdits 或正文。给出符合用户当前诉求的后续选项；不能要求用户使用固定口令确认梗概。",
       )
-    } else if (input.creativeSetup === undefined && !hasPlanningContent(input.outlineMarkdown, false)) {
+      } else if (input.creativeSetup === undefined && !hasPlanningContent(input.outlineMarkdown, false)) {
       repairHints.push(
-        "当前剧情梗概已存在，可据此写细纲；梗概确认按钮只是便捷选项，不是门禁。用户明确要求提取、补全或继续写细纲时，本轮应输出合格 outlineBody（引导 §4.1：必填章定位/分场/信息边界/风险待决；不适用节写「本节：无」；须含相对梗概的增量，禁止同构扩写），尊重用户这轮具体要求，不要要求固定确认说法或重复询问。细纲尚未写入前不要输出正文草稿。",
+        "当前剧情梗概已存在：须按 synopsis-to-outline-guide，合并「用户本次要求 + 梗概」写细纲，禁止只对着梗概扩写。梗概确认按钮只是便捷选项，不是门禁。用户明确要求提取、补全或继续写细纲时，本轮应输出合格 outlineBody（引导 §4.1：必填章定位/分场/信息边界/风险待决；不适用节写「本节：无」；须含相对梗概的增量，禁止同构扩写；用户合同∪梗概事件须被分场覆盖），尊重用户这轮具体要求，不要要求固定确认说法或重复询问。细纲尚未写入前不要输出正文草稿。",
       )
     }
     if (titleAlignmentIssue !== undefined) {
@@ -6115,6 +6116,20 @@ function summarizeConversation(messages: readonly Readonly<{ role: string; conte
     return `${speaker}：${message.content}`
   })
   return `# 剧情梗概讨论记录\n\n${lines.join("\n\n")}`
+}
+
+/** Recent user creative asks appended so formal draft bootstrap keeps user+synopsis+outline together. */
+function formatUserCreativeDirectivesAppendix(
+  messages: readonly Readonly<{ role: string; content: string }>[],
+): string {
+  const userLines = messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content.trim())
+    .filter((content) => content.length > 0)
+  if (userLines.length === 0) return ""
+  const recent = userLines.slice(-8)
+  const clipped = recent.map((content) => (content.length <= 1_200 ? content : `${content.slice(0, 1_199)}…`))
+  return `\n\n---\n\n## 用户创作指令（摘录·须与细纲/梗概一并遵守）\n\n${clipped.map((line, index) => `${String(index + 1)}. ${line}`).join("\n\n")}\n`
 }
 
 function isMissingSynopsisArtifactError(error: unknown): boolean {

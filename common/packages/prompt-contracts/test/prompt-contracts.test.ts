@@ -97,8 +97,11 @@ describe("prompt contracts", () => {
     for (const vendor of WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES) {
       expect(PLATFORM_BASE_RULE_RESOURCES).not.toContain(vendor)
     }
-    expect(defaultSkillIdsForPhase("draft")).toEqual(["webnovel-deslop", "webnovel-dialogue"])
+    expect(defaultSkillIdsForPhase("draft")).toEqual(["webnovel-deslop", "webnovel-dialogue", "outline-to-draft"])
     expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("discuss-workflow")
+    expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("user-to-synopsis")
+    expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("synopsis-to-outline")
+    expect(defaultSkillIdsForPhase("synopsis_discuss")).not.toContain("outline-to-draft")
     expect(PLATFORM_SKILLS.length).toBeGreaterThanOrEqual(7)
   })
 

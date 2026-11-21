@@ -15,7 +15,7 @@ import { openChapterHarness } from "./helpers/chapter-coordination-harness.js"
 const temporaryRoots: string[] = []
 const path = `${CHARACTER_DIRECTORY}/林照.json`
 const defaults: WorkspaceDefaultDocuments = {
-  baseRules: "# 基础规则\n", contentHandling: "# 内容\n", webnovelProseLogic: "# 正文\n", plotSynopsisGuide: "# 梗概\n",
+  baseRules: "# 基础规则\n", contentHandling: "# 内容\n", webnovelProseLogic: "# 正文\n", plotSynopsisGuide: "# 梗概\n", userToSynopsisGuide: "# user->synopsis\n", synopsisToOutlineGuide: "# synopsis->outline\n", outlineToDraftGuide: "# outline->draft\n",
   settingsQueryGuide: "# 查询\n", settingsRevisionGuide: "# 修订\n", discussCreationDeskWorkflow: "# 讨论\n",
   agentMemoryIndex: "# 记忆\n", settingsReadme: "# 设定\n", referencesReadme: "# 参考\n", descriptionRules: "# 描写\n",
   proseStyleRules: "# 笔风\n", stagingReadme: "# 暂存\n", stagingNotes: "# 笔记\n", stagingCharacters: "# 人物草稿\n",
