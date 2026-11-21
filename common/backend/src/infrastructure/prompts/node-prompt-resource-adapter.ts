@@ -6,10 +6,13 @@ import {
   BASE_RULES_RESOURCE,
   CONTENT_HANDLING_RESOURCE,
   DISCUSS_CREATION_DESK_WORKFLOW_RESOURCE,
+  OUTLINE_TO_DRAFT_GUIDE_RESOURCE,
   PLOT_SYNOPSIS_GUIDE_RESOURCE,
   PROMPT_CONTRACT_VERSION,
   SETTINGS_QUERY_GUIDE_RESOURCE,
   SETTINGS_REVISION_GUIDE_RESOURCE,
+  SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE,
+  USER_TO_SYNOPSIS_GUIDE_RESOURCE,
   WEBNOVEL_PROSE_LOGIC_RESOURCE,
   PLATFORM_BASE_RULE_RESOURCES,
   SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES,
@@ -41,6 +44,18 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
 
   public async loadPlotSynopsisGuide(): Promise<PromptResource> {
     return this.load(PLOT_SYNOPSIS_GUIDE_RESOURCE)
+  }
+
+  public async loadUserToSynopsisGuide(): Promise<PromptResource> {
+    return this.load(USER_TO_SYNOPSIS_GUIDE_RESOURCE)
+  }
+
+  public async loadSynopsisToOutlineGuide(): Promise<PromptResource> {
+    return this.load(SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE)
+  }
+
+  public async loadOutlineToDraftGuide(): Promise<PromptResource> {
+    return this.load(OUTLINE_TO_DRAFT_GUIDE_RESOURCE)
   }
 
   public async loadSettingsQueryGuide(): Promise<PromptResource> {

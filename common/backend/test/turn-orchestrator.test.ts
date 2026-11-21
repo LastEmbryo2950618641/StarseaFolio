@@ -4658,7 +4658,7 @@ async function createFixture() {
       baseRules: "# base\n",
       contentHandling: "# content handling\n",
       webnovelProseLogic: "# prose logic\n",
-      plotSynopsisGuide: "# synopsis guide\n",
+      plotSynopsisGuide: "# synopsis guide\n", userToSynopsisGuide: "# user->synopsis\n", synopsisToOutlineGuide: "# synopsis->outline\n", outlineToDraftGuide: "# outline->draft\n",
       settingsQueryGuide: "# settings query guide\n",
       settingsRevisionGuide: "# settings revision guide\n",
       discussCreationDeskWorkflow: "# discuss workflow\n",

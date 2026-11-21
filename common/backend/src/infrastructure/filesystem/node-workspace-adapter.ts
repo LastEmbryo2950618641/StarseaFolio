@@ -102,6 +102,18 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
       encoding: "utf8",
       flag: "wx",
     })
+    await writeFile(resolveInside(root, "世界推演规则/基础规则/user-to-synopsis-guide.md"), defaults.userToSynopsisGuide, {
+      encoding: "utf8",
+      flag: "wx",
+    })
+    await writeFile(resolveInside(root, "世界推演规则/基础规则/synopsis-to-outline-guide.md"), defaults.synopsisToOutlineGuide, {
+      encoding: "utf8",
+      flag: "wx",
+    })
+    await writeFile(resolveInside(root, "世界推演规则/基础规则/outline-to-draft-guide.md"), defaults.outlineToDraftGuide, {
+      encoding: "utf8",
+      flag: "wx",
+    })
     await writeFile(resolveInside(root, "世界推演规则/基础规则/settings-query-guide.md"), defaults.settingsQueryGuide, {
       encoding: "utf8",
       flag: "wx",
@@ -203,6 +215,18 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     await writeFileIfMissing(
       resolveInside(root, "世界推演规则/基础规则/plot-synopsis-guide.md"),
       defaults.plotSynopsisGuide,
+    )
+    await writeFileIfMissing(
+      resolveInside(root, "世界推演规则/基础规则/user-to-synopsis-guide.md"),
+      defaults.userToSynopsisGuide,
+    )
+    await writeFileIfMissing(
+      resolveInside(root, "世界推演规则/基础规则/synopsis-to-outline-guide.md"),
+      defaults.synopsisToOutlineGuide,
+    )
+    await writeFileIfMissing(
+      resolveInside(root, "世界推演规则/基础规则/outline-to-draft-guide.md"),
+      defaults.outlineToDraftGuide,
     )
     await writeFileIfMissing(
       resolveInside(root, "世界推演规则/基础规则/settings-query-guide.md"),
