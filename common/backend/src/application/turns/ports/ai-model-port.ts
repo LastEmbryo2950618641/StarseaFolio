@@ -100,6 +100,9 @@ export interface PromptResourcePort {
   loadBaseRules(): Promise<PromptResource>
   loadContentHandling(): Promise<PromptResource>
   loadPlotSynopsisGuide(): Promise<PromptResource>
+  loadUserToSynopsisGuide(): Promise<PromptResource>
+  loadSynopsisToOutlineGuide(): Promise<PromptResource>
+  loadOutlineToDraftGuide(): Promise<PromptResource>
   loadSettingsQueryGuide(): Promise<PromptResource>
   loadSettingsRevisionGuide(): Promise<PromptResource>
   loadDiscussCreationDeskWorkflow(): Promise<PromptResource>

@@ -17,6 +17,9 @@ arguments 示例：`{"skillId":"webnovel-dialogue","includeReferences":false}`�
 | `style-profile` | 文风剖析协议 | onDemand | 从对标书抽文风手册。 |
 | `discuss-workflow` | 创作台讨论工作流 | default(synopsis_discuss) | 创作台 outcome/工具/门禁流程；讨论回合默认挂载。 |
 | `plot-synopsis` | 梗概与细纲指南 | default(synopsis_discuss) | 写/改梗概或细纲时用。 |
+| `user-to-synopsis` | 用户输入→梗概思维链 | default(synopsis_discuss) | 把用户本轮要求收成章级梗概前的内部思考与落笔闸。 |
+| `synopsis-to-outline` | 用户+梗概→细纲思维链 | default(synopsis_discuss) | 写细纲前必须合并用户要求与梗概；禁止只扩写梗概。 |
+| `outline-to-draft` | 用户+梗概+细纲→草稿思维链 | default(draft) | 仅写正文时用；设定沉淀走抽取/暂存。规划梗概/细纲勿挂载。 |
 | `settings-revision` | 设定修订指南 | default(synopsis_discuss) | 改设定集、对齐冲突设定时用。 |
 
 ## 描写场面卡（工作区）

@@ -34,7 +34,7 @@ const defaults = {
   baseRules: "# Worldseed V1 基础规则\n\n平台只读规则。\n",
   contentHandling: "# 内容处理规则\n\n平台只读规则。\n",
   webnovelProseLogic: "# 中文网文正文质量与逻辑\n\n平台只读规则。\n",
-  plotSynopsisGuide: "# 剧情梗概讨论引导\n\n平台只读引导。\n",
+  plotSynopsisGuide: "# 剧情梗概讨论引导\n\n平台只读引导。\n", userToSynopsisGuide: "# user->synopsis\n", synopsisToOutlineGuide: "# synopsis->outline\n", outlineToDraftGuide: "# outline->draft\n",
   settingsQueryGuide: "# 设定集默认查询规则\n\n平台只读引导。\n",
   settingsRevisionGuide: "# 设定集修订规则\n\n平台只读引导。\n",
   discussCreationDeskWorkflow: "# 创作台讨论工作流\n\n平台只读。\n",

@@ -12,6 +12,9 @@ export type WorkspaceDefaultDocuments = Readonly<{
   contentHandling: string
   webnovelProseLogic: string
   plotSynopsisGuide: string
+  userToSynopsisGuide: string
+  synopsisToOutlineGuide: string
+  outlineToDraftGuide: string
   settingsQueryGuide: string
   settingsRevisionGuide: string
   discussCreationDeskWorkflow: string
