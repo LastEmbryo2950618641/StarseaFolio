@@ -130,10 +130,12 @@ describe("TurnOrchestrator", () => {
     )
     const fake = new FakeAiModelAdapter(randomUUID)
     let interpretInput: TurnPhaseInput | undefined
+    let draftPrompt: string | undefined
     const model: AIModelPort = {
       info: { ...fake.info, contextWindowTokens: 1_000_000 },
-      execute: (request) => {
+      execute: (request, options) => {
         if (request.phase === "interpret") interpretInput = request.input as TurnPhaseInput
+        if (request.phase === "draft") draftPrompt = options?.phasePrompt?.text
         return fake.execute(request)
       },
     }
@@ -167,6 +169,8 @@ describe("TurnOrchestrator", () => {
     expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId.endsWith("角色出场.md"))?.semanticText)
       .toContain("用户指定的角色出场规则")
     expect(interpretInput?.presentation).toMatchObject({ minimumWordCount: 2000, maximumWordCount: 3000 })
+    expect(draftPrompt).toContain("2000–3000")
+    expect(draftPrompt).toContain("移除正文中的全部空白字符后计数")
     const descriptionEvidence = interpretInput?.readEvidence.find((evidence) => (
       evidence.ownerId === "表现输出/描写规则/近景跟随.md"
     ))

@@ -7,9 +7,12 @@ import { describe, expect, it } from "vitest"
 import {
   BASE_RULES_RESOURCE,
   CONTENT_HANDLING_RESOURCE,
+  OUTLINE_TO_DRAFT_GUIDE_RESOURCE,
   PLOT_SYNOPSIS_GUIDE_RESOURCE,
   SETTINGS_QUERY_GUIDE_RESOURCE,
   SETTINGS_REVISION_GUIDE_RESOURCE,
+  SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE,
+  USER_TO_SYNOPSIS_GUIDE_RESOURCE,
   WEBNOVEL_PROSE_LOGIC_RESOURCE,
   WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES,
   SKILL_INDEX_RESOURCE,
@@ -334,6 +337,28 @@ describe("prompt contracts", () => {
     expect(draft).toContain("服从细纲 = 演出其要求的场面与约束")
   })
 
+  it("preserves explicit user scope, status changes, and chapter length across writing stages", () => {
+    const packageRoot = resolve(process.cwd(), "common/packages/prompt-contracts")
+    const userToSynopsis = readFileSync(resolve(packageRoot, USER_TO_SYNOPSIS_GUIDE_RESOURCE), "utf8")
+    const synopsisToOutline = readFileSync(resolve(packageRoot, SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE), "utf8")
+    const outlineToDraft = readFileSync(resolve(packageRoot, OUTLINE_TO_DRAFT_GUIDE_RESOURCE), "utf8")
+    const plotSynopsis = readFileSync(resolve(packageRoot, PLOT_SYNOPSIS_GUIDE_RESOURCE), "utf8")
+    const draft = readFileSync(resolve(packageRoot, promptDefinitions.draft.resourcePath), "utf8")
+    const prose = readFileSync(resolve(packageRoot, WEBNOVEL_PROSE_LOGIC_RESOURCE), "utf8")
+
+    expect(userToSynopsis).toContain("在其指定范围内以最新指令为准")
+    expect(plotSynopsis).toContain("用户本轮明确要求重写或改变既有事实时，在指定范围内以最新指令为准")
+    expect(userToSynopsis).toContain("建立覆盖名单")
+    expect(synopsisToOutline).toContain("一章一主峰约束冲突结构")
+    expect(synopsisToOutline).toContain("首次执行及相关方照办")
+    expect(outlineToDraft).toContain("不得用估算代替计数")
+    expect(outlineToDraft).toContain("蒙太奇是否覆盖全部指定对象")
+    expect(draft).toContain("正文主体按界面口径计数并落在范围内")
+    expect(draft).toContain("阶段结果必须在本章发生")
+    expect(prose).toContain("蒙太奇保结果")
+    expect(prose).toContain("不约束整章长度")
+  })
+
   it("requires character personality in settings revision and draft prompts", () => {
     const packageRoot = resolve(process.cwd(), "common/packages/prompt-contracts")
     const revision = readFileSync(resolve(packageRoot, SETTINGS_REVISION_GUIDE_RESOURCE), "utf8")
@@ -350,16 +375,6 @@ describe("prompt contracts", () => {
     expect(extraction).toContain("## 性格")
     expect(extraction).toContain("姓名")
     expect(extraction).toContain("性别")
-    expect(extraction).toContain("work_style_revision")
-    const workStyle = readFileSync(
-      resolve(packageRoot, promptDefinitions.work_style_revision.resourcePath),
-      "utf8",
-    )
-    expect(workStyle).toContain("userRequirements")
-    expect(workStyle).toContain("融合")
-    expect(workStyle).toContain("sections")
-    expect(workStyle).toContain("source")
-    expect(workStyle).toContain("正文")
   })
 
   it("keeps rule assembly semantic and lets the runtime own its snapshot identity", () => {

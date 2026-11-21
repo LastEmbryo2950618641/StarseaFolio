@@ -153,7 +153,10 @@ import {
   resolveWorldDivergenceMode,
   worldDivergencePhaseAppendix,
 } from "../settings/world-divergence-policy.js"
-import { chapterNarrativeIntentPhaseAppendix } from "../settings/chapter-narrative-intent-policy.js"
+import {
+  chapterNarrativeIntentPhaseAppendix,
+  chapterPresentationPhaseAppendix,
+} from "../settings/chapter-narrative-intent-policy.js"
 import { truncateChapterBodyDigest } from "../chapters/turn-handoff.js"
 import type { SettingsLineageService } from "../settings/settings-lineage-service.js"
 import type { ChapterTemporalSourceResolver } from "../chapters/chapter-temporal-source-resolver.js"
@@ -3032,6 +3035,7 @@ export class TurnOrchestrator {
         input.phase,
       ),
       chapterNarrativeIntentPhaseAppendix(input.input.chapterIntent, input.phase),
+      chapterPresentationPhaseAppendix(input.input.presentation, input.phase),
       skillPack?.text,
     ].filter((text): text is string => text !== undefined && text.trim().length > 0)
     const prompt = appendices.length === 0

@@ -31,7 +31,7 @@ describe("chapter narrative intent policy", () => {
     expect(chapterNarrativeIntentPhaseAppendix(undefined, "settings_extraction")).toBeUndefined()
   })
 
-  it("injects creation-desk word budget into synopsis_discuss", () => {
+  it("injects the configured prose range into discussion and draft phases", () => {
     const appendix = chapterPresentationPhaseAppendix({
       minimumWordCount: 2000,
       maximumWordCount: 3000,
@@ -44,6 +44,9 @@ describe("chapter narrative intent policy", () => {
     expect(appendix).toContain("自动.md")
     expect(appendix).toContain("本作品描写")
     expect(appendix).toContain("presentationWrites")
+    expect(appendix).toContain("移除正文中的全部空白字符后计数")
+    expect(appendix).toContain("落入本轮范围")
+    expect(appendix).toContain("区间中段")
     const locked = chapterPresentationPhaseAppendix({
       minimumWordCount: 2000,
       maximumWordCount: 3000,
@@ -56,9 +59,12 @@ describe("chapter narrative intent policy", () => {
     expect(locked).not.toContain("描写：自动")
     expect(appendix).toContain("感官描写.md")
     expect(appendix).toContain("去AI味.md")
-    expect(chapterPresentationPhaseAppendix({
+    const draft = chapterPresentationPhaseAppendix({
       minimumWordCount: 2000,
       maximumWordCount: 3000,
-    }, "draft")).toBeUndefined()
+    }, "draft")
+    expect(draft).toContain("2000–3000")
+    expect(draft).toContain("移除正文中的全部空白字符后计数")
+    expect(draft).toContain("不能用估算代替")
   })
 })

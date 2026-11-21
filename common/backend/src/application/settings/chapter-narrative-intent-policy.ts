@@ -48,20 +48,27 @@ export type ChapterPresentationBudget = Readonly<{
   maximumWordCount: number
 }>
 
-/** Inject creation-desk presentation controls into synopsis discuss (word budget, style paths). */
+/** Inject active creation-desk constraints into prose-writing phases. */
 export function chapterPresentationPhaseAppendix(
   presentation: ChapterPresentationBudget | undefined,
   phase: AIPhase,
 ): string | undefined {
-  if (phase !== "synopsis_discuss" || presentation === undefined) return undefined
+  if (presentation === undefined) return undefined
+  const proseLengthContract = [
+    `## 单章正文长度（${String(presentation.minimumWordCount)}–${String(presentation.maximumWordCount)} 字）`,
+    "范围约束 AI 新写或改写的正文主体，标题不计。计数与编辑器一致，移除正文中的全部空白字符后计数，标点计入。",
+    "篇幅优先安排在区间中段以留足余量。最终正文必须落入本轮范围，按同一口径实数并在自检中报告，不能用估算代替。低于下限时补足有因果作用的场面、行动后果、角色反应和对话；高于上限时压缩重复过程，不删用户指定的情节。“短、快、狠”只管场景节拍，不缩短整章。",
+    "用户提供并明确要求原样保存的全文保持原文；如超出范围，报告实数，不自行扩写或删改。",
+  ]
+  if (phase === "draft") return proseLengthContract.join("\n")
+  if (phase !== "synopsis_discuss") return undefined
   const lines = [
-    "## 创作台正文预算（本轮强制）",
-    "说明：下列字数是创作台当前的**单章正文主体字数范围**（标题不计入），是可调整的工作参数，不是固定门禁。",
+    ...proseLengthContract,
+    "",
     "结合卷目标、当前情节容量与场景需要，若当前描写/笔风/字数/节奏/因果焦点设置不合适，可在 artifact.creationDeskSettings 中给出需要调整的字段；用户仍可随时在创作台手动修改。字数调整必须同时给出最小值和最大值。",
     "描写与笔风只能选择本轮工作区实际存在的 `表现输出/描写规则/*.md`、`表现输出/笔风规则/*.md` 路径；只推荐/选择，不改写这些预设文件。",
     "规划弧大纲、估章数、判断是否超单章容量时，**必须**以此为准，不得改用自拟的「每章一两万字」之类默认。",
     "",
-    `### 单章字数：${String(presentation.minimumWordCount)}–${String(presentation.maximumWordCount)} 字`,
     "- 弧大纲中的「节奏与字数」须引用此区间；",
     "- 若情节容量明显超出该区间，应建议拆章 / 先落大纲，而不是暗中提高单章字数。",
   ]
