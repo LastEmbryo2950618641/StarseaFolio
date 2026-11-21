@@ -2801,6 +2801,15 @@ export class SynopsisConversationService {
         }
     const systemRules = await this.dependencies.prompts.loadSynopsisDiscussSystemRules()
     const defaultSkillPack = await this.dependencies.prompts.loadDefaultSkillPack("synopsis_discuss")
+    const recentUserMessages = (await this.dependencies.conversation.listMessages(input.sessionId))
+      .filter((message) => message.role === "user")
+      .slice(-8)
+    const draftWasRequestedRecently = recentUserMessages.some((message) => (
+      isExplicitChapterDraftRequest(message.content)
+    ))
+    const discussionDraftGuide = isExplicitChapterDraftRequest(input.userMessage) || draftWasRequestedRecently
+      ? await this.dependencies.prompts.loadOutlineToDraftGuide()
+      : undefined
     const turnMonitor = this.dependencies.readTurnMonitor === undefined
       ? undefined
       : await this.dependencies.readTurnMonitor()
@@ -3363,6 +3372,17 @@ export class SynopsisConversationService {
       )).length
       const contextMessages = [
         ...toVisibleDiscussContextMessages(storedContext),
+        ...(discussionDraftGuide === undefined || storedContext.some((message) => (
+          message.content?.includes("# 用户要求 + 梗概 + 细纲 → 正文草稿") === true
+        ))
+          ? []
+          : [{
+              messageId: this.dependencies.createId(),
+              sequence: storedContext.length,
+              role: "system" as const,
+              kind: "phase_instruction" as const,
+              content: discussionDraftGuide.text,
+            }]),
         {
           messageId: this.dependencies.createId(),
           sequence: storedContext.length,
@@ -6759,7 +6779,7 @@ export function isExplicitWholeVolumePlanningRequest(message: string): boolean {
 }
 
 function isExplicitChapterDraftRequest(message: string): boolean {
-  return /按细纲写正文|(?:生成|写|改|修订|续写|补齐|补全).{0,12}正文(?:草稿)?|(?:开始|继续)写正文|修订正文|改写正文|(?:细纲|大纲).{0,12}(?:和|及|与).{0,12}正文.{0,8}(?:都|一起|同时|补齐|补全|完成|写)|(?:一起|同时|都|连着).{0,12}(?:写|补|完成|生成).{0,12}(?:细纲|正文)/u.test(message)
+  return /按细纲写正文|(?:生成|写|改|修订|续写|补齐|补全|重写).{0,12}(?:正文|草稿)|(?:开始|继续)写正文|修订正文|改写正文|(?:细纲|大纲).{0,12}(?:和|及|与).{0,12}(?:正文|草稿).{0,8}(?:都|一起|同时|补齐|补全|完成|写|重写)?|(?:一起|同时|都|连着).{0,12}(?:写|补|完成|生成|重写).{0,12}(?:细纲|正文|草稿)/u.test(message)
 }
 
 function isExplicitChapterSynopsisWriteRequest(message: string): boolean {

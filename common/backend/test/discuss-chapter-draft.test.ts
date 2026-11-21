@@ -5,8 +5,10 @@ import { join } from "node:path"
 import Database from "better-sqlite3"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { PROTOCOL_VERSION } from "@starseafolio/contracts"
+import { PROTOCOL_VERSION, type PhaseRequestEnvelope } from "@starseafolio/contracts"
 
+import type { AIModelPort, ModelExecutionOptions } from "../src/application/turns/ports/ai-model-port.js"
+import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
 import {
   openChapterHarness,
   seedCommittedChapter,
@@ -22,8 +24,11 @@ afterEach(() => {
   }
 })
 
-async function withHarness(run: (harness: ChapterHarness) => Promise<void>): Promise<void> {
-  const harness = await openChapterHarness("Discuss Chapter Draft Test")
+async function withHarness(
+  run: (harness: ChapterHarness) => Promise<void>,
+  options?: Readonly<{ model?: AIModelPort }>,
+): Promise<void> {
+  const harness = await openChapterHarness("Discuss Chapter Draft Test", options)
   temporaryRoots.push(harness.root)
   try {
     await run(harness)
@@ -92,6 +97,57 @@ async function startDiscussOnPublishedChapter(harness: ChapterHarness, sequence 
 }
 
 describe("discuss auto-append chapter drafts", () => {
+  it("loads the prose drafting guide into context when a discussion turn writes a draft", async () => {
+    const delegate = new FakeAiModelAdapter(randomUUID)
+    const seenContextMessages: NonNullable<ModelExecutionOptions["contextMessages"]>[] = []
+    const model: AIModelPort = {
+      info: delegate.info,
+      execute(request: PhaseRequestEnvelope, options?: ModelExecutionOptions) {
+        seenContextMessages.push(options?.contextMessages ?? [])
+        return delegate.execute(request, options)
+      },
+      compressContext(input) {
+        return delegate.compressContext(input)
+      },
+    }
+    await withHarness(async (harness) => {
+      await seedCommittedChapter(harness)
+      await startDiscussOnPublishedChapter(harness)
+      const callsBeforeDraft = seenContextMessages.length
+      const draftSent = await invoke<{
+        appendedDraft?: { revisionTaskId: string }
+      }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "重写正文草稿，把开头写得更冷",
+      })
+      const revisionTaskId = draftSent.appendedDraft?.revisionTaskId
+      expect(revisionTaskId).toBeDefined()
+      if (revisionTaskId === undefined) throw new Error("Discussion did not save the draft")
+      const draftVersions = await invoke<{
+        versions: Array<{ body: string; isLatest: boolean; source: string }>
+      }>(harness, "chapter.revision.draftVersion.list", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        revisionTaskId,
+      })
+      expect(draftVersions.versions.some((version) => version.isLatest && version.source === "agent")).toBe(true)
+      expect(seenContextMessages.slice(callsBeforeDraft).flat().some((message) => (
+        message.content.includes("# 用户要求 + 梗概 + 细纲 → 正文草稿")
+      ))).toBe(true)
+      const callsBeforeFollowUp = seenContextMessages.length
+      await invoke(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "按刚才的方向再压缩一遍",
+      })
+
+      expect(seenContextMessages.slice(callsBeforeFollowUp).flat().some((message) => (
+        message.content.includes("# 用户要求 + 梗概 + 细纲 → 正文草稿")
+      ))).toBe(true)
+    }, { model })
+  })
+
   it("appends a draft from discuss send without changing the official body", async () => {
     await withHarness(async (harness) => {
       const chapter = await seedCommittedChapter(harness)
