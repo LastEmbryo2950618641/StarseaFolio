@@ -1404,6 +1404,7 @@ export class ProjectRuntime {
             userInput: input.heading === undefined
               ? input.userInput
               : `${input.heading}\n\n${input.userInput}`,
+            conversationArchiveSessionId: input.sessionId,
             chapterSequence,
             allowWorkspaceChapterReads: true,
             deductionGoalBundle: await this.createDeductionGoalsService().buildTurnBundle({

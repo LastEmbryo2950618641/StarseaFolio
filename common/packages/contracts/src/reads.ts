@@ -17,6 +17,21 @@ export const verificationProbeDescriptorSchema = z.object({
 })
 export type VerificationProbeDescriptor = z.infer<typeof verificationProbeDescriptorSchema>
 
+export const conversationArchiveQuerySchema = z.discriminatedUnion("operation", [
+  z.object({
+    operation: z.literal("search"),
+    query: z.string().trim().max(200).optional(),
+    role: z.enum(["user", "assistant"]).optional(),
+    offset: z.number().int().nonnegative().optional(),
+  }).strict(),
+  z.object({
+    operation: z.literal("read"),
+    messageId: z.string().trim().min(1).max(128),
+    offset: z.number().int().nonnegative().optional(),
+  }).strict(),
+])
+export type ConversationArchiveQuery = z.infer<typeof conversationArchiveQuerySchema>
+
 export const readRequestSchema = z.object({
   requestId: idSchema,
   reason: z.string().min(1),
@@ -29,6 +44,7 @@ export const readRequestSchema = z.object({
     maxCandidates: z.number().int().positive(),
     maxDepth: z.number().int().nonnegative(),
     sourceKinds: z.array(z.enum(["graph", "revision", "source", "rule", "reference", "web"])),
+    conversationArchive: conversationArchiveQuerySchema.optional(),
     sourceIds: z.array(sourceObjectIdSchema).optional(),
     sourceBoundary: z.enum(["start", "end"]).optional(),
     /**

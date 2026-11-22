@@ -1198,6 +1198,7 @@ export class BackendFacade {
       workspaceRootRef: payload.workspaceRootRef,
       userInput: prepared.userInput,
       chapterSequence: prepared.chapterSequence,
+      conversationArchiveSessionId: prepared.sessionId,
       allowWorkspaceChapterReads: payload.allowWorkspaceChapterReads,
       lockDeductionGoals: false,
       ...(payload.presentation === undefined ? {} : { presentation: payload.presentation }),
@@ -1212,6 +1213,7 @@ export class BackendFacade {
     projectId: ProjectId
     workspaceRootRef: string
     userInput: string
+    conversationArchiveSessionId?: string
     chapterSequence: number
     allowWorkspaceChapterReads: boolean
     presentation?: TurnOrchestratorInput["presentation"]
@@ -1313,6 +1315,7 @@ export class BackendFacade {
       internalStore: runtime.internalStore,
       userInput: input.userInput,
       chapterSequence,
+      ...(input.conversationArchiveSessionId === undefined ? {} : { conversationArchiveSessionId: input.conversationArchiveSessionId }),
       allowWorkspaceChapterReads: input.allowWorkspaceChapterReads,
       ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
       ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
@@ -1807,6 +1810,7 @@ export class BackendFacade {
       internalStore: runtime.internalStore,
       userInput: phaseInput.userInput,
       chapterSequence: phaseInput.chapterSequence,
+      ...(phaseInput.conversationArchiveSessionId === undefined ? {} : { conversationArchiveSessionId: phaseInput.conversationArchiveSessionId }),
       allowWorkspaceChapterReads: phaseInput.allowWorkspaceChapterReads,
       ...(phaseInput.presentation === undefined ? {} : { presentation: phaseInput.presentation }),
       ...(phaseInput.chapterIntent === undefined ? {} : { chapterIntent: phaseInput.chapterIntent }),
@@ -2072,6 +2076,7 @@ function readFacadeInterruptionTimestamp(error: unknown): number {
 function readRecoverablePhaseInput(value: unknown): {
   userInput: string
   chapterSequence: number
+  conversationArchiveSessionId?: string
   allowWorkspaceChapterReads: boolean
   presentation?: TurnOrchestratorInput["presentation"]
   chapterIntent?: TurnOrchestratorInput["chapterIntent"]
@@ -2084,6 +2089,7 @@ function readRecoverablePhaseInput(value: unknown): {
   return {
     userInput: record.userInput,
     chapterSequence: record.chapterSequence,
+    ...(typeof record.conversationArchiveSessionId !== "string" ? {} : { conversationArchiveSessionId: record.conversationArchiveSessionId }),
     allowWorkspaceChapterReads: record.allowWorkspaceChapterReads !== false,
     ...(record.presentation === undefined ? {} : { presentation: record.presentation as TurnOrchestratorInput["presentation"] }),
     ...(record.chapterIntent === undefined

@@ -42,7 +42,8 @@ describe("synopsis context compaction integration", () => {
           )) {
             retriedWithSmallerHistory = true
           }
-          sawFoldSummary ||= options?.contextMessages?.some((m) => m.content.includes("context-fold-summary-v1")) ?? false
+          sawFoldSummary ||= options?.contextMessages?.some((m) =>
+            m.content.includes("context-fold-summary-v1") && m.content.includes("conversation_archive")) ?? false
           sawBootstrap ||= phaseInput.readEvidence.some((e) => e.ownerId === "设定集/readme.md")
         }
         const result = await fake.execute(request, options)

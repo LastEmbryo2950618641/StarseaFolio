@@ -13,6 +13,8 @@ import {
 import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { digest } from "../src/core/identity/digest.js"
+import { assembleModelPhaseResult, parseModelPhaseResult } from "../src/infrastructure/models/deepseek/model-phase-result-assembler.js"
+import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
 import {
   openChapterHarness,
   prepareChapterPlanning,
@@ -1085,6 +1087,79 @@ describe("synopsis conversation", () => {
       expect(resolved.deductionGoalBundle).toBeDefined()
       expect(resolved.reconcile).toBeDefined()
     })
+  })
+
+  it("lets a draft started from the chapter button look up earlier user messages on demand", async () => {
+    const original = "让失踪多年的姐姐在这一章寄来第一封信。"
+    const fake = new FakeAiModelAdapter(randomUUID)
+    let draftRounds = 0
+    const model: AIModelPort = {
+      info: fake.info,
+      compressContext: (input) => fake.compressContext(input),
+      async execute(request, options) {
+        const baseline = await fake.execute(request, options)
+        if (request.phase === "synopsis_discuss") {
+          synopsisConversationStreamHub.setTodos(request.projectId,
+            [{ id: "discuss", content: "记录本章讨论", status: "completed" }], Date.now())
+          return {
+            ...baseline,
+            contextExchange: undefined,
+            result: {
+              ...baseline.result, outcome: "continue", requestedReads: [],
+              artifact: { assistantMessage: "已记录这条要求。", finalSelfReview: "本轮只讨论。" },
+            },
+          }
+        }
+        if (request.phase !== "draft") return baseline
+        expect(JSON.stringify(request.input)).not.toContain(original)
+        const context = options?.contextMessages ?? []
+        const results = context.flatMap((message) => {
+          try {
+            const payload = JSON.parse(message.content)
+            return payload.source === "conversation_archive" ? [payload] : []
+          } catch { return [] }
+        })
+        draftRounds += 1
+        if (draftRounds === 1) {
+          expect(context.map((message) => message.content).join("\n")).not.toContain(original)
+          expect(options?.phasePrompt?.text).toContain("query.conversationArchive")
+        }
+        if (draftRounds === 3) {
+          expect(results.at(-1).result).toMatchObject({ role: "user", content: original })
+          return baseline
+        }
+        const conversationArchive = draftRounds === 1
+          ? { operation: "search" as const, role: "user" as const, query: "第一封信" }
+          : { operation: "read" as const, messageId: results.at(-1).result.matches[0].messageId }
+        return {
+          result: assembleModelPhaseResult(parseModelPhaseResult({
+            outcome: "request_read",
+            requestedReads: [{
+              reason: "查阅本章的历史要求", expectedEvidence: "用户发言",
+              query: { conversationArchive },
+            }],
+            reason: "核对旧要求",
+            selfReview: "需要读回会话原文",
+          }, request.phase), request),
+          usage: baseline.usage,
+        }
+      },
+    }
+    const harness = await openChapterHarness("Read the archive from a chapter draft", { model })
+    temporaryRoots.push(harness.root)
+    try {
+      const base = { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef }
+      await invoke(harness, "synopsis.conversation.start", base)
+      await invoke(harness, "synopsis.conversation.send", { ...base, message: original })
+      await prepareChapterPlanning(harness)
+      const started = await invoke<{ taskId: string }>(harness, "synopsis.conversation.beginTurn", {
+        ...base, acknowledgeWarnings: true,
+      })
+      await waitForTask(harness.facade, started.taskId)
+      expect(draftRounds).toBe(3)
+    } finally {
+      await harness.container.close()
+    }
   })
 
   it("beginTurn starts a draft turn without locking planned progress", async () => {

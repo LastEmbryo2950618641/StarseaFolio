@@ -6,6 +6,7 @@ import {
   type ProjectId,
   type ProjectSettings,
   type ChapterNarrativeIntent,
+  type ConversationArchiveQuery,
   type CharacterFieldValue,
   type CreationDeskSettingsUpdate,
   type DiscussCustomProceedGates,
@@ -130,11 +131,13 @@ import {
   compactDiscussContextHistory,
   computeDiscussBootstrapDigest,
   describeRequiredRetryStep,
+  DISCUSS_ARCHIVE_NOTICE,
   DISCUSS_PROGRESS_PROTOCOL,
   DISCUSS_STEP_FAILURE_PROTOCOL,
   findInvalidDiscussGateMessageIds,
   measureDiscussProgress,
   readDiscussStepFailures,
+  selectActiveDiscussRoutingMessages,
   toVisibleDiscussContextMessages,
 } from "./discuss-session-context.js"
 import {
@@ -877,7 +880,10 @@ export class SynopsisConversationService {
         ]
         const { scope, usage } = await input.model.classifyDiscussTurn({
           message: input.message,
-          recentMessages: priorMessages.filter((message) => !message.hidden).slice(-4)
+          recentMessages: selectActiveDiscussRoutingMessages(
+            await this.dependencies.conversation.listDiscussContextMessages(session.sessionId),
+            priorMessages.filter((message) => !message.hidden).slice(-4),
+          )
             .map(({ role, content }) => ({ role, content: content.slice(0, 3_000) })),
           chapterSequence: session.chapterSequence,
           focusKind: session.focusKind,
@@ -2706,7 +2712,7 @@ export class SynopsisConversationService {
     projectId: ProjectId
     workspaceRootRef: string
     sessionId?: string
-  }>): Promise<SynopsisResolveTurnInputResult> {
+  }>): Promise<SynopsisResolveTurnInputResult & { sessionId: string }> {
     const session = input.sessionId === undefined
       ? await this.dependencies.conversation.findActiveSession(input.projectId)
       : await this.dependencies.conversation.findSession(input.sessionId)
@@ -2735,6 +2741,7 @@ export class SynopsisConversationService {
     })
     return {
       ...resolved,
+      sessionId: session.sessionId,
       deductionGoalBundle,
       reconcile,
     }
@@ -2748,6 +2755,7 @@ export class SynopsisConversationService {
     forceOverride?: boolean
   }>): Promise<Readonly<{
     userInput: string
+    sessionId: string
     chapterSequence: number
     source: SynopsisResolveTurnInputResult["source"]
     synopsisPath?: string
@@ -2773,11 +2781,24 @@ export class SynopsisConversationService {
     }
     return {
       userInput: resolved.userInput,
+      sessionId: resolved.sessionId,
       chapterSequence: resolved.chapterSequence,
       source: resolved.source,
       ...(resolved.synopsisPath === undefined ? {} : { synopsisPath: resolved.synopsisPath }),
       reconcile,
     }
+  }
+
+  public async readConversationArchive(
+    scope: Readonly<{ projectId: ProjectId; sessionId: string }>,
+    query: ConversationArchiveQuery,
+  ) {
+    const offset = query.offset ?? 0
+    return query.operation === "search"
+      ? this.dependencies.conversation.searchArchivedMessages({
+          ...scope, offset, query: query.query ?? "", ...(query.role === undefined ? {} : { role: query.role }),
+        })
+      : this.dependencies.conversation.readArchivedMessage({ ...scope, offset, messageId: query.messageId })
   }
 
   private async hydrateDiscussUsage(projectId: ProjectId): Promise<SynopsisConversationStreamUsage | undefined> {
@@ -2860,16 +2881,13 @@ export class SynopsisConversationService {
       )
     const outlineMarkdown = await this.readSynopsisFile(workspaceRootRef, outlinePath)
     const synopsisMarkdown = await this.readSynopsisFile(workspaceRootRef, session.synopsisPath)
-    const messages = await this.dependencies.conversation.listMessages(session.sessionId)
-    const userDirectivesAppendix = formatUserCreativeDirectivesAppendix(messages)
-
     if (outlineMarkdown.trim().length > 0) {
       const synopsisAppendix = synopsisMarkdown.trim().length > 0
         ? `\n\n---\n\n## 剧情梗概（附录·冲突以细纲为准，用户合同仍须覆盖）\n\n${synopsisMarkdown.trim()}\n`
         : ""
       return {
         chapterSequence: session.chapterSequence,
-        userInput: `${outlineMarkdown.trim()}${synopsisAppendix}${userDirectivesAppendix}`,
+        userInput: `${outlineMarkdown.trim()}${synopsisAppendix}`,
         source: "outline_file",
         synopsisPath: session.synopsisPath,
       }
@@ -2878,16 +2896,19 @@ export class SynopsisConversationService {
     if (synopsisMarkdown.trim().length > 0) {
       return {
         chapterSequence: session.chapterSequence,
-        userInput: `${synopsisMarkdown.trim()}${userDirectivesAppendix}`,
+        userInput: synopsisMarkdown.trim(),
         source: "synopsis_file",
         synopsisPath: session.synopsisPath,
       }
     }
 
-    if (messages.length > 0) {
+    const history = await this.dependencies.conversation.searchArchivedMessages({
+      projectId: session.projectId, sessionId: session.sessionId, query: "", offset: 0, role: "user",
+    })
+    if (history.matches.length > 0) {
       return {
         chapterSequence: session.chapterSequence,
-        userInput: summarizeConversation(messages),
+        userInput: "继续当前章的正文推演。需要前情或旧要求时查阅会话存档。",
         source: "conversation",
       }
     }
@@ -3155,6 +3176,27 @@ export class SynopsisConversationService {
       ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
     })
     let storedContext = await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)
+    const compactOlderHistory = async (): Promise<void> => {
+      const compacted = compactDiscussContextHistory(storedContext)
+      if (compacted === undefined) return
+      const compactedAt = this.dependencies.now()
+      if (compacted.noticeContent !== undefined) {
+        await this.dependencies.conversation.appendDiscussContextMessages({
+          sessionId: input.sessionId, projectId: input.projectId, createdAtMs: compactedAt,
+          messages: [{ role: "system", kind: "phase_instruction", content: compacted.noticeContent }],
+        })
+      }
+      await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, compacted.messagesToHide, compactedAt)
+      storedContext = await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)
+      runtimeLog("info", "synopsis-conversation", "context.history_compacted", {
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        hiddenMessageCount: compacted.messagesToHide.length,
+        retainedTurnCount: compacted.retainedTurnCount,
+        visibleMessageCount: storedContext.length,
+      })
+    }
+    await compactOlderHistory()
     const draftGuideHeader = "# 用户要求 + 梗概 + 细纲 → 正文草稿"
     const cachedDraftGuides = storedContext.filter((message) => (
       message.kind === "phase_instruction" && message.role === "system"
@@ -3321,6 +3363,7 @@ export class SynopsisConversationService {
     let originalWorkGateRepairs = 0
     let goalScheduleRepairs = 0
     let pendingWrites: PendingDiscussWrites | undefined
+    let archiveResults: ReturnType<typeof toVisibleDiscussContextMessages> = []
     const repairHints: string[] = []
     const originalWorkContext = detectsOriginalWorkContext({
       userMessage: input.userMessage,
@@ -3452,7 +3495,7 @@ export class SynopsisConversationService {
     const allowChapterWorkflowTools = input.allowChapterWorkflowTools
       ?? input.allowWorkflowTools === true
     const executeWorkflowTool = this.dependencies.executeWorkflowTool
-    const toolCallbacks: SynopsisWorkflowToolCallbacks = input.allowWorkflowTools !== true
+    const workflowCallbacks: SynopsisWorkflowToolCallbacks = input.allowWorkflowTools !== true
       ? {
           // External reference research cannot confirm style or write story artifacts.
           ...(input.creativeSetup !== undefined || this.dependencies.searchOriginalWork === undefined
@@ -3517,6 +3560,14 @@ export class SynopsisConversationService {
             }
           },
         }
+    const toolCallbacks: SynopsisWorkflowToolCallbacks = {
+      ...workflowCallbacks,
+      ...(input.creativeSetup !== undefined ? {} : {
+        readConversationArchive: (query) => this.readConversationArchive(
+          { projectId: input.projectId, sessionId: input.sessionId }, query,
+        ),
+      }),
+    }
 
     if (originalWorkContext) {
       runtimeLog("info", "synopsis-conversation", "original_work_reference.capability", {
@@ -3681,8 +3732,9 @@ export class SynopsisConversationService {
           sequence: storedContext.length,
           role: "system" as const,
           kind: "phase_instruction" as const,
-          content: synopsisToolCatalog(toolCallbacks),
+          content: synopsisToolCatalog(toolCallbacks, foldsApplied > 0 ? DISCUSS_ARCHIVE_NOTICE : undefined),
         },
+        ...archiveResults,
         ...(input.writeScope === undefined ? [] : [{
           messageId: this.dependencies.createId(),
           sequence: storedContext.length,
@@ -3735,6 +3787,7 @@ export class SynopsisConversationService {
             ?? defaultProjectSettings.execution.contextCompactionThresholdRatio,
           targetRatio: settings?.execution.contextCompressionTargetRatio
             ?? defaultProjectSettings.execution.contextCompressionTargetRatio,
+          ...(toolCallbacks.readConversationArchive === undefined ? {} : { foldNotice: DISCUSS_ARCHIVE_NOTICE }),
           onReadyToCall: () => {
             synopsisConversationStreamHub.beginThinkingRound(input.projectId, thinkingRound, this.dependencies.now())
           },
@@ -3743,6 +3796,8 @@ export class SynopsisConversationService {
           },
           onCompacted: async (event) => {
             if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
+            const hiddenIds = new Set(event.hiddenMessageIds)
+            archiveResults = archiveResults.filter((message) => !hiddenIds.has(message.messageId))
             await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, event.hiddenMessageIds, this.dependencies.now())
             if (event.foldMessages.length > 0) {
               await this.dependencies.conversation.appendDiscussContextMessages({
@@ -3911,33 +3966,7 @@ export class SynopsisConversationService {
             messages: exchangeMessages,
           })
           storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
-          const compacted = compactDiscussContextHistory(storedContext)
-          if (compacted !== undefined) {
-            await this.dependencies.conversation.appendDiscussContextMessages({
-              sessionId: input.sessionId,
-              projectId: input.projectId,
-              createdAtMs: this.dependencies.now(),
-              messages: [{
-                role: "user",
-                kind: "phase_instruction",
-                content: compacted.summaryContent,
-              }],
-            })
-            await this.dependencies.conversation.hideDiscussContextMessages(
-              input.sessionId,
-              compacted.messagesToHide,
-              this.dependencies.now(),
-            )
-            storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
-            runtimeLog("info", "synopsis-conversation", "context.history_compacted", {
-              projectId: input.projectId,
-              sessionId: input.sessionId,
-              hiddenMessageCount: compacted.messagesToHide.length,
-              summarizedUserInputCount: compacted.summarizedUserInputCount,
-              retainedTurnCount: compacted.retainedTurnCount,
-              visibleMessageCount: storedContext.length,
-            })
-          }
+          await compactOlderHistory()
         }
         await this.dependencies.conversation.saveDiscussContextDigests({
           sessionId: input.sessionId,
@@ -4106,6 +4135,7 @@ export class SynopsisConversationService {
       let originalWorkFallbackNotice: string | undefined
       if (originalWorkContext && !originalWorkHasEvidence && parsedResult.outcome !== "request_read") {
         const canBootstrapTodo = originalToolRequest?.name === "todo_write"
+          || originalToolRequest?.name === "conversation_archive"
         const canUseOriginalTool = originalToolRequested
         const mustReadImportedReference = originalWorkStage === "archive_imported"
           && originalWorkGateRepairs < 3
@@ -4296,12 +4326,23 @@ export class SynopsisConversationService {
               { source: toolArtifact.data },
             )
           }
-          await this.dependencies.conversation.appendDiscussContextMessages({
-            sessionId: input.sessionId,
-            projectId: input.projectId,
-            createdAtMs: this.dependencies.now(),
-            messages: [{ role: "system", kind: "phase_instruction", content: JSON.stringify(toolResult) }],
-          })
+          if (toolRequest.name === "conversation_archive" && toolRequest.action === "invoke") {
+            // Historical text is call-scoped data. Keep it available during this turn only.
+            archiveResults.push({
+              messageId: this.dependencies.createId(),
+              sequence: (storedContext.at(-1)?.sequence ?? 0) + archiveResults.length + 1,
+              role: "user",
+              kind: "phase_instruction",
+              content: JSON.stringify(toolResult),
+            })
+          } else {
+            await this.dependencies.conversation.appendDiscussContextMessages({
+              sessionId: input.sessionId,
+              projectId: input.projectId,
+              createdAtMs: this.dependencies.now(),
+              messages: [{ role: "system", kind: "phase_instruction", content: JSON.stringify(toolResult) }],
+            })
+          }
           // The next model round must see the result it is expected to act on.
           storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
           if (toolFailed && !isPrecedingChapterPublishGateError(new Error(toolErrorMessage))) {
@@ -6511,28 +6552,6 @@ function truncateToolRunSummary(text: string): string {
   const normalized = text.replaceAll("\r\n", "\n").trim()
   if (normalized.length <= 1_200) return normalized
   return `${normalized.slice(0, 1_199)}…`
-}
-
-function summarizeConversation(messages: readonly Readonly<{ role: string; content: string }>[]): string {
-  const lines = messages.map((message) => {
-    const speaker = message.role === "user" ? "用户" : message.role === "assistant" ? "Agent" : "系统"
-    return `${speaker}：${message.content}`
-  })
-  return `# 剧情梗概讨论记录\n\n${lines.join("\n\n")}`
-}
-
-/** Recent user creative asks appended so formal draft bootstrap keeps user+synopsis+outline together. */
-function formatUserCreativeDirectivesAppendix(
-  messages: readonly Readonly<{ role: string; content: string }>[],
-): string {
-  const userLines = messages
-    .filter((message) => message.role === "user")
-    .map((message) => message.content.trim())
-    .filter((content) => content.length > 0)
-  if (userLines.length === 0) return ""
-  const recent = userLines.slice(-8)
-  const clipped = recent.map((content) => (content.length <= 1_200 ? content : `${content.slice(0, 1_199)}…`))
-  return `\n\n---\n\n## 用户创作指令（摘录·须与细纲/梗概一并遵守）\n\n${clipped.map((line, index) => `${String(index + 1)}. ${line}`).join("\n\n")}\n`
 }
 
 function isMissingSynopsisArtifactError(error: unknown): boolean {

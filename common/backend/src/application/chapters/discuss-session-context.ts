@@ -5,11 +5,14 @@ import type {
 } from "@starseafolio/contracts"
 
 import { MODEL_CONTEXT_DELTA_HEADER } from "../context/model-context-appender.js"
+import { CONTEXT_FOLD_SUMMARY_PROTOCOL } from "../context/context-compacting-execution.js"
 import { digest, resolveDescriptionRulePaths, listWorkDescriptionRuleFiles } from "../../core/index.js"
 import type { TurnReadEvidence } from "../turns/ports/ai-model-port.js"
 import { isPresentationRuleMarkdownPath, listUserRuleMarkdownPaths } from "./synopsis-workspace-reads.js"
 
 export const DISCUSS_HISTORY_SUMMARY_PROTOCOL = "discuss-history-summary-v1"
+export const DISCUSS_ARCHIVE_NOTICE_PROTOCOL = "discuss-archive-notice-v1"
+export const DISCUSS_ARCHIVE_NOTICE = "部分会话上下文已压缩。遇到继续、重写或引用旧要求而现有上下文不全时，可用 conversation_archive 按需查阅本会话的原始消息。以用户当前要求为准。工作区正文和设定可用 request_read 查阅。"
 const DISCUSS_HISTORY_COMPACT_AFTER_TURNS = 12
 const DISCUSS_HISTORY_KEEP_RECENT_TURNS = 8
 export const DISCUSS_PROGRESS_PROTOCOL = "discuss-progress-v1"
@@ -92,90 +95,70 @@ export function measureDiscussProgress(messages: readonly ModelContextMessage[],
   }
 }
 
+const discussHistoryNoticeContent = JSON.stringify({
+  protocol: DISCUSS_ARCHIVE_NOTICE_PROTOCOL,
+  notice: DISCUSS_ARCHIVE_NOTICE,
+})
+
+export function selectActiveDiscussRoutingMessages(
+  context: readonly ModelContextMessage[],
+  recent: readonly Readonly<{ role: "user" | "assistant" | "system"; content: string }>[],
+): readonly Readonly<{ role: "user" | "assistant" | "system"; content: string }>[] {
+  const folded = context.some((message) => message.kind === "phase_instruction" && [
+    DISCUSS_ARCHIVE_NOTICE_PROTOCOL, DISCUSS_HISTORY_SUMMARY_PROTOCOL, CONTEXT_FOLD_SUMMARY_PROTOCOL,
+  ].some((protocol) => message.content?.startsWith(`{"protocol":"${protocol}"`) === true))
+  if (!folded) return recent
+
+  const activeTurns = new Map<string, { user?: string; assistant?: string }>()
+  for (const message of context) {
+    if (message.turnId === undefined || message.content === undefined) continue
+    const turn = activeTurns.get(message.turnId) ?? {}
+    if (message.kind === "phase_request" && message.content.startsWith(`${MODEL_CONTEXT_DELTA_HEADER}\n`)) {
+      const userInput = parseJsonObject(message.content.slice(MODEL_CONTEXT_DELTA_HEADER.length + 1))?.input
+      if (userInput !== null && typeof userInput === "object" && "userInput" in userInput
+        && typeof userInput.userInput === "string") turn.user = userInput.userInput
+    } else if (message.kind === "phase_response") {
+      const artifact = parseJsonObject(message.content)?.artifact
+      if (artifact !== null && typeof artifact === "object" && "assistantMessage" in artifact
+        && typeof artifact.assistantMessage === "string") turn.assistant = artifact.assistantMessage
+    }
+    activeTurns.set(message.turnId, turn)
+  }
+  return [...activeTurns.values()].slice(-2).flatMap(({ user, assistant }) => [
+    ...(user === undefined ? [] : [{ role: "user" as const, content: user }]),
+    ...(assistant === undefined ? [] : [{ role: "assistant" as const, content: assistant }]),
+  ])
+}
+
 export function compactDiscussContextHistory(messages: readonly ModelContextMessage[]): Readonly<{
   messagesToHide: readonly string[]
-  summaryContent: string
-  summarizedUserInputCount: number
+  noticeContent?: string
   retainedTurnCount: number
 }> | undefined {
   const ordered = [...messages].sort((left, right) => left.sequence - right.sequence)
   const turnIds = [...new Set(ordered.flatMap((message) => (
-    message.kind === "phase_request" && message.turnId !== undefined ? [message.turnId] : []
+    message.kind === "phase_request" && message.turnId !== undefined
+      && message.content?.startsWith(MODEL_CONTEXT_DELTA_HEADER) === true ? [message.turnId] : []
   )))]
-  if (turnIds.length < DISCUSS_HISTORY_COMPACT_AFTER_TURNS) return undefined
+  const retainedTurnIds = turnIds.length >= DISCUSS_HISTORY_COMPACT_AFTER_TURNS
+    ? turnIds.slice(-DISCUSS_HISTORY_KEEP_RECENT_TURNS)
+    : turnIds
+  const oldTurnIds = new Set(turnIds.slice(0, turnIds.length - retainedTurnIds.length))
+  const messagesToHide = ordered.flatMap((message) => {
+    const isLegacySummary = message.kind === "phase_instruction"
+      && message.content?.startsWith(`{"protocol":"${DISCUSS_HISTORY_SUMMARY_PROTOCOL}"`) === true
+    const isOldExchange = message.turnId !== undefined && oldTurnIds.has(message.turnId)
+      && (message.kind === "phase_request" || message.kind === "phase_response")
+    return isLegacySummary || isOldExchange ? [message.messageId] : []
+  })
+  if (messagesToHide.length === 0) return undefined
 
-  const retainedTurnIds = new Set(turnIds.slice(-DISCUSS_HISTORY_KEEP_RECENT_TURNS))
-  const oldTurnIds = new Set(turnIds.filter((turnId) => !retainedTurnIds.has(turnId)))
-  if (oldTurnIds.size === 0) return undefined
-
-  const userInputs: string[] = []
-  const exchanges: unknown[] = []
-  const archivedMessageIds: string[] = []
-  const summaryMessageIds: string[] = []
-  const addUserInput = (value: string): void => {
-    if (value.trim().length === 0) return
-    userInputs.push(value)
-  }
-
-  for (const message of ordered) {
-    if (message.kind === "phase_instruction" && message.content?.startsWith("{\"protocol\":\"discuss-history-summary-v1\"") === true) {
-      summaryMessageIds.push(message.messageId)
-      try {
-        const parsed = JSON.parse(message.content) as { protocol?: unknown; userInputs?: unknown; exchanges?: unknown }
-        if (parsed.protocol === DISCUSS_HISTORY_SUMMARY_PROTOCOL && Array.isArray(parsed.userInputs)) {
-          for (const item of parsed.userInputs) if (typeof item === "string") addUserInput(item)
-          if (Array.isArray(parsed.exchanges)) exchanges.push(...parsed.exchanges)
-        }
-      } catch {
-        // A malformed old summary is left visible and is not treated as recoverable input.
-        summaryMessageIds.pop()
-      }
-      continue
-    }
-    if (message.turnId === undefined || !oldTurnIds.has(message.turnId) || message.content === undefined) continue
-    if (message.kind === "phase_request") {
-      const delta = readDiscussRequestDelta(message.content)
-      if (delta === undefined) continue
-      const input = delta.input as Record<string, unknown>
-      if (typeof input.userInput === "string" && input.userInput.trim().length > 0) {
-        addUserInput(input.userInput)
-        exchanges.push([message.role, {
-          ...delta,
-          input: { ...input, userInput: { $ref: `#/userInputs/${String(userInputs.length - 1)}` } },
-        }])
-      } else {
-        exchanges.push([message.role, delta])
-      }
-      archivedMessageIds.push(message.messageId)
-    } else if (message.kind === "phase_response") {
-      // Keep the complete semantic payload: decisions and evidence may exist only here.
-      let content: unknown = message.content
-      try { content = JSON.parse(message.content) } catch { /* Preserve non-JSON replies verbatim. */ }
-      exchanges.push([message.role, content])
-      archivedMessageIds.push(message.messageId)
-    }
-  }
-  if (userInputs.length === 0) return undefined
-
-  const messagesToHide = [...summaryMessageIds, ...archivedMessageIds]
+  const hasNotice = ordered.some((message) => message.kind === "phase_instruction"
+    && message.content === discussHistoryNoticeContent)
   return {
     messagesToHide,
-    summaryContent: JSON.stringify({ protocol: DISCUSS_HISTORY_SUMMARY_PROTOCOL, userInputs, exchanges }),
-    summarizedUserInputCount: userInputs.length,
-    retainedTurnCount: retainedTurnIds.size,
-  }
-}
-
-function readDiscussRequestDelta(content: string | undefined): Record<string, unknown> | undefined {
-  if (content === undefined || !content.startsWith(`${MODEL_CONTEXT_DELTA_HEADER}\n`)) return undefined
-  try {
-    const parsed: unknown = JSON.parse(content.slice(MODEL_CONTEXT_DELTA_HEADER.length + 1))
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
-    const input = (parsed as Record<string, unknown>).input
-    if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined
-    return parsed as Record<string, unknown>
-  } catch {
-    return undefined
+    ...(hasNotice ? {} : { noticeContent: discussHistoryNoticeContent }),
+    retainedTurnCount: retainedTurnIds.length,
   }
 }
 

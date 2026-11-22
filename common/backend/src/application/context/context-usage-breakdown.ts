@@ -221,9 +221,10 @@ function classifyPhaseInstruction(content: string | undefined): ContextUsageCate
     // Ephemeral tool catalog injected for the wire call (rarely persisted).
     if (record.protocol === "synopsis-tools-v1" && Array.isArray(record.tools)) return "tools"
     if (record.protocol === "synopsis-skills-v1") return "skills"
-    // Tool results, discuss gates, and lossless history summaries are conversation state.
+    // Tool results, discussion gates, and archive notices are conversation state.
     if (record.protocol === "synopsis-tools-v1"
       || record.protocol === "discuss-gate-v1"
+      || record.protocol === "discuss-archive-notice-v1"
       || record.protocol === "discuss-history-summary-v1") {
       return "conversation"
     }

@@ -665,6 +665,7 @@ export const synopsisDiscussArtifactSchema = z.object({
       "bash",
       "todo_write",
       "memory_write",
+      "conversation_archive",
       "original_work_search",
       "original_work_download",
       "character_update",

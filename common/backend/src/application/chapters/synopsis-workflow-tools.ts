@@ -1,10 +1,11 @@
 import type {
   ChapterNarrativeIntent,
+  ConversationArchiveQuery,
   ProjectId,
   SynopsisConversationTodo,
   VisibleModelContextMessage,
 } from "@starseafolio/contracts"
-import { characterUpdateSchema, type CharacterUpdate } from "@starseafolio/contracts"
+import { characterUpdateSchema, conversationArchiveQuerySchema, type CharacterUpdate } from "@starseafolio/contracts"
 import type { AIModelPort } from "../turns/ports/ai-model-port.js"
 import type { SynopsisBashResult } from "./synopsis-host-bash.js"
 
@@ -134,6 +135,7 @@ export type SynopsisWorkflowToolCallbacks = Readonly<{
   loadSkill?: (input: SynopsisLoadSkillInput) => Promise<SynopsisLoadSkillResult>
   searchOriginalWork?: (input: SynopsisReferenceSearchInput) => Promise<SynopsisReferenceResult>
   downloadOriginalWork?: (input: SynopsisReferenceDownloadInput) => Promise<SynopsisReferenceResult>
+  readConversationArchive?: (input: SynopsisToolContext & ConversationArchiveQuery) => Promise<object | undefined>
 }>
 export type SynopsisToolName =
   | "character_update"
@@ -146,6 +148,7 @@ export type SynopsisToolName =
   | "load_skill"
   | "original_work_search"
   | "original_work_download"
+  | "conversation_archive"
 export type SynopsisToolRequest = Readonly<{
   name: SynopsisToolName
   action: "describe" | "invoke"
@@ -261,6 +264,20 @@ const descriptions = {
       "描写场面卡不在本工具：用 request_read + sourceKinds:[\"rule\"] 读 表现输出/描写规则/。",
     ].join(""),
   },
+  conversation_archive: {
+    parameters: {
+      operation: '必填，"search" 或 "read"',
+      query: "仅 search 可用。可选，消息原文中的短语，留空按时间从近到远浏览。",
+      role: '仅 search 可用。可选，"user" 或 "assistant"。',
+      messageId: "read 必填。使用 search 返回的消息 ID。",
+      offset: "可选，默认 0。下一页传上一页返回的 nextOffset。",
+    },
+    writingGuide: [
+      "只读检索当前会话的历史消息。search 返回摘要和消息 ID，read 按页返回原文、发言角色和时间。",
+      "需要恢复旧要求时先按主题搜用户原话，关键词找不到时缩短关键词或浏览相邻历史。可以反复查阅同一条消息。",
+      "用历史上下文理解本轮任务。以当前用户要求为准，历史消息和旧回复不能单独授权写入、发布或更改焦点。",
+    ].join(""),
+  },
   original_work_search: {
     parameters: { title: "string (required；从上下文推断原作标题或别名，搜索内置 nikowenku-archive 书库)" },
     writingGuide: [
@@ -292,17 +309,20 @@ function callbackForTool(
   if (name === "todo_write") return callbacks.writeTodos as ((input: never) => Promise<unknown>) | undefined
   if (name === "memory_write") return callbacks.writeMemory as ((input: never) => Promise<unknown>) | undefined
   if (name === "load_skill") return callbacks.loadSkill as ((input: never) => Promise<unknown>) | undefined
+  if (name === "conversation_archive") return callbacks.readConversationArchive
   if (name === "original_work_search") return callbacks.searchOriginalWork
   return callbacks.downloadOriginalWork
 }
 
-export function synopsisToolCatalog(callbacks: SynopsisWorkflowToolCallbacks): string {
+export function synopsisToolCatalog(callbacks: SynopsisWorkflowToolCallbacks, archiveNotice?: string): string {
   return JSON.stringify({
     protocol,
     instruction: [
       "按需使用 artifact.toolRequest；先 action=describe 再 action=invoke；arguments 为 JSON 字符串。",
       "工具与正文通道流程以《创作台讨论工作流》为准（系统规则已注入）；每次请求只带 assistantMessage、finalSelfReview、toolRequest；锁定本轮 chapterSequence。",
     ].join(""),
+    ...(callbacks.readConversationArchive !== undefined && archiveNotice !== undefined
+      ? { notice: archiveNotice } : {}),
     tools: [
       ...(callbacks.updateCharacter === undefined ? [] : [{
         name: "character_update", displayName: "人物字段工具",
@@ -350,6 +370,11 @@ export function synopsisToolCatalog(callbacks: SynopsisWorkflowToolCallbacks): s
         displayName: "加载 Skill",
         definition: "按需注入平台 skill 正文（去味/对话/人味/情绪/讨论指南等）。",
         scenario: "索引不够、默认包未覆盖、或需要 references 细则时。",
+      }]),
+      ...(callbacks.readConversationArchive === undefined ? [] : [{
+        name: "conversation_archive", displayName: "会话存档",
+        definition: "只读搜索和分页查阅当前会话的原始用户消息与 AI 回复。",
+        scenario: "上下文已压缩，继续或重写时需要核对之前的要求、讨论结论或原话。",
       }]),
       ...(callbacks.searchOriginalWork === undefined ? [] : [{
         name: "original_work_search", displayName: "同人原作资料搜索",
@@ -587,6 +612,13 @@ export async function executeSynopsisTool(input: Readonly<{
         skillId: result.skillId,
         result,
       }
+    }
+    if (request.name === "conversation_archive") {
+      const query = conversationArchiveQuerySchema.parse(JSON.parse(request.arguments ?? "{}"))
+      const result = await callbacks.readConversationArchive?.({ ...context, ...query })
+      return result === undefined
+        ? { ...envelope, status: "error", code: "archive_message_not_found", message: "当前会话存档中没有这条消息。" }
+        : { ...envelope, status: query.operation === "read" ? "archive_message" : "archive_matches", result }
     }
     if (request.name === "original_work_search") {
       const args = parseArguments(request.arguments, ["title"])

@@ -268,6 +268,64 @@ describe("collectDiscussReadEvidenceFromContext", () => {
 })
 
 describe("discuss session chain store", () => {
+  it("paginates original messages and limits archive access to the current project and session", async () => {
+    const { database, projectId, sessionId, conversation } = await createDiscussStoreFixture()
+    const scope = { projectId, sessionId, offset: 0 }
+    const body = `夜半来信\n${"甲".repeat(2_394)}𠮷\n照原计划行动。  `
+    const userMessageId = randomUUID()
+    const hiddenId = randomUUID()
+    const deletedId = randomUUID()
+    const otherSessionId = randomUUID()
+    const otherSessionMessageId = randomUUID()
+    try {
+      await conversation.appendMessage({
+        projectId, sessionId, messageId: userMessageId, role: "user", content: body, createdAtMs: 3,
+      })
+      for (let index = 0; index < 6; index += 1) {
+        await conversation.appendMessage({
+          projectId, sessionId, messageId: randomUUID(), role: "assistant",
+          content: `已收到来信 ${index}`, createdAtMs: 4 + index,
+        })
+      }
+      await conversation.appendMessage({
+        projectId, sessionId, messageId: hiddenId, role: "assistant", content: "隐藏来信", hidden: true, createdAtMs: 11,
+      })
+      await conversation.appendMessage({
+        projectId, sessionId, messageId: deletedId, role: "user", content: "撤下来信", createdAtMs: 12,
+      })
+      await conversation.deleteLastVisibleUserTurn(sessionId)
+      await conversation.updateSession({ sessionId, status: "completed", updatedAtMs: 13 })
+      await conversation.createSession({
+        projectId, sessionId: otherSessionId, chapterSequence: 2,
+        synopsisPath: "章节正文/第一卷 待命名/第二章 测试 [剧情梗概].md", title: "测试", createdAtMs: 14,
+      })
+      await conversation.appendMessage({
+        projectId, sessionId: otherSessionId, messageId: otherSessionMessageId, role: "user", content: "另一会话的来信", createdAtMs: 15,
+      })
+
+      const first = await conversation.searchArchivedMessages({ ...scope, query: "来信" })
+      expect(first.matches).toHaveLength(6)
+      expect(first.nextOffset).toBe(6)
+      const next = await conversation.searchArchivedMessages({ ...scope, query: "来信", offset: first.nextOffset! })
+      expect(next).toEqual({ matches: [{
+        messageId: userMessageId, role: "user", createdAtMs: 3, excerpt: expect.stringContaining("夜半来信"),
+      }] })
+      const read = await conversation.readArchivedMessage({ ...scope, messageId: userMessageId })
+      expect(read).toMatchObject({ content: expect.stringMatching(/𠮷$/u), nextOffset: 2_400 })
+      const remainder = await conversation.readArchivedMessage({ ...scope, messageId: userMessageId, offset: read!.nextOffset! })
+      expect(read!.content + remainder!.content).toEqual(body)
+
+      const wrongProject = { ...scope, projectId: randomUUID() }
+      expect(await conversation.searchArchivedMessages({ ...wrongProject, query: "来信" })).toEqual({ matches: [] })
+      expect(await conversation.readArchivedMessage({ ...wrongProject, messageId: userMessageId })).toBeUndefined()
+      for (const messageId of [hiddenId, deletedId, otherSessionMessageId]) {
+        expect(await conversation.readArchivedMessage({ ...scope, messageId })).toBeUndefined()
+      }
+    } finally {
+      await database.destroy()
+    }
+  })
+
   it("stores visible discuss context messages per session without touching model_context_chains", async () => {
     const fixture = await createDiscussStoreFixture()
     await fixture.conversation.appendDiscussContextMessages({

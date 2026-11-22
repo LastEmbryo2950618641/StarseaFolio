@@ -175,6 +175,7 @@ function isAlwaysProtectedProtocol(protocol: string): boolean {
   return protocol === "discuss-step-failures-v1"
     || protocol === "discuss-progress-v1"
     || protocol === "discuss-gate-v1"
+    || protocol === "discuss-archive-notice-v1"
     || protocol === CONTEXT_BUDGET_PROTOCOL
 }
 
@@ -297,10 +298,11 @@ export function buildFoldSummaryContent(input: {
   summary: string
   foldedMessageCount: number
   foldedMessageIds: readonly string[]
+  notice?: string
 }): string {
   return JSON.stringify({
     protocol: CONTEXT_FOLD_SUMMARY_PROTOCOL,
-    notice: FOLD_NOTICE,
+    notice: input.notice ?? FOLD_NOTICE,
     foldedMessageCount: input.foldedMessageCount,
     foldedMessageIds: input.foldedMessageIds,
     summary: input.summary,
@@ -338,6 +340,7 @@ export async function foldContextMessages(input: {
   windowTokens: number
   targetRatio: number
   observedInputTokens?: number
+  foldNotice?: string
   signal?: AbortSignal
   createMessageId: () => string
 }): Promise<{
@@ -387,6 +390,7 @@ export async function foldContextMessages(input: {
       summary: compressed.summary,
       foldedMessageCount: foldedIds.length,
       foldedMessageIds: foldedIds,
+      ...(input.foldNotice === undefined ? {} : { notice: input.foldNotice }),
     })
     const foldDraft: ContextFoldMessageDraft = {
       role: "user",
@@ -446,6 +450,7 @@ export async function executeWithContextCompaction(input: {
   lastRequestInputTokens?: number
   triggerRatio: number
   targetRatio: number
+  foldNotice?: string
   onReadyToCall?(): void
   /** Fired around each compaction attempt so the UI can show a `compression` badge. */
   onCompacting?(active: boolean): void
@@ -465,6 +470,7 @@ export async function executeWithContextCompaction(input: {
         currentTurnId: input.request.turnId,
         windowTokens,
         targetRatio: input.targetRatio,
+        ...(input.foldNotice === undefined ? {} : { foldNotice: input.foldNotice }),
         ...(observedInputTokens === undefined ? {} : { observedInputTokens }),
         ...(input.options.signal === undefined ? {} : { signal: input.options.signal }),
         createMessageId,

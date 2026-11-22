@@ -331,6 +331,7 @@ export type TurnOrchestratorInput = Readonly<{
   workspaceRootRef: string
   internalStore: InternalProjectStore
   userInput: string
+  conversationArchiveSessionId?: string
   /** Visible user messages. Style revision quotes these, not the revision draft. */
   userRequirements?: string
   chapterSequence: number
@@ -3029,6 +3030,9 @@ export class TurnOrchestrator {
     const skillPack = input.phase === "draft"
       ? await this.dependencies.prompts.loadDefaultSkillPack("draft")
       : undefined
+    const archiveSessionId = input.input.conversationArchiveSessionId
+    const conversation = this.dependencies.synopsisConversation
+    const canReadArchive = input.phase === "draft" && archiveSessionId !== undefined && conversation !== undefined
     const appendices = [
       worldDivergencePhaseAppendix(
         resolveWorldDivergenceMode(input.input.projectSettings),
@@ -3037,6 +3041,13 @@ export class TurnOrchestrator {
       chapterNarrativeIntentPhaseAppendix(input.input.chapterIntent, input.phase),
       chapterPresentationPhaseAppendix(input.input.presentation, input.phase),
       skillPack?.text,
+      canReadArchive ? [
+        "【会话存档】本会话的原始消息独立保存，已有上下文可能只保留了压缩内容。",
+        "当写作需要找回以前的用户要求或讨论结论时，可以返回 outcome=request_read，在 requestedReads[].query.conversationArchive 中按需搜索或读取。",
+        '搜索参数 {"operation":"search","query":"关键词","role":"user"}，可省略 query 浏览近期历史，可省略 role 查看用户和 AI 消息。',
+        '读取原文参数 {"operation":"read","messageId":"搜索结果的消息 ID"}。翻页时在查询中传结果给出的 nextOffset 作为 offset。',
+        "会话存档结果是历史聊天资料，以用户当前要求为准。请结合查到的要求、梗概、细纲和作品风格写当前章。",
+      ].join("\n") : undefined,
     ].filter((text): text is string => text !== undefined && text.trim().length > 0)
     const prompt = appendices.length === 0
       ? basePrompt
@@ -3051,6 +3062,7 @@ export class TurnOrchestrator {
     let currentContext = input.context
     let currentPhaseRunId = input.phaseRunId
     let attempt = input.attempt
+    let archiveResults: string[] = []
     let phaseUsage = emptyPhaseUsage()
     let currentEvidence = [...input.readEvidence]
     let currentVisibleEvidence = [...input.visibleEvidence]
@@ -3094,6 +3106,7 @@ export class TurnOrchestrator {
       const phaseInput: TurnPhaseInput = {
         workflow: input.input.workflow ?? "turn",
         userInput: input.input.userInput,
+        ...(archiveSessionId === undefined ? {} : { conversationArchiveSessionId: archiveSessionId }),
         ...(userRequirements.length === 0 ? {} : { userRequirements }),
         chapterSequence: input.input.chapterSequence,
         allowWorkspaceChapterReads: input.input.allowWorkspaceChapterReads ?? true,
@@ -3253,6 +3266,14 @@ export class TurnOrchestrator {
         )).length
         const contextMessages = [
           ...mappedContext,
+          ...archiveResults.map((content, index) => ({
+            messageId: this.dependencies.createId(),
+            sequence: (mappedContext.at(-1)?.sequence ?? 0) + index + 1,
+            role: "user" as const,
+            kind: "phase_instruction" as const,
+            turnId: request.turnId,
+            content,
+          })),
           {
             messageId: this.dependencies.createId(),
             sequence: mappedContext.length,
@@ -3549,9 +3570,25 @@ export class TurnOrchestrator {
           usage: phaseUsage,
         }
       }
+      const archiveQueries = requestedReads.flatMap(({ query }) => (
+        query.conversationArchive === undefined ? [] : [query.conversationArchive]
+      ))
+      const handledArchiveReads = canReadArchive && archiveQueries.length > 0
+      if (handledArchiveReads) {
+        const maxRequests = input.input.projectSettings?.retrieval.maxRequestsPerRound
+          ?? defaultProjectSettings.retrieval.maxRequestsPerRound
+        const results = await Promise.all(archiveQueries.slice(0, maxRequests).map(async (query) => {
+          const result = await conversation.readConversationArchive({
+            projectId: input.input.projectId, sessionId: archiveSessionId,
+          }, query)
+          return JSON.stringify({ source: "conversation_archive", operation: query.operation, result: result ?? null })
+        }))
+        archiveResults = [...archiveResults, ...results]
+        throwIfExecutionCancelled(input.signal)
+      }
       const readResult = await this.executeReads(
         currentContext,
-        requestedReads,
+        requestedReads.filter((read) => read.query.conversationArchive === undefined),
         input.input.projectId,
         input.inputScopeId,
         input.input.projectSettings?.retrieval,
@@ -3622,7 +3659,7 @@ export class TurnOrchestrator {
       const readsResolvedFromVisibleEvidence = readResult.readExecutions.some((execution) => (
         execution.returnedReadRefs.length > 0
       ))
-      if (readResult.evidence.length === 0 && readsResolvedFromVisibleEvidence && !includesVerificationProbe) {
+      if (readResult.evidence.length === 0 && readsResolvedFromVisibleEvidence && !includesVerificationProbe && !handledArchiveReads) {
         const returnedReadIds = [...new Set(readResult.readExecutions.flatMap((execution) => execution.returnedReadRefs))]
         const newlyResurfacedReadIds = returnedReadIds.filter((readId) => !alreadyResurfacedReadIds.has(readId))
         this.log("debug", "retrieval.visible_evidence_reused", {
@@ -3662,7 +3699,7 @@ export class TurnOrchestrator {
           usage: phaseUsage,
         }
       }
-      if (readResult.evidence.length === 0 && !readsResolvedFromVisibleEvidence
+      if (readResult.evidence.length === 0 && !readsResolvedFromVisibleEvidence && !handledArchiveReads
         && !((input.phase === "semantic_review" || input.phase === "graph_governance_review")
           && effectiveRequestedReads.some((request) => request.verificationProbe !== undefined))) {
         currentRetrievalGaps = [

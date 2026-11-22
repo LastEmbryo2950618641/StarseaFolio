@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { verificationProbeDescriptorSchema } from "./reads.js"
+import { conversationArchiveQuerySchema, verificationProbeDescriptorSchema } from "./reads.js"
 
 const modelReadEvidenceReferenceSchema = z.string().regex(/^(?:(?:read-[1-9][0-9]*)|(?:evidence_[1-9][0-9]*))$/u)
 const modelGraphReferenceSchema = z.string().regex(/^(?:(?:node|link)(?:-|_)[1-9][0-9]*|local:[a-zA-Z0-9_.-]+)$/u)
@@ -14,6 +14,7 @@ const modelReadQuerySchema = z.object({
   maxCandidates: z.number().int().positive().optional(),
   maxDepth: z.number().int().nonnegative().optional(),
   sourceKinds: z.array(z.enum(["graph", "revision", "source", "rule", "reference", "web"])).optional(),
+  conversationArchive: conversationArchiveQuerySchema.optional(),
   sourceIds: z.array(modelSourceReferenceSchema).optional(),
   sourceBoundary: z.enum(["start", "end"]).optional(),
   readMode: z.enum(["read_full", "list", "grep"]).optional(),

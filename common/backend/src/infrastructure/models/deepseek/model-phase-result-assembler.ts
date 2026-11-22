@@ -128,6 +128,7 @@ export function assembleModelPhaseResult(
         maxCandidates: query?.maxCandidates ?? 24,
         maxDepth: query?.maxDepth ?? 2,
         sourceKinds: normalizeRequestedSourceKinds(exactKeys, query?.sourceKinds),
+        ...(query?.conversationArchive === undefined ? {} : { conversationArchive: query.conversationArchive }),
         ...(query?.sourceIds === undefined ? {} : { sourceIds: query.sourceIds }),
         ...(query?.sourceBoundary === undefined ? {} : { sourceBoundary: query.sourceBoundary }),
         ...(query?.readMode === undefined ? {} : { readMode: query.readMode }),

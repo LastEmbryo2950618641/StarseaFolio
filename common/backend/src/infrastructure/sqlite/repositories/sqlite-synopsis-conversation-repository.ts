@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 
-import type { Kysely } from "kysely"
+import { sql, type Kysely } from "kysely"
 
 import type {
   ChapterArtifactContentState,
@@ -298,6 +298,59 @@ export class SqliteSynopsisConversationRepository {
       .orderBy("created_at_ms", "asc")
       .execute()
     return rows.map(mapMessage)
+  }
+
+  public async searchArchivedMessages(input: Readonly<{
+    projectId: ProjectId
+    sessionId: string
+    role?: "user" | "assistant"
+    query: string
+    offset: number
+  }>) {
+    const pageSize = 6
+    const matchPosition = sql<number>`instr(lower(content_text), lower(${input.query}))`
+    let query = this.database.selectFrom("synopsis_conversation_messages")
+      .select(["id as messageId", "role", "created_at_ms as createdAtMs"])
+      .select(sql<string>`substr(content_text, max(1, ${matchPosition} - 60), 240)`.as("excerpt"))
+      .where("project_id", "=", input.projectId)
+      .where("session_id", "=", input.sessionId)
+      .where("hidden", "=", 0)
+      .where("role", "in", ["user", "assistant"])
+    if (input.role !== undefined) query = query.where("role", "=", input.role)
+    if (input.query !== "") query = query.where(matchPosition, ">", 0)
+    const matches = await query.orderBy("created_at_ms", "desc").orderBy(sql`rowid`, "desc")
+      .offset(input.offset).limit(pageSize + 1).execute()
+    return {
+      matches: matches.slice(0, pageSize),
+      ...(matches.length > pageSize ? { nextOffset: input.offset + pageSize } : {}),
+    }
+  }
+
+  public async readArchivedMessage(input: Readonly<{
+    projectId: ProjectId
+    sessionId: string
+    messageId: string
+    offset: number
+  }>) {
+    const pageSize = 2_400
+    const row = await this.database.selectFrom("synopsis_conversation_messages")
+      .select(["id as messageId", "role", "created_at_ms as createdAtMs", "content_text as content"])
+      .where("project_id", "=", input.projectId)
+      .where("session_id", "=", input.sessionId)
+      .where("id", "=", input.messageId)
+      .where("hidden", "=", 0)
+      .where("role", "in", ["user", "assistant"])
+      .executeTakeFirst()
+    if (row === undefined) return undefined
+    // Preserve the original text even when it contains supplementary Unicode characters.
+    const characters = Array.from(row.content)
+    const end = input.offset + pageSize
+    return {
+      ...row,
+      offset: input.offset,
+      content: characters.slice(input.offset, end).join(""),
+      ...(end < characters.length ? { nextOffset: end } : {}),
+    }
   }
 
   public async listMessagesForProject(projectId: ProjectId): Promise<readonly SynopsisConversationMessage[]> {

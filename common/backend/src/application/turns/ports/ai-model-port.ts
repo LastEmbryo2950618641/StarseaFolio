@@ -144,6 +144,8 @@ export interface PromptResourcePort {
 export type TurnPhaseInput = Readonly<{
   workflow: "turn" | "query" | "evolution" | "revision" | "synopsis"
   userInput: string
+  /** Host-scoped archive reference used when resuming a persisted task. */
+  conversationArchiveSessionId?: string
   /** User's own requests. Style revision must quote this, not the draft. */
   userRequirements?: string
   chapterSequence: number

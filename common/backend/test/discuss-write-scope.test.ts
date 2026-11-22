@@ -43,6 +43,94 @@ function modelReply(request: Parameters<Execute>[0], fields: Record<string, unkn
 }
 
 describe("discussion authorizes and verifies current-turn writes", () => {
+  it("recovers folded writing requirements through the conversation archive before drafting", async () => {
+    const originalRequest = "本章结尾要分别写出两地守军及其领队接到消息后的反应。"
+    const rewriteRequest = "按细纲重写本章草稿。"
+    const fake = new FakeAiModelAdapter(randomUUID)
+    let drafting = false
+    let archiveReads = 0
+    let originalMessageId: string
+    const model: AIModelPort = {
+      info: fake.info,
+      async classifyDiscussTurn(input) {
+        if (drafting) expect(JSON.stringify(input.recentMessages)).not.toContain(originalRequest)
+        return { scope: drafting ? { draft: "write" } : {}, usage: { inputTokens: 20, outputTokens: 10, latencyMs: 0 } }
+      },
+      async execute(request, options) {
+        if (request.phase !== "synopsis_discuss") return fake.execute(request, options)
+        if (!drafting) return modelReply(request, { assistantMessage: "我建议只改开场。" })
+        const context = options?.contextMessages ?? []
+        const archived = context.flatMap((message) => {
+          try {
+            const payload = JSON.parse(message.content)
+            return payload.name === "conversation_archive" ? [payload] : []
+          } catch { return [] }
+        })
+        const replyWithTool = (action: "describe" | "invoke", args?: object) => modelReply(request, {
+          choices: undefined,
+          toolRequest: { name: "conversation_archive", action, ...(args === undefined ? {} : { arguments: JSON.stringify(args) }) },
+        })
+        expect(JSON.stringify(request.input)).not.toContain(originalRequest)
+        if (!archived.some((result) => result.status === "described")) {
+          expect(context.map((message) => message.content).join("\n")).not.toContain(originalRequest)
+          expect(context.some((message) => message.content.includes("已压缩") && message.content.includes("conversation_archive"))).toBe(true)
+          return replyWithTool("describe")
+        }
+        const latest = archived.at(-1)
+        if (latest.status === "described") {
+          return replyWithTool("invoke", { operation: "search", query: "守军", role: "user" })
+        }
+        if (latest.status === "archive_matches") {
+          expect(latest.result.matches).toMatchObject([{ messageId: originalMessageId, role: "user" }])
+          expect(latest.result.matches).toHaveLength(1)
+          return replyWithTool("invoke", { operation: "read", messageId: originalMessageId })
+        }
+        expect(latest.status).toBe("archive_message")
+        expect(latest.result).toMatchObject({ messageId: originalMessageId, role: "user", content: originalRequest })
+        archiveReads += 1
+        if (archiveReads === 1) return replyWithTool("invoke", { operation: "read", messageId: originalMessageId })
+        return modelReply(request, {
+          planningWriteIntent: { draft: "write" },
+          chapterDraftProposal: {
+            base: "body", heading: "第一章 雨夜旧站台",
+            body: "消息传来后，东门领队派人疏散百姓，西门守卫把接应信号改成了三盏灯。",
+          },
+        })
+      },
+    }
+    const harness = await openChapterHarness("Keep author directions across draft turns", { model })
+    try {
+      await seedCommittedChapter(harness)
+      await prepareChapterPlanning(harness)
+      const original = await send(harness, originalRequest)
+      if (!original.ok) throw new Error(original.error.message)
+      const { session, messages } = original.data as SynopsisConversationSendResult
+      originalMessageId = messages.find((message) => message.role === "user" && message.content === originalRequest)!.messageId
+      expect(await send(harness, rewriteRequest)).toMatchObject({ ok: true })
+      const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
+      try {
+        db.prepare("UPDATE synopsis_discuss_context_messages SET hidden_at = ? WHERE kind IN ('phase_request', 'phase_response')")
+          .run(Date.now())
+        db.prepare(`INSERT INTO synopsis_discuss_context_messages
+          (id, session_id, project_id, sequence_no, role, kind, content_text, content_digest, token_estimate, created_at_ms)
+          SELECT ?, ?, ?, COALESCE(MAX(sequence_no), 0) + 1, 'user', 'phase_instruction', ?, ?, 100, ?
+          FROM synopsis_discuss_context_messages WHERE session_id = ?`)
+          .run(randomUUID(), session.sessionId, harness.projectId,
+            JSON.stringify({ protocol: "discuss-history-summary-v1", userInputs: [originalRequest, rewriteRequest], exchanges: [] }),
+            "legacy-history", Date.now(), session.sessionId)
+      } finally { db.close() }
+
+      drafting = true
+      const result = await send(harness, "继续")
+      if (!result.ok) throw new Error(result.error.message)
+      expect((result.data as SynopsisConversationSendResult).appendedDraft).toBeDefined()
+      expect(archiveReads).toBe(2)
+    } finally {
+      await harness.container.close()
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
   it("refreshes an upgraded session's skills and retries when the requested synopsis was replaced by an outline", async () => {
     let rewrite = false
     let rewriteCalls = 0
