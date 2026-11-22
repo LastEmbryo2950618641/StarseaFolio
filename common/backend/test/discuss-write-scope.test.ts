@@ -7,7 +7,8 @@ import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@starseaf
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
 import { digest } from "../src/core/index.js"
-import { openChapterHarness, prepareChapterPlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
+import { openChapterHarness, prepareChapterPlanning, seedCommittedChapter, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
 const synopsis = "# 第一章 雨夜旧站台\n\n林烬听见即将发车的广播，带着车票上了末班车。"
 const outline = "# 第一章 雨夜旧站台\n\n林烬从车窗看见熟悉的身影。"
@@ -119,6 +120,106 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       if (!sent.ok) throw new Error(sent.error.message)
       expect(await harness.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(manual)
       expect((sent.data as SynopsisConversationSendResult).messages.at(-1)?.content).toContain("有手改规划，已保留")
+    } finally {
+      await harness.container.close()
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
+  it("does not present an older draft as ready to publish after a synopsis-only rewrite", async () => {
+    const model = {
+      classifyDiscussTurn() {
+        return Promise.resolve({
+          scope: { synopsis: "rewrite" as const },
+          usage: { inputTokens: 20, outputTokens: 10, latencyMs: 0 },
+        })
+      },
+      execute(request) {
+        return Promise.resolve(modelReply(request, {
+          planningWriteIntent: { synopsis: "rewrite" },
+          synopsisBody: synopsis,
+          choices: [
+            { label: "用新梗概重写细纲", action: "confirm_synopsis" },
+          ],
+        }))
+      },
+    } satisfies AIModelPort
+    const harness = await openChapterHarness("Synopsis rewrite with an existing draft", { model })
+    try {
+      await prepareChapterPlanning(harness)
+      const revisions = harness.container.getCurrentRuntime()?.createChapterRevisionService()
+      if (revisions === undefined) throw new Error("Missing revision service")
+      const oldDraft = await revisions.startForChapterSequence({
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef, chapterSequence: 1,
+        heading: "第一章 雨夜旧站台", body: "林烬把车票留在窗台，转身离开。",
+        volumeFolderName: "第一卷 待命名", source: "agent",
+      })
+      const result = await send(harness, "重写梗概，这次让林烬赶上末班车。")
+      if (!result.ok) throw new Error(result.error.message)
+      const data = result.data as SynopsisConversationSendResult
+      const reply = data.messages.at(-1)
+      expect(reply?.content).not.toContain("草稿已经写好")
+      expect(reply?.choices?.map((choice) => choice.action)).toEqual(["confirm_synopsis"])
+      expect(data.proceedProgress).toEqual({ stage: "synopsis_discuss", status: "done" })
+      expect(data.appendedDraft).toBeUndefined()
+      expect((await revisions.listDraftVersions(oldDraft.revisionTaskId)).versions.map((draft) => draft.versionId))
+        .toEqual([oldDraft.versionId])
+    } finally {
+      await harness.container.close()
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
+  it("adds a publish choice for a new draft but not for an unchanged draft", async () => {
+    const fake = new FakeAiModelAdapter(randomUUID)
+    const draft = {
+      base: "body", heading: "第一章 雨夜旧站台",
+      body: "林烬站在窗边望着站台。广播响了一声，他拿起车票往外走。",
+    }
+    let useProposalList = false
+    const model: AIModelPort = {
+      info: fake.info,
+      classifyDiscussTurn() {
+        return Promise.resolve({ scope: { draft: "write" }, usage: { inputTokens: 20, outputTokens: 10, latencyMs: 0 } })
+      },
+      execute(request, options) {
+        if (request.phase !== "synopsis_discuss") return fake.execute(request, options)
+        return Promise.resolve(modelReply(request, {
+          planningWriteIntent: { draft: "write" },
+          ...(useProposalList
+            ? { chapterDraftProposals: [{ ...draft, chapterSequence: 1 }] }
+            : { chapterDraftProposal: draft }),
+        }))
+      },
+    }
+    const harness = await openChapterHarness("Unchanged draft", { model })
+    try {
+      await seedCommittedChapter(harness)
+      const first = await send(harness, "修改第一章草稿。")
+      if (!first.ok) throw new Error(first.error.message)
+      const firstData = first.data as SynopsisConversationSendResult
+      const saved = firstData.appendedDraft
+      if (saved === undefined) throw new Error("Expected a saved draft")
+      expect(firstData.messages.at(-1)?.choices?.find((choice) => choice.action === "promote_draft_to_body")
+        ?.publishDraftVersionId).toBe(saved.draftVersionId)
+
+      const revisions = harness.container.getCurrentRuntime()?.createChapterRevisionService()
+      if (revisions === undefined) throw new Error("Missing revision service")
+      const before = await revisions.listDraftVersions(saved.revisionTaskId)
+      for (const list of [false, true]) {
+        useProposalList = list
+        const repeated = await send(harness, "再核对并修改第一章草稿。")
+        if (!repeated.ok) throw new Error(repeated.error.message)
+        const data = repeated.data as SynopsisConversationSendResult
+        const reply = data.messages.at(-1)
+        expect(reply?.content).toContain("草稿未变")
+        expect(reply?.content).not.toContain("草稿已经写好")
+        expect(reply?.content).not.toContain("草稿未落入草稿版本")
+        expect(reply?.choices?.some((choice) => choice.action === "promote_draft_to_body")).toBe(false)
+        expect(data.appendedDraft).toBeUndefined()
+      }
+      const after = await revisions.listDraftVersions(saved.revisionTaskId)
+      expect(after.versions.map((draft) => draft.versionId)).toEqual(before.versions.map((draft) => draft.versionId))
     } finally {
       await harness.container.close()
       rmSync(harness.root, { recursive: true, force: true })

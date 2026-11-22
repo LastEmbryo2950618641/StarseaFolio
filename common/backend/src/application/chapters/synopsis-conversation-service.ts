@@ -1807,7 +1807,8 @@ export class SynopsisConversationService {
           if (applied.notice !== undefined) writeNotices.push(applied.notice)
           draftSaveBlocked ||= applied.blocked === true
           if (applied.deferredSequence !== undefined) deferredDraftSequences.push(applied.deferredSequence)
-          if (entry.chapterSequence === session.chapterSequence && applied.appended !== undefined) {
+          if (entry.chapterSequence === session.chapterSequence
+            && (applied.appended !== undefined || (applied.unchanged === true && draftApply.appended === undefined))) {
             draftApply = applied
           }
         }
@@ -1847,6 +1848,7 @@ export class SynopsisConversationService {
         assist.planningWriteIntent?.draft === "write"
         && !isCurrentUserFocusChange(assist.focusChange, input.message)
         && draftApply.appended === undefined
+        && draftApply.unchanged !== true
         && !assist.content.includes("没有写入草稿版本")
       ) {
         writeNotices.push(
@@ -1910,9 +1912,7 @@ export class SynopsisConversationService {
       }
       const gateDeferred = !focusLocked && (focusGateDeferred || deferredDraftSequences.length > 0)
       const workflowChoices = filterDiscussChoices(
-        this.dependencies.publishDraft === undefined
-          ? withPromoteDraftChoice(draftAssist.choices, draftApply.appended)
-          : draftAssist.choices,
+        draftAssist.choices?.filter((choice) => choice.action !== "promote_draft_to_body"),
         {
           focusLocked,
           synopsisReady: synopsisReadyForOutline,
@@ -2192,10 +2192,10 @@ export class SynopsisConversationService {
       let autoContinue: { message: string } | undefined = autoContinueMessage === undefined
         ? undefined
         : { message: autoContinueMessage }
-      const publishableDraft = batchAutomation
+      const publishableDraft = batchAutomation || savedDraft === undefined
         ? undefined
         : await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
-      if (publishableDraft !== undefined) {
+      if (publishableDraft !== undefined && publishableDraft.draftVersionId === savedDraft?.draftVersionId) {
         persistedChoices = withDraftConfirmationChoice(persistedChoices, publishableDraft)
         if (!assistantContent.includes(DRAFT_PUBLISH_CONFIRMATION)) {
           assistantContent += "\n\n草稿已经写好。请确认「草稿可以，发布正文」；确认后会自动完成设定抽取、图治理并落入正文，中间不再询问。"
@@ -2203,6 +2203,12 @@ export class SynopsisConversationService {
         // Stay on draft_discuss until the user starts 章节入库 (publish confirm).
         emitProceedProgress("draft_discuss", "waiting")
         autoContinue = undefined
+      } else if (savedDraft === undefined && autoContinue === undefined && appliedFocusSequence === undefined) {
+        if (savedOutlineThisTurn) {
+          emitProceedProgress("outline_discuss", "done")
+        } else if (wroteSynopsisBody && synopsisReadyForOutline) {
+          emitProceedProgress("synopsis_discuss", "done")
+        }
       }
       if (pipelineAuto) {
         const fingerprint = await this.readDiscussProgressFingerprint({
@@ -2250,14 +2256,18 @@ export class SynopsisConversationService {
         const writes = [
           ["synopsis", "梗概", writeScope.synopsis !== undefined, wroteSynopsisBody],
           ["outline", "细纲", writeScope.outline !== undefined, savedOutlineThisTurn],
-          ["draft", "草稿", writeScope.draft === "write" && writeScope.volumeDrafts !== true, savedDraft !== undefined],
+          ["draft", "草稿", writeScope.draft === "write" && writeScope.volumeDrafts !== true,
+            savedDraft !== undefined || draftApply.unchanged === true],
         ] as const
         const recorded = synopsisConversationStreamHub.peek(input.projectId, session.sessionId).todos
         const hostTodos = writes.flatMap(([key, label, requested, saved]) => {
           if (!requested) return []
           const id = `host-write-${key}`
           if (saved && !recorded.some((todo) => todo.id === id)) return []
-          return [{ id, content: `${saved ? "已保存" : "待实际保存"}${label}`, status: saved ? "completed" as const : "pending" as const }]
+          const content = key === "draft" && draftApply.unchanged === true
+            ? "草稿内容相同，沿用现有版本"
+            : `${saved ? "已保存" : "待实际保存"}${label}`
+          return [{ id, content, status: saved ? "completed" as const : "pending" as const }]
         })
         if (hostTodos.length > 0) {
           synopsisConversationStreamHub.setTodos(input.projectId, hostTodos, this.dependencies.now(), { merge: true })
@@ -6150,6 +6160,7 @@ export class SynopsisConversationService {
     messageId: string
   }>): Promise<Readonly<{
     appended?: NonNullable<SynopsisConversationSendResult["appendedDraft"]>
+    unchanged?: true
     notice?: string
     deferredSequence?: number
     blocked?: boolean
@@ -6256,20 +6267,14 @@ export class SynopsisConversationService {
     const listed = await revisions.listDraftVersions(started.revisionTaskId)
     const latest = listed.versions.find((version) => version.isLatest) ?? listed.versions.at(-1)
     if (latest !== undefined && latest.heading === heading && latest.body === body) {
+      const notice = `草稿未变（仍为 ${latest.label}）`
       this.emitDiscussEdit(input.projectId, {
         path: indexed.currentPublishPath,
         kind: "draft",
         status: "completed",
-        summary: `草稿未变（仍为 ${latest.label}）`,
+        summary: notice,
       })
-      return {
-        appended: {
-          revisionTaskId: started.revisionTaskId,
-          chapterId: indexed.chapterId,
-          draftVersionId: latest.versionId,
-          draftLabel: latest.label,
-        },
-      }
+      return { unchanged: true, notice }
     }
     this.emitDiscussEdit(input.projectId, {
       path: indexed.currentPublishPath,
@@ -7184,14 +7189,6 @@ function withDraftConfirmationChoice(
     action: "promote_draft_to_body",
     publishDraftVersionId: draft.draftVersionId,
   }, ...rest]
-}
-
-function withPromoteDraftChoice(
-  choices: SynopsisConversationChoice[] | undefined,
-  draft: { draftLabel: string; draftVersionId: string } | undefined,
-): SynopsisConversationChoice[] | undefined {
-  if (draft === undefined) return choices
-  return withDraftConfirmationChoice(choices, draft)
 }
 
 export function filterDiscussChoices(
