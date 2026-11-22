@@ -184,12 +184,12 @@ describe("TurnOrchestrator", () => {
     const sensoryEvidence = interpretInput?.readEvidence.find((evidence) => (
       evidence.ownerId === "表现输出/描写规则/感官描写.md"
     ))
-    expect(sensoryEvidence?.semanticText).toContain("【描写·感官基线·本轮始终生效】")
-    expect(sensoryEvidence?.semanticText).toContain("何时")
+    expect(sensoryEvidence?.semanticText).toContain("【描写·感官参考】")
+    expect(sensoryEvidence?.semanticText).toContain("详略随场面调整")
     const deaiEvidence = interpretInput?.readEvidence.find((evidence) => (
       evidence.ownerId === "表现输出/描写规则/去AI味.md"
     ))
-    expect(deaiEvidence?.semanticText).toContain("【描写·去AI味基线·本轮始终生效】")
+    expect(deaiEvidence?.semanticText).toContain("【描写·去AI味参考】")
     expect(deaiEvidence?.semanticText).toContain("眼中闪过")
     expect(deaiEvidence?.semanticText).toContain("保留人物表达的目的、对象与因果")
     const ownerIds = interpretInput?.readEvidence.map((evidence) => evidence.ownerId) ?? []
@@ -240,9 +240,9 @@ describe("TurnOrchestrator", () => {
     expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/描写规则/自动.md")?.semanticText)
       .toContain("【描写·自动调度】")
     expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/描写规则/感官描写.md")?.semanticText)
-      .toContain("【描写·感官基线·本轮始终生效】")
+      .toContain("【描写·感官参考】")
     expect(interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/描写规则/去AI味.md")?.semanticText)
-      .toContain("【描写·去AI味基线·本轮始终生效】")
+      .toContain("【描写·去AI味参考】")
   })
 
   it("injects this-work description overlay after selected presentation rules", async () => {
@@ -285,7 +285,7 @@ describe("TurnOrchestrator", () => {
     ]))
     const overlay = interpretInput?.readEvidence.find((evidence) => evidence.ownerId === "表现输出/本作品描写/压抑氛围.md")
     expect(overlay?.semanticText).toContain("【本作品描写·附加层】")
-    expect(overlay?.semanticText).toContain("不能抢下拉选中的机位或文类预设")
+    expect(overlay?.semanticText).toContain("结合《作品风格》、作者要求和具体场面选择写法")
     expect(overlay?.semanticText).toContain("整部作品保持持续的压抑空气")
     const dropdownIndex = ownerIds.indexOf("表现输出/描写规则/默认描写规则.md")
     const overlayIndex = ownerIds.indexOf("表现输出/本作品描写/压抑氛围.md")
