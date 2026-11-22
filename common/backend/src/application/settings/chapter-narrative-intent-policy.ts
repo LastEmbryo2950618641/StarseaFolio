@@ -3,7 +3,6 @@ import type { AIPhase, ChapterNarrativeIntent } from "@starseafolio/contracts"
 import {
   AUTO_DESCRIPTION_RULE_PATH,
   DEAI_DESCRIPTION_RULE_PATH,
-  DESCRIPTION_RULES_DIR,
   isAutoDescriptionSelection,
   SENSORY_DESCRIPTION_RULE_PATH,
 } from "../../core/workspace/work-description-rules.js"
@@ -54,10 +53,11 @@ export function chapterPresentationPhaseAppendix(
   phase: AIPhase,
 ): string | undefined {
   if (presentation === undefined) return undefined
+  const referenceWordCount = Math.round((presentation.minimumWordCount + presentation.maximumWordCount) / 2)
   const proseLengthContract = [
     `## 单章正文长度（${String(presentation.minimumWordCount)}–${String(presentation.maximumWordCount)} 字）`,
     "范围约束 AI 新写或改写的正文主体，标题不计。计数与编辑器一致，移除正文中的全部空白字符后计数，标点计入。",
-    "篇幅优先安排在区间中段以留足余量。最终正文必须落入本轮范围，按同一口径实数并在自检中报告，不能用估算代替。低于下限时补足有因果作用的场面、行动后果、角色反应和对话；高于上限时压缩重复过程，不删用户指定的情节。“短、快、狠”只管场景节拍，不缩短整章。",
+    `以区间中段约 ${String(referenceWordCount)} 字为篇幅参考，按本章需要调整。动笔前为关键场面分配篇幅，写足相关的关系、反应和氛围。重要情节仍像提要时，先补写场面，再检查总字数。场景切换的速度按叙事需要安排。最终正文必须落入本轮范围，按同一口径计数并报告实数，不能用估算代替。超上限时先缩减重复描写和解释，保留用户指定情节。`,
     "用户提供并明确要求原样保存的全文保持原文；如超出范围，报告实数，不自行扩写或删改。",
   ]
   if (phase === "draft") return proseLengthContract.join("\n")
@@ -78,22 +78,21 @@ export function chapterPresentationPhaseAppendix(
       "### 小说定位规则（以对应 Markdown 正文为准）",
       `- 小说大类规则：${presentation.novelMajorCategoryRulePath === undefined ? "未选择" : `\`${presentation.novelMajorCategoryRulePath}\``}`,
       `- 小说次大类规则：${presentation.novelSubcategoryRulePath === undefined ? "未选择" : `\`${presentation.novelSubcategoryRulePath}\``}`,
-      "- 必须遵守本轮注入的所选规则文件正文；不要依据文件名自行臆测规则，也不要套用未选择平台的规则。",
+      "- 阅读本轮所选规则正文，理解小说定位与读者期待。结合用户要求与场景取用适合的写法。",
     )
   }
   if (isAutoDescriptionSelection(presentation.descriptionRulePath)) {
     lines.push(
       "",
       "### 描写：自动",
-      `- 已注入 \`${DESCRIPTION_RULES_DIR}/\` 下全部 Markdown；以 \`${AUTO_DESCRIPTION_RULE_PATH}\` 调度，同一章可按场面切换其他场面卡；`,
-      `- \`${SENSORY_DESCRIPTION_RULE_PATH}\` 与 \`${DEAI_DESCRIPTION_RULE_PATH}\` 为**始终生效**基线（感官时机 / 去AI味），不是可切换场面卡；`,
-      "- 用户若下拉锁定某一描写文件，则注入该文件 + 上述基线，整章遵守该场面卡，不得再切换其他场面卡。",
+      `- 参考 \`${AUTO_DESCRIPTION_RULE_PATH}\`，按场面选用合适的表现手法。`,
+      `- \`${SENSORY_DESCRIPTION_RULE_PATH}\` 与 \`${DEAI_DESCRIPTION_RULE_PATH}\` 提供感官和润色建议。`,
     )
   } else {
     lines.push(
       "",
       `### 描写规则路径：\`${presentation.descriptionRulePath}\``,
-      `- 本轮锁定该场面卡，并始终附带 \`${SENSORY_DESCRIPTION_RULE_PATH}\` 与 \`${DEAI_DESCRIPTION_RULE_PATH}\`；不得改用同目录其他场面卡。`,
+      `- 本轮锁定该场面卡作为描写参考，并附带 \`${SENSORY_DESCRIPTION_RULE_PATH}\` 与 \`${DEAI_DESCRIPTION_RULE_PATH}\`。结合场景选用卡内的写法。`,
     )
   }
   if (presentation.proseStyleRulePath !== undefined && presentation.proseStyleRulePath.length > 0) {
@@ -104,8 +103,8 @@ export function chapterPresentationPhaseAppendix(
     "### 表现规则协作",
     "- 可用 `request_read` + `sourceKinds: [\"rule\"]` 读取 `表现输出/描写规则/`、`表现输出/笔风规则/` 与 `表现输出/本作品描写/`（可先 `list` 再全文/片段）；",
     "- 下拉选中的描写/笔风是可编辑预设；需要 AI 调整时用 `creationDeskSettings` 返回真实路径，**禁止**用 `presentationWrites` 改写预设文件；",
-    "- 只把整部作品持续生效的呈现约束写入 `表现输出/本作品描写/*.md`（`mode: create|update`）；系统立即落盘；单文件不超过 4000 字、最多 8 个文件；",
-    "- 单章氛围写梗概/细纲；机位/文类以下拉为准，句长密度以 `作品风格.md` 为准；不要放进 `stagingPromote`。",
+    "- 长期创作方向写入 `表现输出/本作品描写/*.md`（`mode: create|update`），单章氛围写进梗概或细纲。风格文件会立即落盘，单文件最多 4000 字、目录最多 8 个文件。",
+    "- 参考作品定位和语感，按情节选择视点、句段和描写密度。作者明确指定的写法按原要求执行。",
   )
   return lines.join("\n")
 }

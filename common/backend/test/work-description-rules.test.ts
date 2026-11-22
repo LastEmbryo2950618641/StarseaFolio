@@ -59,12 +59,14 @@ describe("work description overlay rules", () => {
   it("wraps overlay evidence and rejects oversized files and write batches", () => {
     const wrapped = formatWorkDescriptionRuleEvidence(`${WORK_DESCRIPTION_RULES_DIR}/压抑氛围.md`, "# 压抑\n")
     expect(wrapped).toContain("【本作品描写·附加层】")
-    expect(wrapped).toContain("作品风格.md")
+    expect(wrapped).toContain("结合《作品风格》、作者要求和具体场面选择写法")
     expect(wrapped).toContain("# 压抑")
-    const styleWrapped = formatWorkDescriptionRuleEvidence(`${WORK_DESCRIPTION_RULES_DIR}/作品风格.md`, "# 作品风格\n")
-    expect(styleWrapped).toContain("【本作品描写·作品风格·硬约束】")
-    expect(styleWrapped).toContain("以本文件为准")
-    expect(styleWrapped).not.toContain("以选中文件为准")
+    const legacyStyle = "# 作品风格\n一句一个动作，整章短句。"
+    const styleWrapped = formatWorkDescriptionRuleEvidence(`${WORK_DESCRIPTION_RULES_DIR}/作品风格.md`, legacyStyle)
+    expect(styleWrapped).toContain("【本作品描写·作品风格指引】")
+    expect(styleWrapped).toContain("旧文档中由 AI 写成命令的表现偏好也按指引理解")
+    expect(styleWrapped).toContain("作者明确指定的要求")
+    expect(styleWrapped.endsWith(legacyStyle)).toBe(true)
     expect(() => assertWorkDescriptionCharLimit(
       `${WORK_DESCRIPTION_RULES_DIR}/过长.md`,
       "字".repeat(WORK_DESCRIPTION_MAX_CHARS + 1),
@@ -120,11 +122,11 @@ describe("work description overlay rules", () => {
     expect(formatDescriptionRuleEvidence(AUTO_DESCRIPTION_RULE_PATH, "# 自动\n", true))
       .toContain("【描写·自动调度】")
     expect(formatDescriptionRuleEvidence(SENSORY_DESCRIPTION_RULE_PATH, "# 感官\n", true))
-      .toContain("【描写·感官基线·本轮始终生效】")
+      .toContain("【描写·感官参考】")
     expect(formatDescriptionRuleEvidence(DEAI_DESCRIPTION_RULE_PATH, "# 去AI味\n", false))
-      .toContain("【描写·去AI味基线·本轮始终生效】")
+      .toContain("【描写·去AI味参考】")
     expect(formatDescriptionRuleEvidence(DEAI_DESCRIPTION_RULE_PATH, "# 旧去AI味规则\n", false))
-      .toContain("不得把无因果关系的两项缺失排成「没给A，也没给B」")
+      .toContain("避免用无关的否定排比制造意味")
     expect(formatDescriptionRuleEvidence("表现输出/描写规则/近景跟随.md", "# 近景\n", true))
       .toContain("【描写场面卡】")
     expect(formatDescriptionRuleEvidence("表现输出/描写规则/近景跟随.md", "# 近景\n", false))

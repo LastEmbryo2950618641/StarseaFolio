@@ -46,7 +46,7 @@ describe("chapter narrative intent policy", () => {
     expect(appendix).toContain("presentationWrites")
     expect(appendix).toContain("移除正文中的全部空白字符后计数")
     expect(appendix).toContain("落入本轮范围")
-    expect(appendix).toContain("区间中段")
+    expect(appendix).toContain("区间中段约 2500 字为篇幅参考")
     const locked = chapterPresentationPhaseAppendix({
       minimumWordCount: 2000,
       maximumWordCount: 3000,
@@ -61,9 +61,10 @@ describe("chapter narrative intent policy", () => {
     expect(appendix).toContain("去AI味.md")
     const draft = chapterPresentationPhaseAppendix({
       minimumWordCount: 2000,
-      maximumWordCount: 3000,
+      maximumWordCount: 4500,
     }, "draft")
-    expect(draft).toContain("2000–3000")
+    expect(draft).toContain("2000–4500")
+    expect(draft).toContain("区间中段约 3250 字为篇幅参考")
     expect(draft).toContain("移除正文中的全部空白字符后计数")
     expect(draft).toContain("不能用估算代替")
   })

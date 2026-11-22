@@ -8,6 +8,7 @@ import type {
 import {
   assertWorkDescriptionCharLimit,
   digest,
+  formatWorkDescriptionRuleEvidence,
   isWorkDescriptionRulePath,
 } from "../../core/index.js"
 import type { TurnReadEvidence } from "../turns/ports/ai-model-port.js"
@@ -36,7 +37,7 @@ const LIST_EVIDENCE_OWNER = "workspace:catalog"
  * Absolute `exactKeys` are also handled as read-only host filesystem paths.
  */
 export async function executeSynopsisWorkspaceReads(input: Readonly<{
-  workspace: WorkspacePort
+  workspace: Pick<WorkspacePort, "readMarkdown">
   workspaceRootRef: string
   catalog: WorkspaceCatalogSnapshot
   requests: PhaseResultEnvelope["requestedReads"]
@@ -156,6 +157,9 @@ export async function executeSynopsisWorkspaceReads(input: Readonly<{
       }
 
       const sliced = sliceMarkdownLines(content, request.query.lineStart, request.query.lineEnd)
+      const fullText = !sliced.ranged && isWorkDescriptionRulePath(entry.relativePath)
+        ? formatWorkDescriptionRuleEvidence(entry.relativePath, sliced.text)
+        : sliced.text
       const evidenceDigest = digest(sliced.text)
       const evidenceKey = `${entry.relativePath}:${evidenceDigest}`
       if (seen.has(evidenceKey)) continue
@@ -177,7 +181,7 @@ export async function executeSynopsisWorkspaceReads(input: Readonly<{
               `# ${entry.relativePath} (L${String(sliced.lineStart)}-L${String(sliced.lineEnd)} / ${String(sliced.totalLines)} lines, ${String(entry.size)} bytes)`,
               sliced.text,
             ].join("\n\n")
-          : sliced.text,
+          : fullText,
         sourceRefs: [{ sourceKind: "workspace", relativePath: entry.relativePath, version: entry.version }],
         digest: evidenceDigest,
       })

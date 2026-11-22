@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  executeSynopsisWorkspaceReads,
   formatSynopsisSearchLabel,
   grepMarkdownContent,
   listUserRuleMarkdownPaths,
@@ -114,6 +115,26 @@ function readRequest(partial: {
 }
 
 describe("synopsis workspace reads helpers", () => {
+  it("gives chapter discussion the advisory style guidance for existing style files", async () => {
+    const relativePath = "表现输出/本作品描写/作品风格.md"
+    const legacyStyle = "# 作品风格\n\n整部作品必须使用短句。"
+    const evidence = await executeSynopsisWorkspaceReads({
+      workspace: { readMarkdown: async () => legacyStyle },
+      workspaceRootRef: "workspace",
+      catalog: {
+        ...catalog,
+        entries: [{ relativePath, entryKind: "file", role: "presentation", version: 1, digest: "style", size: 80 }],
+      },
+      requests: [readRequest({ exactKeys: [relativePath], sourceKinds: ["rule"] })],
+      existingEvidence: [],
+      createId: () => "style-read",
+    })
+
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0]?.semanticText).toContain("旧文档中由 AI 写成命令的表现偏好也按指引理解")
+    expect(evidence[0]?.semanticText).toContain(legacyStyle)
+  })
+
   it("selects files by exact path and includes staging for reference", () => {
     const selected = selectSynopsisWorkspaceEntries(
       catalog,

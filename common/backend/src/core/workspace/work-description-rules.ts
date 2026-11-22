@@ -8,10 +8,6 @@ const require = createRequire(import.meta.url)
 // package exports block ./package.json; resolve entry then walk to package root.
 const promptContractsEntry = require.resolve("@starseafolio/prompt-contracts")
 const promptContractsRoot = dirname(dirname(promptContractsEntry))
-const DEAI_DESCRIPTION_RULE_FILE = join(
-  promptContractsRoot,
-  "resources/presentation/表现输出/描写规则/去AI味.md",
-)
 
 export const WORK_DESCRIPTION_RULES_DIR = "表现输出/本作品描写"
 export const DESCRIPTION_RULES_DIR = "表现输出/描写规则"
@@ -42,103 +38,20 @@ const WORK_DESCRIPTION_FILE_PATTERN = /^表现输出\/本作品描写\/[^/]+\.md
 const DESCRIPTION_RULE_FILE_PATTERN = /^表现输出\/描写规则\/[^/]+\.md$/u
 const USER_PRESET_PRESENTATION_FILE_PATTERN = /^表现输出\/(?:描写规则|笔风规则|小说大类规则|小说次大类规则)\/[^/]+\.md$/u
 
-/** Platform seed: always-on sensory timing baseline (when to write, not how). */
-export const SENSORY_DESCRIPTION_RULE_MARKDOWN = [
-  "# 感官描写",
-  "",
-  "> 职责：规定**何时**必须落到感官与可感知细节。不管具体怎么写、用什么词、偏哪种腔。",
-  "",
-  "## 本轮身份",
-  "",
-  "本文件是描写**基线**，每轮正式推演与创作台讨论都会注入，不论下拉选「自动」还是锁定某一场面卡。",
-  "切镜、密度、铺开顺序仍由 `自动.md` / 场面卡 / 锁定文件负责；本文件只补「该不该写感官」的时机。",
-  "具体写法由 AI 按场面与人物限知自由发挥；若用户要固定气味、色调、禁用词等细节偏好，写在 `表现输出/本作品描写/`，不要改本文件的「时机」职责。",
-  "",
-  "## 硬约束",
-  "",
-  "- **时机到位就要写**：下列触发出现时，正文须留下可感知的感官或外观痕迹，禁止只用抽象判断句带过（如「很好看」「好臭」「很可怕」而无任何感知落点）。",
-  "- **怎么写不规定**：不要求五感清单、不规定修辞；默认**一点到位、镶进动作**。篇幅与密度服从 `作品风格.md` 与当前场面卡，不是本文件授权加长。",
-  "- **限知优先**：只写观察者当下能闻到、看见、听见、触到、尝到或身体直接感到的；不得为凑感官泄露其不知的信息。",
-  "- **首次优先，重复从简**：同一对象/刺激的「首次」须落笔；之后只写变化、对比或当下仍抢注意力的一点，禁止每次见面重铺全套。",
-  "- 不改世界事实；禁止把「镜头推进 / 切到特写」写进正文。",
-  "",
-  "## 何时必须落到感官或可感知细节",
-  "",
-  "### 人与人",
-  "",
-  "- **靠近、拥抱、贴身、共处一室到能闻到对方时**：落到体味、发香、汗气、呼吸、衣物气息等可感知气味（有则写，无则写清新/干燥/皂气等当场真实的一点，勿空喊「靠近了」）。",
-  "- **本场或本章第一次看清某人**：落到可辨认的外观一点（发色、袖口、姿态、伤疤等），**镶进正在做的动作里**；禁止开场外形清单、禁止为过检把冷直章写成扫脸段。",
-  "- **对方换了衣服 / 第一次以这身装束出场**：落到衣装的形色、质地、新旧、是否合身、是否沾污等可见处一点。",
-  "- **身体接触刚发生或性质变化时**（拉住、推开、擦伤、体温传来等）：落到触感或温度，不只写动作名。",
-  "",
-  "### 人与物 / 环境",
-  "",
-  "- **第一次进入关键空间，或空间气味/光线突变**：落到气味、空气、湿度、光暗、声响中至少一种当场可感；办事/蒙太奇章只给办事需要的那一点，不另开景物段。",
-  "- **第一次拿起、穿上、吃到、踩上关键物件**：落到触感、重量、温度、味道或声音中与剧情有关的一点。",
-  "",
-  "### 刺激性场面（首次或剧情要求停住时）",
-  "",
-  "下列刺激在**首次遭遇**，或细纲/场面要求角色被其击中时，必须写可感知落点，禁止只贴标签：",
-  "",
-  "- 血腥、伤残、尸体与体液",
-  "- 恐怖、惊惧、不洁与压迫感",
-  "- 黑暗、眩光、烟尘、浓雾",
-  "- 恶臭、腐气、刺鼻化学味",
-  "- 强烈的美、华丽、醒目衣装或场面",
-  "- 色欲 / 色情张力下的身体感知（气味、体温、触感、呼吸、布料等）——仍服从限知与用户规则/细纲禁笔，本文件只要求「有感知」，不规定尺度与措辞",
-  "",
-  "## 不做的事",
-  "",
-  "- 不教如何比喻、不列必须用的意象词。",
-  "- 不要求每段五感齐全；与当前动作无关的感官可以不写。",
-  "- **不授权加长**：过本文件不等于要把短句动作章改写成抒情景物章；与 `作品风格.md` 冲突时，以作品风格的密度与节奏为准。",
-  "- 不替代 `本作品描写/`：作品级持续偏好（固定体味设定、禁用某种感官夸张等）由用户或讨论写入本作品描写。",
-].join("\n")
+/** Platform seeds share the same files used by the presentation presets. */
+export const SENSORY_DESCRIPTION_RULE_MARKDOWN = readFileSync(
+  join(promptContractsRoot, "resources/presentation", SENSORY_DESCRIPTION_RULE_PATH),
+  "utf8",
+)
+export const DEAI_DESCRIPTION_RULE_MARKDOWN = readFileSync(
+  join(promptContractsRoot, "resources/presentation", DEAI_DESCRIPTION_RULE_PATH),
+  "utf8",
+)
+export const AUTO_DESCRIPTION_RULE_MARKDOWN = readFileSync(
+  join(promptContractsRoot, "resources/presentation", AUTO_DESCRIPTION_RULE_PATH),
+  "utf8",
+)
 
-/**
- * Platform seed: always-on anti-AI-slop baseline.
- * Source of truth is the presentation markdown (includes full external原文 blocks; do not re-summarize here).
- */
-export const DEAI_DESCRIPTION_RULE_MARKDOWN = readFileSync(DEAI_DESCRIPTION_RULE_FILE, "utf8")
-
-/** Platform seed for dropdown「自动」: conductor for switching sibling description presets. */
-export const AUTO_DESCRIPTION_RULE_MARKDOWN = [
-  "# 自动",
-  "",
-  "> 职责：同一章内按场面切换描写规则。不管用语和题材腔。",
-  "",
-  "## 本轮身份",
-  "",
-  "创作台选「自动」时，本轮只注入本文件 + 感官/去AI味基线；场面卡全文**不预载**。",
-  "本文件负责**何时切换**；需要某张卡细则时用 `request_read`（`sourceKinds:[\"rule\"]`）或请用户下拉锁定。",
-  "`感官描写.md` 与 `去AI味.md` 是**始终生效的基线**，不是可切换场面卡；不要把它们当成「切到某种模式」。",
-  "",
-  "## 硬约束",
-  "",
-  "- 同一章**可以**出现多种描写场面，必须随情节功能切换，禁止整章锁死在一张卡上。",
-  "- 用户若在下拉中锁定某一文件，则以该文件为准，本文件不生效；但 `感官描写.md` 与 `去AI味.md` 仍会一并注入。",
-  "- 按文件名/标题匹配当前场面；没有对应卡时，用下方「缺卡时的默认判断」。",
-  "- 禁止把「镜头推进 / 切到 / 特写」写进正文。不改世界事实与人物未知信息。",
-  "",
-  "## 何时切到哪张卡",
-  "",
-  "匹配文件名或标题中的关键词（不必字面相同）；**不要**把「感官描写」「去AI味」当作切换目标：",
-  "",
-  "- 冲突、对质、认人、近身交锋 → 对峙 / 升密：锁中近景，升密到招式、距离、当场证据。",
-  "- 赶路、转场、办事、交代时间流逝 → 过场 / 白描：降密，一两笔事实立刻办事。",
-  "- 跟随当前行动主体的手、呼吸、眼前一米 → 近景 / 跟随：锁其能看见、听见、碰到或误读的范围。",
-  "- 多人同场、话轮来回 → 群像：每人一个辨识点，不要点名开会。",
-  "- 本场第一次看见关键人物或地点 → 首次 / 铺陈：只铺开一次，再出场只写变化；若 `作品风格.md` 要求中低密度或本章是办事/蒙太奇，改用过场白描密度，外形只镶进动作一点。",
-  "- 必须停在某人注意力里 → 限知 / 主观：不写他看不见的，误判可以写、作者不纠正。",
-  "- 换地、开战、入城、行军 → 远近 / 调度：先定场再落到可跟随的人或物。",
-  "",
-  "场面功能一变就换卡。转场切口用动作完成、话轮交接、观察者转身、换地；用声、光、气味或同一物件衔接。",
-  "",
-  "## 缺卡时的默认判断",
-  "",
-  "切镜 / 锁景 ＞ 密度 ＞ 铺开顺序。首次见关键对象可铺开；对峙升密；赶路/办事/蒙太奇降密；群像每人一点。近景只写最后有用的一槽。",
-  "感官落点时机始终遵守 `感官描写.md`；叙述去套话始终遵守 `去AI味.md`；句长与景物篇幅服从 `作品风格.md`。",
-].join("\n")
 export function normalizeWorkspaceRelativePath(path: string): string {
   return path.trim().replace(/\\/gu, "/")
 }
@@ -256,19 +169,17 @@ export function formatDescriptionRuleEvidence(
   const path = normalizeWorkspaceRelativePath(relativePath)
   if (path === SENSORY_DESCRIPTION_RULE_PATH) {
     return [
-      "【描写·感官基线·本轮始终生效】",
-      "本文件只管「何时该落感官」，不管怎么写；具体写法由 AI 自由发挥，或由用户在本作品描写中补充细节偏好。",
-      "与自动调度 / 场面卡 / 锁定描写规则并存：那些管切镜与密度，本文件管感官落点时机。",
+      "【描写·感官参考】",
+      "按视点与场面需要选用下文的感知细节，详略随叙事目的调整。",
       "",
       content,
     ].join("\n")
   }
   if (path === DEAI_DESCRIPTION_RULE_PATH) {
     return [
-      "【描写·去AI味基线·本轮始终生效】",
-      "本文件压掉机器腔与模板句；不管题材腔与笔风词表。作品专属禁用词可写在本作品描写中叠加。",
-      "与自动调度 / 场面卡 / 锁定描写规则并存。",
-      "平台附加硬约束：不得把无因果关系的两项缺失排成「没给A，也没给B」来制造意味；两项事实都要保留时，写清共同因果与实际后果；无共同因果就拆开叙述，不得擅自补动作或动机。",
+      "【描写·去AI味参考】",
+      "把下文的写作手法当作润色参考。根据人物声口和情境取用，优先修正套话、重复解释和失准修辞。作者明确规定的用词与写法按原要求执行。",
+      "两个事实都需保留时，按其在场景中的真实联系来写，避免用无关的否定排比制造意味。",
       "",
       content,
     ].join("\n")
@@ -277,9 +188,7 @@ export function formatDescriptionRuleEvidence(
     if (path === AUTO_DESCRIPTION_RULE_PATH) {
       return [
         "【描写·自动调度】",
-        "本轮只注入本文件与感官/去AI味基线；场面卡全文不预载。",
-        "需要某场面卡细则时：`request_read` + `sourceKinds:[\"rule\"]` + exactKeys（如 `表现输出/描写规则/近景跟随.md`），或请用户在下拉锁定该卡。",
-        "`感官描写.md` 与 `去AI味.md` 始终生效，不是可切换场面卡。",
+        "场面卡按需参考。可用 `request_read` 读取相关文件（如 `表现输出/描写规则/近景跟随.md`）。感官与润色建议随场面取用。",
         "",
         content,
       ].join("\n")
@@ -287,18 +196,20 @@ export function formatDescriptionRuleEvidence(
     return [
       "【描写场面卡】",
       `文件：${path}`,
-      "仅当自动调度判定当前场面匹配本文件时生效；不要整章锁死在本文件。",
+      "按当前场面需要选用下文的写法。",
       "",
       content,
     ].join("\n")
   }
   return [
     "【描写·本轮锁定】",
-    "整章必须遵守本文件，不得改用同目录其他描写规则（感官与去AI味基线仍同时生效）。",
+    "这是用户选中的描写参考。按场景选用其中的写法，并结合用户的具体要求。",
     "",
     content,
   ].join("\n")
-}export function assertWorkDescriptionCharLimit(relativePath: string, content: string): void {
+}
+
+export function assertWorkDescriptionCharLimit(relativePath: string, content: string): void {
   if (content.length > WORK_DESCRIPTION_MAX_CHARS) {
     throw new Error(
       `本作品描写「${relativePath}」超过 ${String(WORK_DESCRIPTION_MAX_CHARS)} 字（当前 ${String(content.length)} 字）。请拆分或删减后重试。`,
@@ -338,20 +249,17 @@ export function formatWorkDescriptionRuleEvidence(relativePath: string, content:
   const isWorkStyle = normalized === `${WORK_DESCRIPTION_RULES_DIR}/作品风格.md`
   if (isWorkStyle) {
     return [
-      "【本作品描写·作品风格·硬约束】",
-      "本文件是整部作品呈现硬约束：语体、密度、句长、对话占比、声口、命名、人称。",
-      "与描写场面卡 / 感官基线冲突时：机位与切镜可跟场面卡；句长、密度、对话占比、开场方式、景物篇幅以本文件为准。",
-      "感官基线只管「该不该有落点」，不管写成多长；禁止为过感官检查把冷直短句章写成开场外形清单或长段景物。",
-      "用户本轮明确要求「笔风与前面一致」时，以上一章已发布正文的节奏为样板，本文件与样板共同压过补描写冲动。",
+      "【本作品描写·作品风格指引】",
+      "参考下文的作品定位、语气、人物声口与阅读体验。按场景选择句长、分段、视点、对白比例和详略，以上一章的实际正文体会作品语感。",
+      "旧文档中由 AI 写成命令的表现偏好也按指引理解。作者明确指定的要求与已确立的人物、称谓和剧情事实继续有效。",
       "",
       content,
     ].join("\n")
   }
   return [
     "【本作品描写·附加层】",
-    "以下约束适用于整部作品的持续呈现；不能抢下拉选中的机位或文类预设。",
-    "句长、密度、对话占比、声口、命名以同目录 `作品风格.md` 为准；本文件只叠加氛围/禁镜等持续偏好。",
-    "单章一次性氛围（雨夜、慢切等）写在梗概/细纲，不写在本文件。",
+    "下文补充作品的长期呈现偏好。结合《作品风格》、作者要求和具体场面选择写法。",
+    "单章氛围或节奏写进该章梗概或细纲。",
     "",
     content,
   ].join("\n")
