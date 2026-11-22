@@ -1167,7 +1167,32 @@ export class SynopsisConversationService {
       if (synopsisChangedWhileRunning) {
         writeNotices.push("生成期间梗概文件已发生变更，本轮保留最新版本。")
       } else if (assist.synopsisBody !== undefined
-        && (!userEditedSinceAgent || planningWriteIntent?.synopsis === "rewrite")) {
+        && (!userEditedSinceAgent
+          || planningWriteIntent?.synopsis === "rewrite"
+          || writeScope?.synopsis === "rewrite")) {
+        // Rewrite invalidates downstream materials so the stage bar returns to 梗概
+        // (materials-only resolve would otherwise stay on 草稿 while old 细纲/草稿 remain).
+        const rewriteSynopsis = planningWriteIntent?.synopsis === "rewrite"
+          || writeScope?.synopsis === "rewrite"
+        if (rewriteSynopsis) {
+          try {
+            await this.dependencies.chapterSynopsis.restageChapter({
+              projectId: input.projectId,
+              workspaceRootRef: input.workspaceRootRef,
+              chapterSequence: session.chapterSequence,
+              targetStage: "synopsis",
+              reason: "用户要求重写梗概：清除下游细纲与草稿表面，阶段回到梗概",
+            })
+            writeNotices.push("已回退到梗概阶段：旧细纲已清除，草稿表面已清空，请按新梗概重写下游。")
+          } catch (error) {
+            runtimeLog("warn", "synopsis-conversation", "restage-on-synopsis-rewrite-failed", {
+              projectId: input.projectId,
+              sessionId: session.sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+            writeNotices.push("重写梗概时未能自动回退下游材料，阶段条可能仍停在更后节点；请再试或调用 restage_chapter。")
+          }
+        }
         wroteSynopsisBody = true
         const preserveTitle = writeScope !== undefined && writeScope.advance !== true
           && writeScope.chapterTitle !== true && synopsisReady
@@ -1258,7 +1283,8 @@ export class SynopsisConversationService {
           markdown: assist.synopsisBody,
         })
       } else if (assist.synopsisBody !== undefined && userEditedSinceAgent
-        && planningWriteIntent?.synopsis !== "rewrite") {
+        && planningWriteIntent?.synopsis !== "rewrite"
+        && writeScope?.synopsis !== "rewrite") {
         writeNotices.push("梗概文件有你的手改内容，模型未确认本轮要重写该文档，因此已保留原文。")
         this.emitDiscussEdit(input.projectId, {
           path: synopsisPath,
@@ -1604,7 +1630,9 @@ export class SynopsisConversationService {
           this.emitDiscussEdit(input.projectId, {
             path: outlinePath, kind: "outline", status: "failed", summary: "未落盘：细纲已变化",
           })
-        } else if (userEditedOutlineSinceAgent && planningWriteIntent?.outline !== "rewrite") {
+        } else if (userEditedOutlineSinceAgent
+          && planningWriteIntent?.outline !== "rewrite"
+          && writeScope?.outline !== "rewrite") {
           writeNotices.push(planningWriteIntent?.outline === "patch"
             ? "本轮意图要求局部修改细纲，但模型返回了整篇内容，本轮未覆盖手改。"
             : "细纲文件有你的手改内容，模型未确认本轮要重写整篇细纲，因此已保留原文。")
@@ -1615,6 +1643,16 @@ export class SynopsisConversationService {
             summary: "未落盘：你刚改过细纲文件",
           })
         } else {
+          if (planningWriteIntent?.outline === "rewrite" || writeScope?.outline === "rewrite") {
+            await this.dependencies.chapterSynopsis.restageChapter({
+              projectId: input.projectId,
+              workspaceRootRef: input.workspaceRootRef,
+              chapterSequence: session.chapterSequence,
+              targetStage: "outline",
+              reason: "用户要求重写细纲：清除下游草稿表面，阶段回到细纲",
+            })
+            writeNotices.push("已回退到细纲阶段：草稿表面已清空，请按新细纲重写草稿。")
+          }
           await this.dependencies.workspace.saveSynopsisMarkdown(
             input.workspaceRootRef,
             outlinePath,
@@ -3383,8 +3421,14 @@ export class SynopsisConversationService {
                  return executeWorkflowTool(request)
                } }
             : {}),
-           ...(!allowChapterWorkflowTools || this.dependencies.restageChapter === undefined
-             || (input.writeScope !== undefined && input.writeScope.restage !== true)
+          // Host also auto-restages on planningWriteIntent.synopsis/outline=rewrite.
+          // Expose the tool when writeScope allows restage, or when rewrite of an earlier
+          // stage is in scope (so the model can demote if host rewrite path is skipped).
+          ...(!allowChapterWorkflowTools || this.dependencies.restageChapter === undefined
+            || (input.writeScope !== undefined
+              && input.writeScope.restage !== true
+              && input.writeScope.synopsis !== "rewrite"
+              && input.writeScope.outline !== "rewrite")
             ? {}
             : { restageChapter: this.dependencies.restageChapter }),
            ...(!allowChapterWorkflowTools || this.dependencies.runBash === undefined
@@ -4163,6 +4207,17 @@ export class SynopsisConversationService {
           if (toolResult.status === "draft_created") {
             latestToolDraft = toolResult.result as SynopsisWorkflowToolResult
             focusedDraftMarkdown = assembleChapterDocument(latestToolDraft.heading, latestToolDraft.body)
+          }
+          if (!toolFailed && toolRequest.name === "restage_chapter") {
+            const restagedSession = await this.dependencies.conversation.findSession(input.sessionId)
+              ?? await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
+            if (restagedSession !== undefined) {
+              await this.syncProceedProgressFromMaterials({
+                projectId: input.projectId,
+                workspaceRootRef: input.workspaceRootRef,
+                session: restagedSession,
+              })
+            }
           }
           if (!toolFailed && !isDiscussTodoBootstrapTool(toolRequest.name)) {
             const settledTodos = settleToolGateTodos(

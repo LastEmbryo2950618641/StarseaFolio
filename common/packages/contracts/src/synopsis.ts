@@ -244,6 +244,10 @@ export const DISCUSS_PROCEED_STAGE_ORDER: readonly DiscussProceedStage[] = [
  * - 草稿入库 → draft_discuss（仍停在草稿，等待用户确认发布）
  * - 章节入库开始 / 正文已落盘 → body_discuss
  * - 焦点到下一章且尚无梗概 → chapter_requirements
+ *
+ * Rewriting an earlier stage must clear downstream materials (host restage /
+ * `restage_chapter`) before this resolver will move「当前」back; otherwise an
+ * old 细纲+草稿 keep the bar stuck on 草稿 while the user rewrites 梗概.
  */
 export function resolveDiscussPipelineStage(input: Readonly<{
   synopsisReady: boolean

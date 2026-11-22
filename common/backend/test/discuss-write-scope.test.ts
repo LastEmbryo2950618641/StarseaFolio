@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { rmSync } from "node:fs"
+import { existsSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import Database from "better-sqlite3"
 import { describe, expect, it } from "vitest"
@@ -68,7 +68,6 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       if (!first.ok) throw new Error(first.error.message)
       const path = (first.data as SynopsisConversationSendResult).session.synopsisPath
       const outlinePath = path.replace("[剧情梗概].md", "[剧情细纲].md")
-      const original = await harness.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)
       const legacy = "【skill-pack:synopsis_discuss】旧包\n\n{\"protocol\":\"synopsis-skills-v1\",\"kind\":\"default_pack\",\"skillIds\":[\"plot-synopsis\"]}"
       const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
       try {
@@ -81,7 +80,10 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       expect(result).toMatchObject({ ok: true })
       expect(rewriteCalls).toBe(2)
       expect(await harness.workspace.readMarkdown(harness.workspaceRootRef, path)).toContain("带着车票上了末班车")
-      expect(await harness.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(original)
+      // Synopsis rewrite demotes the chapter: old outline must not keep the proceed bar ahead.
+      expect(existsSync(join(harness.workspaceRootRef, outlinePath))).toBe(false)
+      expect((result.data as SynopsisConversationSendResult).messages.at(-1)?.content)
+        .toMatch(/回退到梗概/)
     } finally {
       await harness.container.close()
       rmSync(harness.root, { recursive: true, force: true })

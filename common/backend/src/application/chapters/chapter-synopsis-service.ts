@@ -18,6 +18,7 @@ import {
   parseSynopsisMarkdownPath,
   parseSynopsisTitleFromLabel,
   isOutlinePlaceholderDocument,
+  siblingPlanningMarkdownPath,
 } from "../../core/chapters/synopsis-path.js"
 import { runtimeLog } from "../../infrastructure/diagnostics/index.js"
 import { digest } from "../../core/identity/digest.js"
@@ -683,15 +684,30 @@ export class ChapterSynopsisService {
     const planning = await this.listPlanningFilesForSequence(input.workspaceRootRef, input.chapterSequence)
     const synopsis = planning.find((entry) => entry.kind === "synopsis")
     const outline = planning.find((entry) => entry.kind === "outline")
+    const sessionBefore = await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
+    // Catalog validate can lag behind a just-saved 细纲; also clear the sibling path
+    // beside the active synopsis so rewrite reliably demotes the stage bar.
+    const siblingOutlinePath = siblingPlanningMarkdownPath(
+      outline?.path
+        ?? synopsis?.path
+        ?? sessionBefore?.synopsisPath
+        ?? "",
+      "outline",
+    )
     const body = await this.findBodyForSequence(input.workspaceRootRef, input.chapterSequence)
 
     let clearedOutlinePath: string | undefined
     let archivedBodyPath: string | undefined
     let retiredBodyPath: string | undefined
 
-    if (input.targetStage === "synopsis" && outline !== undefined) {
-      await this.dependencies.workspace.removeSynopsisMarkdown(input.workspaceRootRef, outline.path)
-      clearedOutlinePath = outline.path
+    if (input.targetStage === "synopsis") {
+      const outlinePaths = new Set<string>()
+      if (outline?.path !== undefined) outlinePaths.add(outline.path)
+      if (siblingOutlinePath !== undefined) outlinePaths.add(siblingOutlinePath)
+      for (const outlinePath of outlinePaths) {
+        await this.dependencies.workspace.removeSynopsisMarkdown(input.workspaceRootRef, outlinePath)
+        clearedOutlinePath = outlinePath
+      }
     }
 
     await this.dependencies.conversation.updateChapterArtifactState({
@@ -714,7 +730,8 @@ export class ChapterSynopsisService {
       )
     }
 
-    const session = await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
+    const session = sessionBefore
+      ?? await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
     let synopsisConfirmedCleared = false
     const remainingOutline = input.targetStage === "synopsis" ? undefined : outline
     const focusKind = remainingOutline !== undefined ? "plot_outline" as const : "plot_synopsis" as const

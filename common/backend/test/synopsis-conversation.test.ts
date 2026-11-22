@@ -840,6 +840,78 @@ describe("synopsis conversation", () => {
     }
   })
 
+  it("rewinds proceed stage to synopsis when rewriting synopsis over existing outline", async () => {
+    const rewrittenSynopsis = "# 第一章 雨夜旧站台 剧情梗概\n\n按合同重写：整理势力、威慑配合、统筹成册、统治落地、海外反应。\n"
+    let modelCalls = 0
+    let lastPhase = ""
+    const model: AIModelPort = {
+      info: { provider: "test", model: "synopsis-rewrite-restage", available: true, contextWindowTokens: 64_000 },
+      async execute(request) {
+        modelCalls += 1
+        lastPhase = request.phase
+        synopsisConversationStreamHub.setTodos(request.projectId, [
+          { id: "rewrite", content: "重写梗概", status: "completed" },
+        ], Date.now())
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+            reason: "Rewrite synopsis and demote downstream materials.",
+            selfReview: "planningWriteIntent.synopsis=rewrite triggers host restage.",
+            artifact: {
+              assistantMessage: "已按你的要求重写梗概，并清掉下游细纲与草稿表面。",
+              synopsisBody: rewrittenSynopsis,
+              planningWriteIntent: { synopsis: "rewrite" as const },
+              choices: [{ label: "用这份梗概写细纲", action: "confirm_synopsis" as const }],
+              finalSelfReview: "Synopsis rewrite restaged the chapter.",
+            },
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+        }
+      },
+    }
+    const harness = await openChapterHarness("Synopsis rewrite restages stage bar", { model })
+    temporaryRoots.push(harness.root)
+    try {
+      await prepareChapterPlanning(harness)
+      const listed = await invoke<{ session: { synopsisPath: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+      })
+      const outlinePath = listed.session.synopsisPath.replace("[剧情梗概].md", "[剧情细纲].md")
+      await harness.container.workspace.saveSynopsisMarkdown(
+        harness.workspaceRootRef,
+        outlinePath,
+        "# 第一章 雨夜旧站台 剧情细纲\n\n## 章定位\n旧细纲。\n\n## 分场节拍\n旧场。\n\n## 信息边界\n无。\n\n## 风险与待决\n无。\n",
+      )
+      const before = await invoke<{ proceedProgress?: { stage: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+      })
+      expect(before.proceedProgress?.stage).toBe("outline_discuss")
+
+      const sent = await invoke<{
+        proceedProgress?: { stage: string }
+        messages: Array<{ role: string; content: string }>
+      }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "使用这个重新写第一章的梗概",
+      })
+
+      const assistant = sent.messages.at(-1)?.content ?? ""
+      expect(modelCalls, `phase=${lastPhase}`).toBeGreaterThan(0)
+      expect(await harness.container.workspace.readMarkdown(
+        harness.workspaceRootRef,
+        listed.session.synopsisPath,
+      )).toContain("按合同重写")
+      expect(assistant, `assistant was: ${assistant}`).toMatch(/回退到梗概/)
+      expect(existsSync(join(harness.workspaceRootRef, outlinePath)), `outline still at ${outlinePath}`).toBe(false)
+      expect(sent.proceedProgress?.stage).toBe("synopsis_discuss")
+    } finally {
+      await harness.container.close()
+    }
+  }, 20_000)
+
   it("refreshChoices appends hidden context and merges new chips onto the visible message", async () => {
     await withHarness(async (harness) => {
       const base = {
