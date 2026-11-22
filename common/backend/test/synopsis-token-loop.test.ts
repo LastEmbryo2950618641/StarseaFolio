@@ -987,7 +987,9 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
         const drafted = await send({ maxModelCalls: 40, batchProceed: false })
         expect(drafted.autoContinue).toBeUndefined()
         expect(drafted.messages.at(-1)?.choices?.[0]?.action).toBe("promote_draft_to_body")
-        const published = await send({ message: "草稿可以，发布正文", maxModelCalls: 40, batchProceed: false })
+        const published = await send({ message: "草稿可以，发布正文",
+          publishDraftVersionId: drafted.messages.at(-1)?.choices?.[0]?.publishDraftVersionId,
+          maxModelCalls: 40, batchProceed: false })
         expect(published.messages.at(-1)?.content).toContain("无需重复确认正文")
         expect(published.messages.at(-1)?.content).toContain(timeoutMessage)
         expect(published.autoContinue).toBeUndefined()
@@ -1015,7 +1017,8 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       const drafted = await send({ maxModelCalls: 40, batchProceed })
       expect(drafted.autoContinue).toBeUndefined()
       expect(drafted.messages.at(-1)?.choices?.[0]?.action).toBe("promote_draft_to_body")
-      const sent = await send({ message: "草稿可以，发布正文", maxModelCalls: 40, batchProceed })
+      const sent = await send({ message: "草稿可以，发布正文",
+        publishDraftVersionId: drafted.messages.at(-1)?.choices?.[0]?.publishDraftVersionId, maxModelCalls: 40, batchProceed })
       const response = await harness.facade.handle({
         protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method: "chapter.list",
         payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef },

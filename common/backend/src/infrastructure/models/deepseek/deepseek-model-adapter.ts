@@ -12,8 +12,10 @@ import {
 } from "@starseafolio/contracts"
 import type { DeepSeekRuntimeConfig } from "@starseafolio/config"
 import {
+  discussTurnWriteScopeSchema,
   FictionDeliveryError,
   fictionDeliveryReminder,
+  internalDraftArtifactSchema,
   inspectPhaseFictionDelivery,
   isFictionDeliveryPhase,
 } from "@starseafolio/prompt-contracts"
@@ -22,6 +24,8 @@ import type {
   AIModelPort,
   ContextCompressionInput,
   ContextCompressionResult,
+  DiscussTurnClassification,
+  DiscussTurnClassificationInput,
   ModelExecutionOptions,
   PhaseModelExecution,
   PromptResourcePort,
@@ -152,6 +156,50 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         ...(usage.cacheMissInputTokens === undefined ? {} : { cacheMissInputTokens: usage.cacheMissInputTokens }),
         provider: this.info.provider,
         model: this.info.model,
+      },
+    }
+  }
+
+  public async classifyDiscussTurn(input: DiscussTurnClassificationInput): Promise<DiscussTurnClassification> {
+    const { signal, ...context } = input
+    signal?.throwIfAborted()
+    const client = await this.clientPromise
+    const startedAt = Date.now()
+    const response = await this.completeWithRetry(client, {
+      model: this.config.model,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "按完整语义识别中文小说创作台本轮授权的写入范围。仅返回 JSON 对象，只包含本轮授权字段。",
+            '字段：synopsis="create"|"rewrite"（含补改梗概），outline="create"|"rewrite"|"patch"，draft="write"（写或改草稿），volume="whole_volume"（一次规划该卷多章梗概和细纲），volumeSynopsis=true，volumeOutline=true，volumeTargets=true（调整卷目标字数/章数）。',
+            "只授权当前请求要交付的内容；背景、旧材料、已经存在的前置文件和待办不授权写入。不把章节级与卷级文件混淆；普通问答、引用、举例、撤回或暂缓返回 {}。",
+            "写入已有有效规划使用 rewrite。新建缺失或占位规划使用 create。明确局部修改细纲时使用 patch。",
+            "最近对话仅用于理解指代和已明确接受的提议。单项修改就只返回该项；只有明确要求多项才同时返回。相同说法在不同上下文可能表达不同意图。",
+            "若用户把后续推进交给系统，才用 advance=true。用户明确要求仅改某项或本步就停时，不能附 advance；推进模式只决定已授权任务的停点。",
+            "明确要求切换章节焦点时用 focus=true；明确要求撤回现有正文回到推演时用 restage=true。",
+            "明确要求改章名或对齐标题用 chapterTitle=true，明确要求改卷名用 volumeTitle=true，明确要求通过命令执行工作区操作用 shell=true。",
+            "当前有可发布草稿，且用户明确批准将这份现有草稿入库时，才单独返回 {\"publish\":true}。否定、引用按钮文案、询问是否应发布、对旧版本的确认、要求先改写或等待都不能授权发布现有草稿。批量编排自行发布，不返回 publish。",
+          ].join("\n"),
+        },
+        { role: "user", content: JSON.stringify(context) },
+      ],
+      thinking: { type: "disabled" },
+      ...(this.config.jsonModeEnabled ? { responseFormat: { type: "json_object" as const } } : {}),
+      ...(signal === undefined ? {} : { signal }),
+      maxTokens: 512,
+    })
+    const parsed = discussTurnWriteScopeSchema.parse(JSON.parse((response.content ?? "").trim()
+      .replace(/^```(?:json)?\s*|\s*```$/giu, "")))
+    const usage = readUsage(response.usage)
+    return {
+      scope: parsed,
+      usage: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        ...(usage.cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens: usage.cacheHitInputTokens }),
+        ...(usage.cacheMissInputTokens === undefined ? {} : { cacheMissInputTokens: usage.cacheMissInputTokens }),
       },
     }
   }
@@ -392,6 +440,18 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
             matched: delivery.matched,
           })
           throw new FictionDeliveryError(delivery)
+        }
+        if (request.phase === "draft" && result.outcome !== "request_read") {
+          const presentation = asRecord(asRecord(request.input).presentation)
+          const minimum = presentation.minimumWordCount
+          const maximum = presentation.maximumWordCount
+          if (typeof minimum === "number" && typeof maximum === "number") {
+            const { contentMarkdown } = internalDraftArtifactSchema.parse(result.artifact)
+            const count = contentMarkdown.replace(/^\s*#\s+[^\n]+\n/u, "").replace(/\s+/gu, "").length
+            if (count < minimum || count > maximum) {
+              throw new Error(`正文实际 ${String(count)} 字，要求 ${String(minimum)}–${String(maximum)} 字。请保留用户要求和既有笔风，调整并完整重交正文。`)
+            }
+          }
         }
         runtimeLog("debug", "deepseek-model", "execution.completed", {
           taskId: request.taskId,

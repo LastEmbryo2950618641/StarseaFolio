@@ -4,6 +4,8 @@ import type {
   AIModelPort,
   ContextCompressionInput,
   ContextCompressionResult,
+  DiscussTurnClassification,
+  DiscussTurnClassificationInput,
   ModelExecutionOptions,
   PhaseModelExecution,
   PromptResourcePort,
@@ -78,6 +80,10 @@ export class AnthropicMessagesModelAdapter implements AIModelPort {
 
   public compressContext(input: ContextCompressionInput): Promise<ContextCompressionResult> {
     return this.inner.compressContext(input)
+  }
+
+  public classifyDiscussTurn(input: DiscussTurnClassificationInput): Promise<DiscussTurnClassification> {
+    return this.inner.classifyDiscussTurn(input)
   }
 
   public execute(request: PhaseRequestEnvelope, options?: ModelExecutionOptions): Promise<PhaseModelExecution> {

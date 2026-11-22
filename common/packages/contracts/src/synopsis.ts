@@ -22,6 +22,8 @@ export type DiscussFocusKind = z.infer<typeof discussFocusKindSchema>
 
 export const synopsisConversationChoiceSchema = z.object({
   label: z.string().min(1),
+  /** Host-issued version approved by the publish choice. */
+  publishDraftVersionId: idSchema.optional(),
   /** Server-issued question identity; only an explicit user send may answer it. */
   setupQuestionId: z.string().min(1).optional(),
   workStyleSelection: z.object({

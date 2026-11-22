@@ -14,7 +14,7 @@ import type {
 } from "@starseafolio/contracts"
 
 import type { GraphDegreeEntry } from "./graph-repository.js"
-import type { StageProjection } from "@starseafolio/prompt-contracts"
+import type { DiscussTurnWriteScope, StageProjection } from "@starseafolio/prompt-contracts"
 
 export type PhaseModelUsage = Readonly<{
   modelCalls?: number
@@ -77,11 +77,30 @@ export type ContextCompressionResult = Readonly<{
   usage: PhaseModelUsage
 }>
 
+export type DiscussTurnClassificationInput = Readonly<{
+  message: string
+  recentMessages: readonly Readonly<{ role: string; content: string }>[]
+  chapterSequence: number
+  focusKind: string
+  synopsisReady: boolean
+  outlineReady: boolean
+  proceedMode: string
+  chapterAutomation: boolean
+  publishableDraftLabel?: string
+  signal?: AbortSignal
+}>
+
+export type DiscussTurnClassification = Readonly<{
+  scope: DiscussTurnWriteScope
+  usage: PhaseModelUsage
+}>
+
 export interface AIModelPort {
   readonly info?: AIModelInfo
   execute(request: PhaseRequestEnvelope, options?: ModelExecutionOptions): Promise<PhaseModelExecution>
   /** Fold old context texts into a shorter continuity summary. Not a phase envelope call. */
   compressContext?(input: ContextCompressionInput): Promise<ContextCompressionResult>
+  classifyDiscussTurn?(input: DiscussTurnClassificationInput): Promise<DiscussTurnClassification>
 }
 
 export type PromptResource = Readonly<{
@@ -215,6 +234,7 @@ export type TurnPhaseInput = Readonly<{
     }>
     volumePlanning?: Readonly<{
       volumeFolderName: string
+      startSequence?: number
       ready: boolean
       targetChapterCount?: number
       targetWordCount?: number

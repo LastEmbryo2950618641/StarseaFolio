@@ -7,6 +7,7 @@ import type {
   ChapterRevisionReadResult,
   ChapterSummary,
   ChapterSynopsis,
+  ChapterWorkflowGate,
   DeductionGoalsSnapshot,
   HistoryCheckoutResult,
   HistoryOverview,
@@ -68,7 +69,6 @@ import {
   BATCH_VOLUME_PLAN_USER_MESSAGE,
   batchDeductionStatusLabel,
   createIdleBatchStatus,
-  volumeChaptersHavePlans,
   type BatchDeductionMode,
   type BatchDeductionPhase,
   type BatchDeductionStatus,
@@ -81,6 +81,7 @@ import {
   resolveChapterArtifactRelationsWithInventory,
   resolveChapterMarkdownKind,
   resolveChapterSurfacePath,
+  type DiscussFocusChapterOption,
 } from "../features/editor/synopsis-path.js"
 import { CreationDeskBatchControls } from "../features/editor/CreationDeskBatchControls.js"
 import {
@@ -179,6 +180,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       noProgressGuardLimit?: number
       autoContinued?: boolean
       setupAnswerTo?: string
+      publishDraftVersionId?: string
     }>,
   ) => Promise<boolean>) | undefined>(undefined)
   const batchCancelRef = useRef(false)
@@ -1656,6 +1658,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       focusLocked?: boolean
       lockedChapterSequence?: number
       automation?: "batch_chapter"
+      automationStep?: "volume_plan" | "volume_draft" | "chapter_plan" | "outline" | "draft"
       agentMode?: "auto" | "plan" | "accept_edits"
       proceedMode?: "precise" | "single" | "batch" | "custom"
       customProceedGates?: import("@starseafolio/contracts").DiscussCustomProceedGates
@@ -1664,6 +1667,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       noProgressGuardLimit?: number
       autoContinued?: boolean
       setupAnswerTo?: string
+      publishDraftVersionId?: string
     }>,
   ): Promise<boolean> => {
     if (options?.autoContinued !== true) synopsisAutoContinueCountRef.current = 0
@@ -1832,6 +1836,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         ...(options?.writePermissionMode === undefined
           ? {}
           : { writePermissionMode: options.writePermissionMode }),
+        ...(options?.publishDraftVersionId === undefined ? {} : { publishDraftVersionId: options.publishDraftVersionId }),
+        ...(options?.automationStep === undefined ? {} : { automationStep: options.automationStep }),
         ...(options?.setupAnswerTo === undefined || options?.autoContinued === true || options?.automation !== undefined
           ? {} : { setupAnswerTo: options.setupAnswerTo }),
       }, {
@@ -2507,6 +2513,19 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       setError(undefined)
       let lastSequence = sequence
       const chapterWorkflowEnabled = projectSettings?.creationDesk.chapterWorkflowEnabled === true
+      const checkBatchPlanning = (chapterSequence: number) => invokeBackend<ChapterWorkflowGate>("chapter.workflowGate.get", {
+        projectId: project.projectId,
+        workspaceRootRef: project.workspaceRootRef,
+        chapterSequence,
+      })
+      const volumePlansReady = async (chapters: readonly DiscussFocusChapterOption[]) => {
+        if (chapters.length === 0) return false
+        for (const chapter of chapters) {
+          if (chapter.synopsisPath === undefined || chapter.outlinePath === undefined
+            || !(await checkBatchPlanning(chapter.sequence)).readyForDraft) return false
+        }
+        return true
+      }
 
       try {
         if (mode === "volume_batch") {
@@ -2540,10 +2559,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
                 activeVolumePlan.targetChapterCount,
                 activeVolumePlan.startSequence,
               )
-          if (activeVolumePlan === undefined || !volumeChaptersHavePlans(volumeChapterRows)) {
+          if (activeVolumePlan === undefined || !(await volumePlansReady(volumeChapterRows))) {
             updateBatchStatus("volume_plan", sequence)
             const planned = await sendSynopsisMessage(BATCH_VOLUME_PLAN_USER_MESSAGE, {
               automation: "batch_chapter",
+              automationStep: "volume_plan",
             })
             if (!planned) {
               pauseBatch(sequence, "卷规划讨论失败或被中断")
@@ -2576,7 +2596,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
                 // The validation below pauses the batch if the model omitted the required target.
               }
             }
-            if (!volumeChaptersHavePlans(volumeChapterRows)) {
+            if (!(await volumePlansReady(volumeChapterRows))) {
               pauseBatch(sequence, "卷规划未写齐各章梗概与细纲（需 volumeChapterPlans）")
               return
             }
@@ -2641,6 +2661,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             } else {
               const drafted = await sendSynopsisMessage(BATCH_VOLUME_DRAFT_USER_MESSAGE, {
                 automation: "batch_chapter",
+                automationStep: "volume_draft",
               })
               if (!drafted) {
                 pauseBatch(missingDraftSequences[0]!, "正文草稿讨论失败或被中断")
@@ -2680,7 +2701,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
                 }
                 const drafted = await sendSynopsisMessage(
                   "【批量推演·逐章补草稿】请基于本章已落盘的梗概与细纲，用 chapterDraftProposal 写出本章完整正文草稿；不要 publish_draft，不要推进其他章节。",
-                  { automation: "batch_chapter" },
+                  { automation: "batch_chapter", automationStep: "draft" },
                 )
                 if (!drafted) {
                   pauseBatch(chapterSequence, "本章草稿推演失败或被中断")
@@ -2803,6 +2824,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             updateBatchStatus("synopsis", sequence)
             const planned = await sendSynopsisMessage(BATCH_CHAPTER_ONCE_USER_MESSAGE, {
               automation: "batch_chapter",
+              automationStep: "chapter_plan",
             })
             if (!planned) {
               pauseBatch(sequence, "梗概讨论失败或被中断")
@@ -2814,10 +2836,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             }
             nextPaths = await refreshWorkspace()
             chapter = listDiscussFocusChapters(nextPaths).find((item) => item.sequence === sequence)
-            if (chapter?.outlinePath === undefined) {
+            if (!(await checkBatchPlanning(sequence)).outline.ready) {
               updateBatchStatus("outline", sequence)
               const outlined = await sendSynopsisMessage(BATCH_CHAPTER_OUTLINE_FOLLOWUP, {
                 automation: "batch_chapter",
+                automationStep: "outline",
               })
               if (!outlined) {
                 pauseBatch(sequence, "细纲讨论失败或被中断")
@@ -2836,6 +2859,10 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           chapter = listDiscussFocusChapters(nextPaths).find((item) => item.sequence === sequence)
           if (chapter?.bodyPath !== undefined) {
             updateBatchStatus("stopped", sequence)
+            return
+          }
+          if (!(await checkBatchPlanning(sequence)).readyForDraft) {
+            pauseBatch(sequence, "本章梗概或细纲尚未写入有效内容，已暂停生成草稿")
             return
           }
 
@@ -2867,7 +2894,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             } else {
               const drafted = await sendSynopsisMessage(
                 "【按章推演·正文草稿】请用 chapterDraftProposal 写出本章完整正文草稿；不要 publish_draft；不要优先 chapter_workflow。",
-                { automation: "batch_chapter" },
+                { automation: "batch_chapter", automationStep: "draft" },
               )
               if (!drafted) {
                 pauseBatch(sequence, "正文草稿讨论失败或被中断")

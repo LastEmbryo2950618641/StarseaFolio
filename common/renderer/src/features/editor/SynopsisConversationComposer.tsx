@@ -92,7 +92,7 @@ import { type DiscussFocusChapterOption } from "./synopsis-path.js"
 import { useDeductionGoals } from "./use-deduction-goals.js"
 import { SynopsisChoiceComposerProvider, useChoiceDraft } from "./SynopsisChoiceComposerContext.js"
 import { SynopsisChoiceGroup } from "./SynopsisChoiceGroup.js"
-import { latestSetupQuestionId } from "./synopsis-choice-state.js"
+import { choiceContribution, choiceIdentity, latestSetupQuestionId } from "./synopsis-choice-state.js"
 import {
   formatChapterIngestDetail,
   useChapterIngestActivity,
@@ -161,6 +161,7 @@ type Props = Readonly<{
     noProgressGuardEnabled?: boolean
     noProgressGuardLimit?: number
     setupAnswerTo?: string
+    publishDraftVersionId?: string
   }>): Promise<void>
   onStop?(): Promise<void>
   onRefreshChoices(messageId: string): Promise<void>
@@ -260,7 +261,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
     thread.scrollTop = thread.scrollHeight
   }
 
-  const sendMessage = useCallback(async (message: string): Promise<void> => {
+  const sendMessage = useCallback(async (message: string, publishDraftVersionId?: string): Promise<void> => {
     stickToLatestRef.current = true
     setShowJumpToLatest(false)
     const setupAnswerTo = latestSetupQuestionId(props.messages)
@@ -272,6 +273,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
       noProgressGuardEnabled: noProgressGuard.enabled,
       noProgressGuardLimit: noProgressGuard.limit,
       ...(setupAnswerTo === undefined ? {} : { setupAnswerTo }),
+      ...(publishDraftVersionId === undefined ? {} : { publishDraftVersionId }),
     })
     await goals.refresh()
   }, [
@@ -392,10 +394,19 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   }, [])
 
   const badgeCount = toolbarBadgeCount(goals.snapshot, chapterSequence)
-  const latestChoiceMessageId = [...visibleMessages]
+  const latestChoiceMessage = [...visibleMessages]
     .reverse()
     .find((message) => message.role === "assistant" && (message.choices?.length ?? 0) > 0)
-    ?.messageId
+  const latestChoiceMessageId = latestChoiceMessage?.messageId
+  const publishSelections = visibleMessages.flatMap((message) => (message.choices ?? []).flatMap((choice) => (
+    choice.action === "promote_draft_to_body" && choice.publishDraftVersionId !== undefined
+      ? [{
+          identity: choiceIdentity(props.workspaceRootRef, message, choice, 0),
+          text: choiceContribution(choice),
+          versionId: choice.publishDraftVersionId,
+        }]
+      : []
+  )))
 
   useEffect(() => {
     if (isRail) return
@@ -775,6 +786,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
             persistNoProgressGuardPrefs(clamped)
           }}
           onSend={sendMessage}
+          publishSelections={publishSelections}
           onStartTurn={props.onStartTurn}
           chapterWorkflowEnabled={props.chapterWorkflowEnabled === true}
           {...(props.tokenMetrics === undefined ? {} : { tokenMetrics: props.tokenMetrics })}
@@ -818,7 +830,8 @@ type ComposerInputProps = Readonly<{
   onCloseAdvancedMenu(): void
   noProgressGuard: NoProgressGuardPrefs
   onNoProgressGuardChange(next: NoProgressGuardPrefs): void
-  onSend(message: string): Promise<void>
+  publishSelections: readonly Readonly<{ identity: string; text: string; versionId: string }>[]
+  onSend(message: string, publishDraftVersionId?: string): Promise<void>
   onStop?(): Promise<void>
   onStartTurn(): void
   chapterWorkflowEnabled?: boolean
@@ -953,8 +966,12 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
   const submit = async (): Promise<void> => {
     const message = (draft ?? "").trim()
     if (message.length === 0 || props.busy || props.running) return
+    const selected = composer.getSelected()
+    const versionId = selected.size === 1
+      ? props.publishSelections.find((choice) => selected.has(choice.identity) && message === choice.text)?.versionId
+      : undefined
     composer.reset()
-    await props.onSend(message)
+    await props.onSend(message, versionId)
   }
 
   const modelOptions = (() => {

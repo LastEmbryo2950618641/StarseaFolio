@@ -365,6 +365,7 @@ export type SynopsisConversationAutomation = z.infer<typeof synopsisConversation
 
 export const synopsisConversationSendPayloadSchema = projectSettingsReadPayloadSchema.extend({
   message: z.string().trim().min(1).max(8_000),
+  publishDraftVersionId: idSchema.optional(),
   setupAnswerTo: z.string().min(1).max(100).optional(),
   presentation: turnStartPayloadSchema.shape.presentation,
   chapterIntent: chapterNarrativeIntentSchema.optional(),
@@ -380,6 +381,7 @@ export const synopsisConversationSendPayloadSchema = projectSettingsReadPayloadS
    * auto-confirm synopsis when a body is written so outline can land same/next turn.
    */
   automation: synopsisConversationAutomationSchema.optional(),
+  automationStep: z.enum(["volume_plan", "volume_draft", "chapter_plan", "outline", "draft"]).optional(),
   /**
    * @deprecated Prefer `proceedMode`. Kept for older clients:
    * true → batch, false/absent → resolved via proceedMode default (single).

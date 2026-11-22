@@ -165,6 +165,7 @@ type Props = Readonly<{
     noProgressGuardEnabled?: boolean
     noProgressGuardLimit?: number
     setupAnswerTo?: string
+    publishDraftVersionId?: string
   }>): Promise<void>
   onSynopsisStop?(): Promise<void>
   onSynopsisRefreshChoices(messageId: string): Promise<void>

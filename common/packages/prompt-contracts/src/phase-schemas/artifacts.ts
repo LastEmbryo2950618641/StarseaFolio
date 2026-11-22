@@ -624,6 +624,29 @@ export const synopsisPresentationWriteSchema = z.object({
   mode: z.enum(["create", "update"]),
 })
 
+const planningWriteIntentSchema = z.object({
+  synopsis: z.enum(["create", "rewrite"]).optional(),
+  outline: z.enum(["create", "rewrite", "patch"]).optional(),
+  draft: z.literal("write").optional(),
+  volume: z.literal("whole_volume").optional(),
+}).strict()
+
+/** Approved deliverables for one discussion turn, decided before any writing tools run. */
+export const discussTurnWriteScopeSchema = planningWriteIntentSchema.extend({
+  volumeSynopsis: z.literal(true).optional(),
+  volumeOutline: z.literal(true).optional(),
+  volumeTargets: z.literal(true).optional(),
+  publish: z.literal(true).optional(),
+  advance: z.literal(true).optional(),
+  focus: z.literal(true).optional(),
+  restage: z.literal(true).optional(),
+  volumeDrafts: z.literal(true).optional(),
+  chapterTitle: z.literal(true).optional(),
+  volumeTitle: z.literal(true).optional(),
+  shell: z.literal(true).optional(),
+})
+export type DiscussTurnWriteScope = z.infer<typeof discussTurnWriteScopeSchema>
+
 export const synopsisDiscussArtifactSchema = z.object({
   assistantMessage: z.string().min(1),
   /** Structured additions; the host applies confirmed core fields last. */
@@ -676,12 +699,7 @@ export const synopsisDiscussArtifactSchema = z.object({
     z.string().min(1).optional(),
   ),
   /** Model-interpreted current-turn intent for writing planning documents. */
-  planningWriteIntent: z.object({
-    synopsis: z.enum(["create", "rewrite"]).optional(),
-    outline: z.enum(["create", "rewrite", "patch"]).optional(),
-    draft: z.literal("write").optional(),
-    volume: z.literal("whole_volume").optional(),
-  }).strict().refine(
+  planningWriteIntent: planningWriteIntentSchema.refine(
     (intent) => intent.synopsis !== undefined || intent.outline !== undefined
       || intent.draft !== undefined || intent.volume !== undefined,
     "planningWriteIntent must identify at least one requested planning write",
