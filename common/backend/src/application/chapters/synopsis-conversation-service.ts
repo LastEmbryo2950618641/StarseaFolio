@@ -984,8 +984,11 @@ export class SynopsisConversationService {
           writeScope = { draft: "write" }
           break
       }
-      const draftReadyAtStart = (latestDraftMarkdown?.trim().length ?? 0) > 0
-        || session.draftVersionId !== undefined
+      // Match syncProceedProgressFromMaterials: restage clears draftVersionId / empty state;
+      // orphan revision rows alone must not pin「当前」on 草稿.
+      const draftReadyAtStart = session.draftVersionId !== undefined
+        && session.draftContentState !== "empty"
+        && (latestDraftMarkdown?.trim().length ?? 0) > 0
       const chapterPublishedAtStart = (chapterBodyMarkdown?.trim().length ?? 0) > 0
       const pipelineStageAtStart = resolveDiscussPipelineStage({
         synopsisReady,
@@ -2399,6 +2402,28 @@ export class SynopsisConversationService {
         // Focus moved: keep new focus paths from setFocus; do not overwrite with old chapter digests.
       }
       const updatedSession = (await this.dependencies.conversation.findSession(session.sessionId)) as NonNullable<Awaited<ReturnType<SqliteSynopsisConversationRepository["findSession"]>>>
+      // Authoritative bar: always re-derive from disk after writes/restage so
+      // 梗概→细纲→草稿→正文确认 tracks materials, not mid-turn emit races.
+      let proceedProgress = await this.syncProceedProgressFromMaterials({
+        projectId: input.projectId,
+        workspaceRootRef: input.workspaceRootRef,
+        session: updatedSession,
+        proceedMode,
+        ...(customGates === undefined ? {} : { customProceedGates: customGates }),
+      })
+      if (proceedProgress.stage === "synopsis_discuss" && (wroteSynopsisBody || restagedToSynopsisThisTurn)) {
+        proceedProgress = { stage: "synopsis_discuss", status: "done" }
+        emitProceedProgress("synopsis_discuss", "done")
+      } else if (proceedProgress.stage === "outline_discuss" && (savedOutlineThisTurn || restagedToOutlineThisTurn)) {
+        proceedProgress = { stage: "outline_discuss", status: "done" }
+        emitProceedProgress("outline_discuss", "done")
+      } else if (proceedProgress.stage === "draft_discuss" && savedDraft !== undefined) {
+        proceedProgress = { stage: "draft_discuss", status: "waiting" }
+        emitProceedProgress("draft_discuss", "waiting")
+      } else if (proceedProgress.stage === "body_discuss") {
+        proceedProgress = { stage: "body_discuss", status: "waiting" }
+        emitProceedProgress("body_discuss", "waiting")
+      }
       const messages = await this.dependencies.conversation.listMessagesForProject(input.projectId)
       synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), {
         thinking: assist.reasoningContent ?? streamPeek.thinking,
@@ -2407,7 +2432,6 @@ export class SynopsisConversationService {
       // Drop completed thinking/content so the next send cannot briefly re-show this turn.
       // Cumulative usage is retained for composer metrics (and persisted below).
       const usage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
-      const proceedProgress = synopsisConversationStreamHub.peek(input.projectId, session.sessionId).proceedProgress
       synopsisConversationStreamHub.clear(input.projectId)
       if (usage !== undefined) {
         await this.dependencies.conversation.saveDiscussUsage({
@@ -7238,6 +7262,9 @@ export function filterDiscussChoices(
     ) {
       return false
     }
+    // Stage-gated shortcuts: no「按细纲写正文」until 细纲入库; no publish until 草稿入库.
+    if (input.outlineReady === false && /按.*细纲写正文|写正文草稿/u.test(choice.label)) return false
+    if (choice.action === "promote_draft_to_body" && input.outlineReady === false) return false
     if (choice.action === "confirm_synopsis" && input.synopsisReady === false) return false
     // Drop redundant confirm buttons once focus already moved this turn.
     if (

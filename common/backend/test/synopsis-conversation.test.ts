@@ -912,6 +912,64 @@ describe("synopsis conversation", () => {
     }
   }, 20_000)
 
+  it("advances proceed stage to outline after outline materials are written", async () => {
+    const outlineBody = "# 第一章 雨夜旧站台 剧情细纲\n\n## 章定位\n新细纲。\n\n## 分场节拍\n新场。\n\n## 信息边界\n无。\n\n## 风险与待决\n无。\n"
+    const model: AIModelPort = {
+      info: { provider: "test", model: "outline-stage-advance", available: true, contextWindowTokens: 64_000 },
+      async execute(request) {
+        synopsisConversationStreamHub.setTodos(request.projectId, [
+          { id: "outline", content: "写入细纲", status: "completed" },
+        ], Date.now())
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+            reason: "Write outline and advance stage bar.",
+            selfReview: "Outline ingest moves proceed current to outline_discuss.",
+            artifact: {
+              assistantMessage: "已写入细纲。",
+              outlineBody,
+              planningWriteIntent: { outline: "create" as const },
+              choices: [{ label: "按细纲写正文", action: "continue_discuss" as const }],
+              finalSelfReview: "Outline written.",
+            },
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+        }
+      },
+    }
+    const harness = await openChapterHarness("Outline advances stage bar", { model })
+    temporaryRoots.push(harness.root)
+    try {
+      await prepareChapterPlanning(harness)
+      const listed = await invoke<{ session: { synopsisPath: string } }>(
+        harness, "synopsis.conversation.list", {
+          projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+        },
+      )
+      const outlinePath = listed.session.synopsisPath.replace("[剧情梗概].md", "[剧情细纲].md")
+      await harness.container.workspace.removeSynopsisMarkdown(harness.workspaceRootRef, outlinePath)
+      const before = await invoke<{ proceedProgress?: { stage: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+      })
+      expect(before.proceedProgress?.stage).toBe("synopsis_discuss")
+
+      const sent = await invoke<{ proceedProgress?: { stage: string } }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "用这份梗概写细纲",
+      })
+      expect(sent.proceedProgress?.stage).toBe("outline_discuss")
+      const after = await invoke<{ proceedProgress?: { stage: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+      })
+      expect(after.proceedProgress?.stage).toBe("outline_discuss")
+    } finally {
+      await harness.container.close()
+    }
+  }, 20_000)
+
   it("refreshChoices appends hidden context and merges new chips onto the visible message", async () => {
     await withHarness(async (harness) => {
       const base = {

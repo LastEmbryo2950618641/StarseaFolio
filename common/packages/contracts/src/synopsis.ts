@@ -236,14 +236,14 @@ export const DISCUSS_PROCEED_STAGE_ORDER: readonly DiscussProceedStage[] = [
 
 /**
  * Derive the creation-desk pipeline stage from durable materials on disk.
- * Stage advances only when the corresponding artifact is入库 — not when the
- * user is merely discussing within a stage.
+ * 「当前」跟着材料入库走，不跟讨论话术走：
  *
- * - 梗概入库 → synopsis_discuss
- * - 细纲入库 → outline_discuss
- * - 草稿入库 → draft_discuss（仍停在草稿，等待用户确认发布）
- * - 章节入库开始 / 正文已落盘 → body_discuss
- * - 焦点到下一章且尚无梗概 → chapter_requirements
+ * - 尚无梗概 → chapter_requirements（新章要求）
+ * - 梗概入库、尚无细纲 → synopsis_discuss（梗概）
+ * - 细纲入库、尚无草稿 → outline_discuss（细纲）
+ * - 草稿入库、尚未章节入库 → draft_discuss（草稿）
+ * - 章节入库开始 / 正文已落盘 → body_discuss（正文确认）
+ * - 焦点切到下一章且该章尚无梗概 → chapter_requirements
  *
  * Rewriting an earlier stage must clear downstream materials (host restage /
  * `restage_chapter`) before this resolver will move「当前」back; otherwise an

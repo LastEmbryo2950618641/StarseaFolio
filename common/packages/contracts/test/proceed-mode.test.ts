@@ -97,6 +97,7 @@ describe("discuss proceed mode contracts", () => {
   })
 
   it("derives pipeline stage from durable materials, not from discussion alone", () => {
+    // 新章要求 → 梗概 → 细纲 → 草稿 → 正文确认（材料入库驱动「当前」）
     expect(resolveDiscussPipelineStage({
       synopsisReady: false,
       outlineReady: false,
