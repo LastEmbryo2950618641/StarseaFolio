@@ -3327,7 +3327,7 @@ export class SynopsisConversationService {
         )
       }
       if (attempts >= noProgressGuardLimit) {
-        const mustStopAfterRepeatedFailure = step === "model_contract" || step === "todo_incomplete"
+        const mustStopAfterRepeatedFailure = step === "model_contract"
         if (!noProgressGuardEnabled && !mustStopAfterRepeatedFailure) {
           runtimeLog("info", "synopsis-conversation", "discuss.step_retry_exhausted_skipped", {
             projectId: input.projectId, sessionId: input.sessionId, step, attempts, reason: failure,

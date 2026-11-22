@@ -383,7 +383,7 @@ describe("workflow drafts and publication", () => {
     }
   }, 30000)
 
-  it("blocks chapter_workflow before starting a model draft when synopsis is empty", async () => {
+  it.each([false, true])("blocks chapter_workflow when synopsis is empty and honors the no-progress switch (%s)", async (noProgressGuardEnabled) => {
     const fake = new FakeAiModelAdapter(randomUUID)
     let discussCalls = 0
     let nestedDraftModelCalls = 0
@@ -405,7 +405,12 @@ describe("workflow drafts and publication", () => {
               ? { name: "chapter_workflow", action: "describe" }
               : discussCalls === 4
                 ? { name: "chapter_workflow", action: "invoke", arguments: JSON.stringify({ userInput: "直接写正文" }) }
-            : undefined
+                : discussCalls === 8
+                  ? { name: "todo_write", action: "invoke", arguments: JSON.stringify({
+                      merge: true,
+                      todos: [{ id: "gate", content: "检查正文流程门禁", status: "completed" }],
+                    }) }
+                  : undefined
         return {
           usage: execution.usage,
           result: {
@@ -415,7 +420,9 @@ describe("workflow drafts and publication", () => {
             artifact: {
               assistantMessage: "已检查流程门禁",
               finalSelfReview: "OK",
-              ...(toolRequest === undefined ? {} : { toolRequest }),
+              ...(toolRequest === undefined
+                ? { choices: [{ label: "先写剧情梗概", action: "continue_discuss" }] }
+                : { toolRequest }),
             },
           },
         }
@@ -436,9 +443,16 @@ describe("workflow drafts and publication", () => {
         creationDesk: { ...settings.creationDesk, chapterWorkflowEnabled: true },
       })
       await call("synopsis.conversation.start")
-      await expect(call("synopsis.conversation.send", { message: "直接进入正文推演", maxModelCalls: 20 }))
-        .rejects.toThrow(/todo_incomplete.*3.*停止/)
-      expect(discussCalls).toBeGreaterThanOrEqual(4)
+      const sent = call("synopsis.conversation.send", {
+        message: "直接进入正文推演", noProgressGuardEnabled, maxModelCalls: 12,
+      })
+      if (noProgressGuardEnabled) {
+        await expect(sent).rejects.toThrow(/todo_incomplete.*3.*停止/)
+        expect(discussCalls).toBe(7)
+      } else {
+        await expect(sent).resolves.toBeDefined()
+        expect(discussCalls).toBe(9)
+      }
       expect(nestedDraftModelCalls).toBe(0)
       expect(await call("chapter.draft.list")).toEqual([])
     } finally {
