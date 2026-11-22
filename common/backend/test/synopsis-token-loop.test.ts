@@ -65,7 +65,29 @@ async function withScript(
     async execute(request, options) {
       if (request.phase !== "synopsis_discuss") return fake.execute(request, options)
       const { requestedReads = [], ...scriptedArtifact } = script(++calls, request, options)
-      const artifact = { assistantMessage: "正在处理当前章。", finalSelfReview: "Scripted regression.", ...scriptedArtifact }
+      const planning = (request.input as TurnPhaseInput).synopsisDiscuss
+      const inferredWriteIntent = {
+        ...(typeof scriptedArtifact.synopsisBody === "string" && scriptedArtifact.synopsisBody.length > 0
+          ? { synopsis: planning?.synopsisReady === true ? "rewrite" as const : "create" as const }
+          : {}),
+        ...(scriptedArtifact.bodyEdits === undefined
+          ? scriptedArtifact.outlineBody === undefined
+            ? {}
+            : { outline: planning?.outlineReady === true ? "rewrite" as const : "create" as const }
+          : { outline: "patch" as const }),
+        ...(scriptedArtifact.chapterDraftProposal === undefined && scriptedArtifact.chapterDraftProposals === undefined
+          ? {}
+          : { draft: "write" as const }),
+        ...(scriptedArtifact.volumeChapterPlans === undefined ? {} : { volume: "whole_volume" as const }),
+      }
+      const artifact = {
+        assistantMessage: "正在处理当前章。",
+        finalSelfReview: "Scripted regression.",
+        ...scriptedArtifact,
+        ...(scriptedArtifact.planningWriteIntent === undefined && Object.keys(inferredWriteIntent).length > 0
+          ? { planningWriteIntent: inferredWriteIntent }
+          : {}),
+      }
       return {
         result: {
           schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
@@ -253,7 +275,12 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
         focusChange: { chapterSequence: 2, userRequestQuote: message }, continueTurn: true,
       }
       expect((request.input as TurnPhaseInput).synopsisDiscuss).toMatchObject({ chapterSequence: 2, synopsisMarkdown: synopsis })
-      return { outlineBody: outline, chapterDraftProposal: { base: "body", heading: `第二章 ${title}`, body: "林烬走进山村，向井边的村民打听送信人的住处。" }, choices }
+      return {
+        outlineBody: outline,
+        planningWriteIntent: { outline: "create", draft: "write" },
+        chapterDraftProposal: { base: "body", heading: `第二章 ${title}`, body: "林烬走进山村，向井边的村民打听送信人的住处。" },
+        choices,
+      }
     }, async (harness, send) => {
       await seedCommittedChapter(harness)
       const synopsisPath = deriveSynopsisMarkdownPath(2, title, DEFAULT_VOLUME_FOLDER_NAME)
@@ -267,7 +294,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       expect(next.appendedDraft?.draftVersionId).toBeTruthy()
       expect(next.autoContinue).toBeUndefined()
       expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(outline)
-      expect(calls).toBe(switchCall + 1)
+      expect(calls).toBe(switchCall + 2)
       const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
       try {
         const target = db.prepare("select chapter_sequence from chapter_revision_tasks where id = ?").get(next.appendedDraft!.revisionTaskId)

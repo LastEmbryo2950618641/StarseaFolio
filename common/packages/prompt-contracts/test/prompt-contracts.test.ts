@@ -375,7 +375,18 @@ describe("prompt contracts", () => {
     expect(draft).toContain("按场景选择写法")
     expect(draft).toContain("允许场景承担停顿、氛围或铺垫")
     expect(draft).toContain("场内可用切镜呈现同一事件的跨地域影响")
-    expect(synopsisDiscuss).toContain("宿主会在本轮上下文注入 `outline-to-draft-guide`")
+    expect(synopsisDiscuss).toContain("先调用 `load_skill` 加载 `outline-to-draft`")
+    expect(synopsisDiscuss).not.toContain("可先 `load_skill` `outline-to-draft`")
+    expect(synopsisDiscuss).toContain("planningWriteIntent")
+    expect(synopsisDiscuss).toContain("不能靠用户消息关键词、正则或固定口令")
+    expect(synopsisDiscuss).toContain("引用、举例、提问、否定、暂缓以及仅讨论方案都不是写入授权")
+    expect(synopsisDiscuss).toContain("本轮明确要求新写、重写或局部修改时，直接提交相应完整内容/补丁，不要再次询问是否覆盖")
+    expect(synopsisDiscuss).not.toContain("未确认禁 `outlineBody`/`bodyEdits`")
+    expect(synopsisDiscuss).not.toContain("若你准备改写法或拆章，须")
+    expect(synopsisDiscuss).toContain("只有拟议方案会改变用户明确合同中的必达项、范围或本轮交付内容时，才须明示差异并征询")
+    expect(synopsisDiscuss).toContain("宿主若发现草稿提案已返回但指南未加载，会先加载指南并要求本轮重新生成")
+    expect(synopsisDiscuss).toContain("有任何梗概、细纲、草稿或整卷规划结构化写入时，`planningWriteIntent` 必须存在且逐项匹配写入产物")
+    expect(synopsisDiscuss).toContain("planningWriteIntent`（按完整语义标记梗概 `create`|`rewrite`、细纲 `create`|`rewrite`|`patch`、草稿 `write`、整卷规划 `whole_volume`")
     expect(prose).toContain("蒙太奇保结果")
     expect(prose).toContain("整章长度服从创作台预算")
     expect(prose).toContain("不要求每种手段都出现")
@@ -411,6 +422,56 @@ describe("prompt contracts", () => {
     expect(prose).toContain("章节结尾按当前叙事任务选择落点")
     expect(prose).not.toContain("章末只留一个钩")
     expect(prose).not.toContain("一章一主峰")
+  })
+
+  it("accepts model-interpreted planning write intents without parsing the user message", () => {
+    const parsed = synopsisDiscussArtifactSchema.parse({
+      assistantMessage: "按用户要求重写梗概并局部修订细纲。",
+      synopsisBody: "# 梗概\n\n新梗概。",
+      bodyEdits: {
+        target: "outline",
+        ops: [{ oldText: "旧内容", newText: "新内容" }],
+      },
+      planningWriteIntent: {
+        synopsis: "rewrite",
+        outline: "patch",
+        draft: "write",
+        volume: "whole_volume",
+      },
+      finalSelfReview: "The user explicitly requested both changes.",
+    })
+
+    expect(parsed.planningWriteIntent).toEqual({
+      synopsis: "rewrite",
+      outline: "patch",
+      draft: "write",
+      volume: "whole_volume",
+    })
+    expect(synopsisDiscussArtifactSchema.safeParse({
+      assistantMessage: "无效规划写入意图",
+      planningWriteIntent: { synopsis: "patch" },
+      finalSelfReview: "Synopsis only allows create or rewrite.",
+    }).success).toBe(false)
+  })
+
+  it("requires matching intent for every structured planning write", () => {
+    expect(synopsisDiscussArtifactSchema.safeParse({
+      assistantMessage: "已重写梗概。",
+      synopsisBody: "# 新梗概\n\n内容。",
+      finalSelfReview: "完整梗概已按最新要求更新。",
+    }).success).toBe(false)
+    expect(synopsisDiscussArtifactSchema.safeParse({
+      assistantMessage: "已更新细纲。",
+      outlineBody: "# 细纲\n\n内容。",
+      planningWriteIntent: { outline: "rewrite" },
+      finalSelfReview: "完整细纲与写入意图一致。",
+    }).success).toBe(true)
+    expect(synopsisDiscussArtifactSchema.safeParse({
+      assistantMessage: "已写草稿。",
+      chapterDraftProposal: { base: "body", heading: "第一章", body: "正文。" },
+      planningWriteIntent: { draft: "write" },
+      finalSelfReview: "草稿与写入意图一致。",
+    }).success).toBe(true)
   })
 
   it("requires character personality in settings revision and draft prompts", () => {
@@ -853,6 +914,7 @@ describe("prompt contracts", () => {
   it("accepts chapterDraftProposal and promote_draft_to_body", () => {
     const parsed = synopsisDiscussArtifactSchema.parse({
       assistantMessage: "已写入新草稿。",
+      planningWriteIntent: { draft: "write" },
       chapterDraftProposal: {
         heading: "第一章 虫与蝶",
         body: "雨还在下。",
@@ -896,6 +958,7 @@ describe("prompt contracts", () => {
   it("accepts volumeChapterPlans and chapterDraftProposals for batch volume workflow", () => {
     const parsed = synopsisDiscussArtifactSchema.parse({
       assistantMessage: "本卷规划与草稿已齐。",
+      planningWriteIntent: { volume: "whole_volume", draft: "write" },
       volumePlanMeta: { targetWordCount: 80_000, targetChapterCount: 2 },
       volumeChapterPlans: [{
         chapterSequence: 1,

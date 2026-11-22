@@ -89,6 +89,7 @@ describe("creative setup real model boundary", () => {
           ],
           // Even schema-valid unsolicited artifacts cannot advance the human gate or write chapters.
           synopsisBody: "# 第一章\n禁止越过问卷写入的内容。",
+          planningWriteIntent: { synopsis: "create" },
           volumeSynopsis: { markdown: "# 卷梗概\n禁止越过问卷写入的内容。" },
           arcPlan: { markdown: "# 卷大纲\n禁止越过问卷写入的内容。" },
           continueTurn: true,

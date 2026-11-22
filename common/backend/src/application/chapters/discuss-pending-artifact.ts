@@ -28,17 +28,28 @@ export function restoreDiscussWrites(
     delete retained.bodyEdits
     delete retained.chapterDraftProposal
     delete retained.chapterDraftProposals
+    const synopsisIntent = retained.planningWriteIntent?.synopsis
+    retained.planningWriteIntent = synopsisIntent === undefined ? undefined : { synopsis: synopsisIntent }
   }
   if ((current.outlineBody !== undefined && current.outlineBody !== pending.outlineBody)
     || (current.bodyEdits !== undefined && JSON.stringify(current.bodyEdits) !== JSON.stringify(pending.bodyEdits))
     || current.volumeChapterPlans !== undefined) {
     delete retained.chapterDraftProposal
     delete retained.chapterDraftProposals
+    if (retained.planningWriteIntent?.draft !== undefined) {
+      const { draft: _draftIntent, ...remainingIntent } = retained.planningWriteIntent
+      retained.planningWriteIntent = Object.keys(remainingIntent).length === 0 ? undefined : remainingIntent
+    }
   }
   if (current.outlineBody !== undefined) delete retained.bodyEdits
   if (current.bodyEdits !== undefined) delete retained.outlineBody
   if (current.chapterDraftProposal !== undefined) delete retained.chapterDraftProposals
   if (current.chapterDraftProposals !== undefined) delete retained.chapterDraftProposal
   const supplied = Object.fromEntries(Object.entries(current).filter(([, value]) => value !== undefined))
+  const planningWriteIntent = {
+    ...retained.planningWriteIntent,
+    ...current.planningWriteIntent,
+  }
+  if (Object.keys(planningWriteIntent).length > 0) supplied.planningWriteIntent = planningWriteIntent
   return { ...retained, ...supplied } as SynopsisDiscussArtifact
 }

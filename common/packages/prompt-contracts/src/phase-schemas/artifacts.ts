@@ -675,6 +675,17 @@ export const synopsisDiscussArtifactSchema = z.object({
     (value) => (value === "" ? undefined : value),
     z.string().min(1).optional(),
   ),
+  /** Model-interpreted current-turn intent for writing planning documents. */
+  planningWriteIntent: z.object({
+    synopsis: z.enum(["create", "rewrite"]).optional(),
+    outline: z.enum(["create", "rewrite", "patch"]).optional(),
+    draft: z.literal("write").optional(),
+    volume: z.literal("whole_volume").optional(),
+  }).strict().refine(
+    (intent) => intent.synopsis !== undefined || intent.outline !== undefined
+      || intent.draft !== undefined || intent.volume !== undefined,
+    "planningWriteIntent must identify at least one requested planning write",
+  ).optional(),
   /** Full chapter outline markdown (`…[剧情细纲].md`); preferred turn bootstrap when present. */
   outlineBody: z.string().min(1).optional(),
   /**
@@ -779,6 +790,44 @@ export const synopsisDiscussArtifactSchema = z.object({
   volumeSynopsis: z.object({ markdown: z.string().min(1).max(20_000) }).optional(),
   finalSelfReview: z.string().min(1),
 }).superRefine((value, ctx) => {
+  const writeIntent = value.planningWriteIntent
+  if (value.synopsisBody !== undefined && writeIntent?.synopsis === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "synopsisBody 必须配 planningWriteIntent.synopsis=create 或 rewrite",
+      path: ["planningWriteIntent", "synopsis"],
+    })
+  }
+  if (value.outlineBody !== undefined
+    && writeIntent?.outline !== "create" && writeIntent?.outline !== "rewrite") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "outlineBody 必须配 planningWriteIntent.outline=create 或 rewrite",
+      path: ["planningWriteIntent", "outline"],
+    })
+  }
+  if (value.bodyEdits !== undefined && writeIntent?.outline !== "patch") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "bodyEdits 必须配 planningWriteIntent.outline=patch",
+      path: ["planningWriteIntent", "outline"],
+    })
+  }
+  if ((value.chapterDraftProposal !== undefined || value.chapterDraftProposals !== undefined)
+    && writeIntent?.draft !== "write") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "章节草稿提案必须配 planningWriteIntent.draft=write",
+      path: ["planningWriteIntent", "draft"],
+    })
+  }
+  if ((value.volumeChapterPlans?.length ?? 0) > 0 && writeIntent?.volume !== "whole_volume") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "volumeChapterPlans 必须配 planningWriteIntent.volume=whole_volume",
+      path: ["planningWriteIntent", "volume"],
+    })
+  }
   // Hard gate after coerce: toolRequest must stand alone. Prefer
   // coerceSynopsisDiscussToolExclusive() before parse so discuss can auto-defer writes.
   if (value.toolRequest !== undefined && Object.entries(value).some(([key, field]) =>

@@ -8,7 +8,6 @@ import Database from "better-sqlite3"
 import { PROTOCOL_VERSION, type ProjectSettings } from "@starseafolio/contracts"
 
 import {
-  isExplicitWholeVolumePlanningRequest,
   partitionVolumeChapterPlansBySequence,
 } from "../src/application/chapters/synopsis-conversation-service.js"
 import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
@@ -136,6 +135,7 @@ describe("synopsis conversation", () => {
             artifact: {
               assistantMessage: "我按你给的正文整理并补全了第一章细纲。",
               outlineBody,
+              planningWriteIntent: { outline: "create" as const },
               choices: [
                 { label: "核对细纲是否遗漏正文里的重要事件", action: "continue_discuss" as const },
                 { label: "按当前细纲继续准备正文草稿", action: "continue_discuss" as const },
@@ -188,9 +188,13 @@ describe("synopsis conversation", () => {
     { writeOutline: true, label: "an outline saved earlier in the same response" },
   ])("writes a draft from a natural-language request with $label", async ({ writeOutline }) => {
     const outlineBody = "# 第一章 雨夜旧站台 剧情细纲\n\n## 章定位\n主角在旧站台发现信件。\n\n## 分场节拍\n林烬从长椅下找出信件，辨认故友字迹后决定追查。\n\n## 信息边界\n只揭示信件，不揭示寄件人去向。\n\n## 风险与待决\n无待决。\n"
+    let draftGuideSeen = false
     const model: AIModelPort = {
       info: { provider: "test", model: "freeform-draft", available: true, contextWindowTokens: 64_000 },
-      async execute(request) {
+      async execute(request, options) {
+        draftGuideSeen ||= options?.contextMessages?.some((message) => (
+          message.content.includes("# 用户要求 + 梗概 + 细纲 → 正文草稿")
+        )) === true
         synopsisConversationStreamHub.setTodos(request.projectId,
           [{ id: "draft", content: "按已写细纲生成正文草稿", status: "completed" }], Date.now())
         return {
@@ -203,6 +207,9 @@ describe("synopsis conversation", () => {
             artifact: {
               assistantMessage: "我按现有细纲写好了第一章草稿。",
               ...(writeOutline ? { outlineBody } : {}),
+              planningWriteIntent: writeOutline
+                ? { outline: "create" as const, draft: "write" as const }
+                : { draft: "write" as const },
               chapterDraftProposal: {
                 base: "body" as const,
                 heading: "第一章 雨夜旧站台",
@@ -248,6 +255,7 @@ describe("synopsis conversation", () => {
         batchProceed: false,
       })
       expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
+      expect(draftGuideSeen).toBe(true)
       expect(sent.session.synopsisConfirmedAtMs).toBeUndefined()
     } finally {
       await harness.container.close()
@@ -272,6 +280,9 @@ describe("synopsis conversation", () => {
             reason: "Exercise the application's prerequisite checks.", selfReview: "Prerequisites need checking.",
             artifact: {
               assistantMessage: "已核对当前章节材料。",
+              planningWriteIntent: scenario.proposeOutline
+                ? { outline: "create" as const, draft: "write" as const }
+                : { draft: "write" as const },
               ...(scenario.proposeOutline ? { outlineBody: "# 剧情细纲\n\n林烬在旧站台发现故友留下的信。\n" } : {}),
               chapterDraftProposal: { base: "body" as const, heading: "第一章 雨夜旧站台", body: "这份草稿不能越过前置内容门禁。" },
               choices: [
@@ -333,11 +344,6 @@ describe("synopsis conversation", () => {
 
     expect(result.allowed).toEqual(plans)
     expect(result.deferred).toEqual([])
-  })
-
-  it("does not treat a negated volume-planning request as authorization", () => {
-    expect(isExplicitWholeVolumePlanningRequest("请做整卷规划")).toBe(true)
-    expect(isExplicitWholeVolumePlanningRequest("这次不要卷规划，按章推进")).toBe(false)
   })
 
   it("starts a session and creates synopsis placeholder markdown", async () => {
@@ -438,10 +444,12 @@ describe("synopsis conversation", () => {
         const artifact: Record<string, unknown> = finalDiscussResponses === 0
           ? {
               assistantMessage: "正文已经完成并写入草稿。",
+              planningWriteIntent: { draft: "write" as const },
               finalSelfReview: "The response omitted the required structured draft.",
             }
           : {
               assistantMessage: "已生成本章正文草稿。",
+              planningWriteIntent: { draft: "write" as const },
               finalSelfReview: "The complete chapter draft is included in the structured proposal.",
               chapterDraftProposal: {
                 base: "body",
@@ -517,6 +525,7 @@ describe("synopsis conversation", () => {
             outcome: "continue",
             artifact: {
               assistantMessage: "正文已经完成并写入草稿。",
+              planningWriteIntent: { draft: "write" as const },
               finalSelfReview: "This response deliberately omits the structured proposal.",
             },
             requestedReads: [],
@@ -567,10 +576,12 @@ describe("synopsis conversation", () => {
         const artifact = calls === 1
           ? {
               assistantMessage: "第一章剧情梗概已经写入。",
+              planningWriteIntent: { synopsis: "create" as const },
               finalSelfReview: "The response deliberately omits synopsisBody.",
             }
           : {
               assistantMessage: "已写入第一章剧情梗概。",
+              planningWriteIntent: { synopsis: "create" as const },
               finalSelfReview: "A complete synopsis is included in synopsisBody.",
               chapterTitle: "断电的第一夜",
               synopsisBody: "# 第一章 断电的第一夜 剧情梗概\n\n停电后，林序留守药房，收到妹妹被困医院的短信；他必须在离开前安排可信的人接管药品，否则药品会失守。",
@@ -630,10 +641,12 @@ describe("synopsis conversation", () => {
         const artifact = calls === 1
           ? {
               assistantMessage: "第一章细纲已经写入。",
+              planningWriteIntent: { outline: "create" as const },
               finalSelfReview: "The response deliberately omits outlineBody.",
             }
           : {
               assistantMessage: "已写入第一章剧情细纲。",
+              planningWriteIntent: { outline: "create" as const },
               finalSelfReview: "A complete outline is included in outlineBody.",
               outlineBody: "# 第一章 断电的第一夜 剧情细纲\n\n## 章定位\n林序必须决定是否离开药房救妹妹。\n\n## 分场\n1. 停电后收到求救短信。\n2. 安排药房交接并冒雨出发。\n",
             }
@@ -767,6 +780,64 @@ describe("synopsis conversation", () => {
       const file = readFileSync(join(harness.workspaceRootRef, sent.session.synopsisPath), "utf8")
       expect(file).toContain("雨夜站台")
     })
+  })
+
+  it("overwrites a hand-edited synopsis when the user explicitly requests a rewrite", async () => {
+    const rewrittenSynopsis = "# 第一章 雨夜旧站台 剧情梗概\n\n我刚补充的主线覆盖旧梗概。本章按新的安排展开。\n"
+    const model: AIModelPort = {
+      info: { provider: "test", model: "explicit-synopsis-rewrite", available: true, contextWindowTokens: 64_000 },
+      async execute(request) {
+        const planning = (request.input as { synopsisDiscuss?: { userEditedSinceAgent?: boolean } }).synopsisDiscuss
+        expect(planning?.userEditedSinceAgent).toBe(true)
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+            reason: "The user explicitly requested a complete synopsis rewrite.",
+            selfReview: "The current hand-edited synopsis was treated as the starting point and replaced as requested.",
+            artifact: {
+              assistantMessage: "我已按你本轮补充的内容重写剧情梗概。",
+              synopsisBody: rewrittenSynopsis,
+              planningWriteIntent: { synopsis: "rewrite" as const },
+              choices: [{ label: "用这份梗概写细纲", action: "confirm_synopsis" as const }],
+              finalSelfReview: "The complete synopsis was rewritten as requested.",
+            },
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+        }
+      },
+    }
+    const harness = await openChapterHarness("Explicit synopsis rewrite", { model })
+    temporaryRoots.push(harness.root)
+    try {
+      await prepareChapterPlanning(harness)
+      const listed = await invoke<{ session: { synopsisPath: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
+      })
+      const handEditedSynopsis = `${rewrittenSynopsis.replace("旧梗概", "用户手改旧版")}`
+      await harness.container.workspace.saveSynopsisMarkdown(
+        harness.workspaceRootRef,
+        listed.session.synopsisPath,
+        handEditedSynopsis,
+      )
+
+      const sent = await invoke<{
+        messages: Array<{ role: string; content: string }>
+      }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "使用这个重新写第一章的梗概",
+      })
+
+      expect(await harness.container.workspace.readMarkdown(
+        harness.workspaceRootRef,
+        listed.session.synopsisPath,
+      )).toBe(rewrittenSynopsis)
+      expect(sent.messages.at(-1)?.content).not.toContain("若要以我这版为准")
+    } finally {
+      await harness.container.close()
+    }
   })
 
   it("refreshChoices appends hidden context and merges new chips onto the visible message", async () => {

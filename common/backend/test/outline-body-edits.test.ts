@@ -4,11 +4,18 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { PROTOCOL_VERSION } from "@starseafolio/contracts"
+import { PROTOCOL_VERSION, type PhaseRequestEnvelope } from "@starseafolio/contracts"
 import { synopsisDiscussArtifactSchema } from "@starseafolio/prompt-contracts"
 
 import { applySearchReplace } from "../src/application/chapters/markdown-search-replace.js"
-import { openChapterHarness, prepareVolumePlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
+import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
+import {
+  openChapterHarness,
+  prepareChapterPlanning,
+  prepareVolumePlanning,
+  type ChapterHarness,
+} from "./helpers/chapter-coordination-harness.js"
 
 const temporaryRoots: string[] = []
 
@@ -18,8 +25,11 @@ afterEach(() => {
   }
 })
 
-async function withHarness(run: (harness: ChapterHarness) => Promise<void>): Promise<void> {
-  const harness = await openChapterHarness("Outline Body Edits Test")
+async function withHarness(
+  run: (harness: ChapterHarness) => Promise<void>,
+  options?: Readonly<{ model?: AIModelPort }>,
+): Promise<void> {
+  const harness = await openChapterHarness("Outline Body Edits Test", options)
   temporaryRoots.push(harness.root)
   try {
     await prepareVolumePlanning(harness)
@@ -65,6 +75,7 @@ describe("synopsisDiscussArtifactSchema bodyEdits", () => {
   it("accepts bodyEdits alone", () => {
     const parsed = synopsisDiscussArtifactSchema.safeParse({
       assistantMessage: "局部改",
+      planningWriteIntent: { outline: "patch" },
       bodyEdits: {
         target: "outline",
         ops: [{ oldText: "旧", newText: "新" }],
@@ -117,7 +128,102 @@ describe("outline bodyEdits integration", () => {
     })
   })
 
-  it("skips bodyEdits when the user hand-edited the outline file", async () => {
+  it("keeps a hand-edited outline unchanged when the user only wants to discuss it", async () => {
+    const delegate = new FakeAiModelAdapter(randomUUID)
+    const model: AIModelPort = {
+      info: delegate.info,
+      async execute(request, options) {
+        if ((request.input as { userInput?: string }).userInput === "先讨论怎么收紧场2张力，暂不修改细纲文件") {
+          const assistantMessage = "可以收紧第二场的信息推进。我先只讨论方案，暂不修改细纲。"
+          return {
+            result: {
+              schemaVersion: 1,
+              envelopeId: request.envelopeId,
+              contextId: request.contextId,
+              phase: request.phase,
+              outcome: "continue",
+              requestedReads: [],
+              citedReadIds: [...request.committedReadIds],
+              producedArtifactIds: [],
+              decisionRecordIds: [],
+              unresolvedDependencies: [],
+              reason: "The user asked to discuss a possible outline adjustment without editing the file.",
+              selfReview: "No planning document write was requested.",
+              artifact: {
+                assistantMessage,
+                choices: [
+                  { label: "先讨论第二场的冲突安排", action: "continue_discuss" as const },
+                  { label: "暂不修改细纲", action: "continue_discuss" as const },
+                ],
+                finalSelfReview: "The hand-edited outline remains untouched.",
+              },
+            },
+            usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+          }
+        }
+        return delegate.execute(request, options)
+      },
+      compressContext(input) {
+        return delegate.compressContext(input)
+      },
+    }
+    await withHarness(async (harness) => {
+      const base = {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+      }
+      await invoke(harness, "synopsis.conversation.start", base)
+      await invoke(harness, "synopsis.conversation.send", {
+        ...base,
+        message: "雨夜站台，林序追查名单",
+      })
+      const confirmed = await invoke<{
+        session: { synopsisPath: string }
+      }>(harness, "synopsis.conversation.send", {
+        ...base,
+        message: "用这份梗概写细纲",
+      })
+      const outlineRel = outlinePathFromSynopsis(confirmed.session.synopsisPath)
+      const outlineAbs = join(harness.workspaceRootRef, outlineRel)
+      const handEdited = `${readFileSync(outlineAbs, "utf8").trim()}\n\n> 作者手改标记\n`
+      writeFileSync(outlineAbs, handEdited, "utf8")
+
+      const sent = await invoke<{
+        messages: Array<{ role: string; content: string }>
+      }>(harness, "synopsis.conversation.send", {
+        ...base,
+        message: "先讨论怎么收紧场2张力，暂不修改细纲文件",
+      })
+      const assistant = [...sent.messages].reverse().find((message) => message.role === "assistant")
+      expect(assistant?.content).toContain("先只讨论方案")
+      expect(assistant?.content).not.toContain("已局部更新细纲")
+      expect(readFileSync(outlineAbs, "utf8")).toBe(handEdited)
+    }, { model })
+  })
+
+  it("applies a model-interpreted local edit to the hand-edited outline", async () => {
+    const delegate = new FakeAiModelAdapter(randomUUID)
+    const model: AIModelPort = {
+      info: delegate.info,
+      async execute(request, options) {
+        const result = await delegate.execute(request, options)
+        const response = result.result as { artifact?: Record<string, unknown> }
+        if (response.artifact === undefined) return result
+        const hasOutlinePatch = response.artifact.bodyEdits !== undefined
+        return {
+          ...result,
+          result: {
+            ...result.result,
+            artifact: hasOutlinePatch
+              ? { ...response.artifact, planningWriteIntent: { outline: "patch" } }
+              : response.artifact,
+          },
+        }
+      },
+      compressContext(input) {
+        return delegate.compressContext(input)
+      },
+    }
     await withHarness(async (harness) => {
       const base = {
         projectId: harness.projectId,
@@ -145,10 +251,65 @@ describe("outline bodyEdits integration", () => {
         ...base,
         message: "再修改细纲：收紧场2张力",
       })
+      const updatedOutline = readFileSync(outlineAbs, "utf8")
       const assistant = [...sent.messages].reverse().find((message) => message.role === "assistant")
-      expect(assistant?.content).toMatch(/你刚改过细纲文件/)
-      expect(readFileSync(outlineAbs, "utf8")).toBe(handEdited)
-    })
+
+      expect(assistant?.content).toMatch(/已局部更新细纲/)
+      expect(updatedOutline).toContain("作者手改标记")
+      expect(updatedOutline).toContain("按用户要求收紧")
+      expect(updatedOutline).not.toBe(handEdited)
+    }, { model })
+  })
+
+  it("replaces a hand-edited outline only when the user explicitly requests a full rewrite", async () => {
+    const rewrittenOutline = "# 第一章 雨夜旧站台 剧情细纲\n\n## 章定位\n按用户最新要求重新组织本章。\n\n## 分场节拍\n- 旧站台：林烬按新的主线调查名单。\n\n## 信息边界\n保留用户指定的揭示节奏。\n\n## 风险与待决\n无待决。\n"
+    const model: AIModelPort = {
+      info: { provider: "test", model: "explicit-outline-rewrite", available: true, contextWindowTokens: 64_000 },
+      async execute(request: PhaseRequestEnvelope) {
+        const planning = (request.input as { synopsisDiscuss?: { userEditedOutlineSinceAgent?: boolean } }).synopsisDiscuss
+        expect(planning?.userEditedOutlineSinceAgent).toBe(true)
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId, phase: request.phase,
+            outcome: "continue", requestedReads: [], citedReadIds: [...request.committedReadIds],
+            producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+            reason: "The user explicitly requested a complete outline rewrite.",
+            selfReview: "The full outline follows the current user request.",
+            artifact: {
+              assistantMessage: "我已根据你最新要求重写了整篇细纲。",
+              outlineBody: rewrittenOutline,
+              planningWriteIntent: { outline: "rewrite" as const },
+              choices: [{ label: "检查新细纲覆盖的场景", action: "continue_discuss" as const }],
+              finalSelfReview: "The complete outline replaced the hand-edited version as requested.",
+            },
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0, modelCalls: 1 },
+        }
+      },
+    }
+    await withHarness(async (harness) => {
+      await prepareChapterPlanning(harness)
+      const listed = await invoke<{ session: { synopsisPath: string } }>(harness, "synopsis.conversation.list", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+      })
+      const outlineRel = outlinePathFromSynopsis(listed.session.synopsisPath)
+      const outlineAbs = join(harness.workspaceRootRef, outlineRel)
+      const handEdited = `${readFileSync(outlineAbs, "utf8").trim()}\n\n> 作者手改标记\n`
+      writeFileSync(outlineAbs, handEdited, "utf8")
+
+      const sent = await invoke<{
+        messages: Array<{ role: string; content: string }>
+      }>(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "使用这个重新写整篇细纲",
+      })
+      const assistant = [...sent.messages].reverse().find((message) => message.role === "assistant")
+
+      expect(readFileSync(outlineAbs, "utf8")).toBe(rewrittenOutline)
+      expect(assistant?.content).not.toContain("保留原文")
+    }, { model })
   })
 
   it("fails loud without writing when oldText is missing", () => {

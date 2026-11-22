@@ -55,6 +55,7 @@ function fixtureModel(inputs: Record<string, unknown>[]): AIModelPort {
         } : undefined,
         // Deliberately invalid side effect: an interview must never leak chapter writes.
         synopsisBody: "# 第一章 非法跳过\n不得写入。",
+        planningWriteIntent: { synopsis: "create" },
         continueTurn: true,
         finalSelfReview: "询问用户；不代表用户确认。",
       }
@@ -93,6 +94,7 @@ function chapterWriteAttemptModel(inputs: Record<string, unknown>[], volumeFolde
     if (artifact["volumePlanMeta"] === undefined) return response
     return { ...response, result: { ...response.result, artifact: {
       assistantMessage: "尝试直接写第一章。", synopsisBody: "# 第一章\n缺卷规划时不应写入这段内容。",
+      planningWriteIntent: { synopsis: "create" },
       ...(volumeFolderName === undefined ? {} : { volumeFolderName }),
       choices: [{ label: "继续创作", action: "continue_discuss" }], finalSelfReview: "测试越过实际内容检查。",
     } } }

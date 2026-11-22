@@ -3,15 +3,29 @@ import { synopsisDiscussArtifactSchema } from "@starseafolio/prompt-contracts"
 import { retainDiscussWrites, restoreDiscussWrites } from "../src/application/chapters/discuss-pending-artifact.js"
 
 const draft = { base: "body" as const, heading: "第一章 雨夜", body: "旧稿正文" }
-const artifact = (fields: Record<string, unknown>) => synopsisDiscussArtifactSchema.parse({
-  assistantMessage: "当前进度", finalSelfReview: "checked", ...fields,
-})
+const artifact = (fields: Record<string, unknown>) => {
+  const planningWriteIntent = {
+    ...(fields.synopsisBody === undefined ? {} : { synopsis: "rewrite" as const }),
+    ...(fields.bodyEdits === undefined
+      ? fields.outlineBody === undefined ? {} : { outline: "rewrite" as const }
+      : { outline: "patch" as const }),
+    ...(fields.chapterDraftProposal === undefined ? {} : { draft: "write" as const }),
+  }
+  return synopsisDiscussArtifactSchema.parse({
+    assistantMessage: "当前进度",
+    finalSelfReview: "checked",
+    ...fields,
+    ...(fields.planningWriteIntent === undefined && Object.keys(planningWriteIntent).length > 0
+      ? { planningWriteIntent }
+      : {}),
+  })
+}
 const pending = retainDiscussWrites(artifact({ synopsisBody: "梗概", outlineBody: "大纲", chapterDraftProposal: draft }))
 
 describe("pending discussion writes", () => {
   it("retains writing fields without carrying old choices or continuation decisions", () => {
     const retained = retainDiscussWrites(artifact({ chapterDraftProposal: draft, continueTurn: true, choices: [] }))
-    expect(retained).toEqual({ chapterDraftProposal: draft })
+    expect(retained).toEqual({ chapterDraftProposal: draft, planningWriteIntent: { draft: "write" } })
     const restored = restoreDiscussWrites(retained, artifact({ choices: [{ label: "查看草稿", action: "continue_discuss" }] }), 1)
     expect(restored.chapterDraftProposal).toEqual(draft)
     expect(restored.continueTurn).toBeUndefined()

@@ -13,10 +13,11 @@ describe("synopsis discuss toolRequest exclusive coerce", () => {
       assistantMessage: "先读目录",
       finalSelfReview: "工具单独一轮",
       toolRequest: { name: "bash", action: "describe" },
+      planningWriteIntent: { outline: "rewrite" },
       focusChange: { chapterSequence: 3 },
       choices: [{ label: "换焦点", action: "set_focus", chapterSequence: 3 }],
     })
-    expect(coerced.strippedKeys).toEqual(["focusChange", "choices"])
+    expect(coerced.strippedKeys).toEqual(["planningWriteIntent", "focusChange", "choices"])
     expect(synopsisDiscussArtifactSchema.safeParse(coerced.value).success).toBe(true)
   })
 

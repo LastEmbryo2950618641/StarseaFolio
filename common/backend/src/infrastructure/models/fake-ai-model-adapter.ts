@@ -294,8 +294,23 @@ export class FakeAiModelAdapter implements AIModelPort {
           recommendation: "no_issue",
           finalSelfReview: "The proposed revision was checked for continuity using only the supplied revision context.",
         }
-      case "synopsis_discuss":
-        return this.createSynopsisDiscussArtifact(input)
+      case "synopsis_discuss": {
+        const artifact = this.createSynopsisDiscussArtifact(input)
+        const planningWriteIntent = {
+          ...(artifact.synopsisBody === undefined
+            ? {}
+            : { synopsis: input.synopsisDiscuss?.synopsisReady === true ? "rewrite" as const : "create" as const }),
+          ...(artifact.bodyEdits !== undefined
+            ? { outline: "patch" as const }
+            : artifact.outlineBody === undefined
+              ? {}
+              : { outline: input.synopsisDiscuss?.outlineReady === true ? "rewrite" as const : "create" as const }),
+          ...(artifact.chapterDraftProposal === undefined ? {} : { draft: "write" as const }),
+        }
+        return Object.keys(planningWriteIntent).length === 0
+          ? artifact
+          : { ...artifact, planningWriteIntent }
+      }
       case "graph_governance":
         return this.createGraphGovernanceArtifact(input)
       case "graph_structure_plan": {
