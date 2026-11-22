@@ -1100,6 +1100,8 @@ export class SynopsisConversationService {
       let nextOutlineContentState = session.outlineContentState
       let wroteSynopsisBody = false
       let savedOutlineThisTurn = false
+      let restagedToSynopsisThisTurn = false
+      let restagedToOutlineThisTurn = false
       let nextSynopsisConfirmedAtMs = synopsisConfirmedAtMs
       const writeNotices: string[] = []
       const currentVolume = extractVolumeFolderNameFromPath(synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
@@ -1183,6 +1185,7 @@ export class SynopsisConversationService {
               targetStage: "synopsis",
               reason: "用户要求重写梗概：清除下游细纲与草稿表面，阶段回到梗概",
             })
+            restagedToSynopsisThisTurn = true
             writeNotices.push("已回退到梗概阶段：旧细纲已清除，草稿表面已清空，请按新梗概重写下游。")
           } catch (error) {
             runtimeLog("warn", "synopsis-conversation", "restage-on-synopsis-rewrite-failed", {
@@ -1625,12 +1628,14 @@ export class SynopsisConversationService {
           summary: "正在写入剧情细纲",
         })
         const currentOutline = await this.readSynopsisFile(input.workspaceRootRef, outlinePath)
-        if (digest(currentOutline) !== digest(outlineMarkdown)) {
+        // Host synopsis restage deletes the outline mid-turn; that digest change is expected and
+        // must not block the same turn from writing a replacement outline (+ draft).
+        if (!restagedToSynopsisThisTurn && digest(currentOutline) !== digest(outlineMarkdown)) {
           writeNotices.push("生成期间细纲文件已发生变更，本轮保留最新版本。")
           this.emitDiscussEdit(input.projectId, {
             path: outlinePath, kind: "outline", status: "failed", summary: "未落盘：细纲已变化",
           })
-        } else if (userEditedOutlineSinceAgent
+        } else if (!restagedToSynopsisThisTurn && userEditedOutlineSinceAgent
           && planningWriteIntent?.outline !== "rewrite"
           && writeScope?.outline !== "rewrite") {
           writeNotices.push(planningWriteIntent?.outline === "patch"
@@ -1651,6 +1656,7 @@ export class SynopsisConversationService {
               targetStage: "outline",
               reason: "用户要求重写细纲：清除下游草稿表面，阶段回到细纲",
             })
+            restagedToOutlineThisTurn = true
             writeNotices.push("已回退到细纲阶段：草稿表面已清空，请按新细纲重写草稿。")
           }
           await this.dependencies.workspace.saveSynopsisMarkdown(
@@ -2122,21 +2128,34 @@ export class SynopsisConversationService {
         && (await this.dependencies.revisions.readRevision(savedDraft.revisionTaskId)).status === "completed"
       const synopsisProgressCompleted = autonomousSynopsis && wroteSynopsisBody && synopsisReadyForOutline
       const outlineProgressCompleted = autonomousOutline && wroteOutlineThisTurn && hasOutlineOnDisk
+      // Restage clears session draft pointers; do not keep turn-start draftReady which would
+      // pin the bar on 草稿 after a synopsis/outline rewrite.
       const draftReadyAfterTurn = savedDraft !== undefined
-        || draftReadyAtStart
+        || (draftReadyAtStart && !restagedToSynopsisThisTurn && !restagedToOutlineThisTurn)
       const chapterPublishedAfterTurn = savedDraftPublished || chapterPublishedAtStart
       const pipelineStageAfterTurn = resolveDiscussPipelineStage({
         synopsisReady: synopsisReadyForOutline,
-        outlineReady: hasOutlineOnDisk,
+        outlineReady: hasOutlineOnDisk && !restagedToSynopsisThisTurn,
         draftReady: draftReadyAfterTurn,
         ...(chapterPublishedAfterTurn ? { chapterPublished: true } : {}),
       })
-      // Always refresh the stage bar from materials: 梗概/细纲/草稿入库各自停在对应阶段；
-      // 正文确认只在章节入库开始（publish）或正文已落盘时进入。
-      emitProceedProgress(
-        pipelineStageAfterTurn,
-        stageAuto(pipelineStageAfterTurn) ? "running" : "waiting",
-      )
+      // Prefer materials sync after restage so list/send agree; otherwise emit from turn flags.
+      const proceedProgressAfterTurn = (restagedToSynopsisThisTurn || restagedToOutlineThisTurn)
+        ? await this.syncProceedProgressFromMaterials({
+            projectId: input.projectId,
+            workspaceRootRef: input.workspaceRootRef,
+            session: (await this.dependencies.conversation.findSession(session.sessionId))
+              ?? session,
+            proceedMode,
+            ...(customGates === undefined ? {} : { customProceedGates: customGates }),
+          })
+        : undefined
+      if (proceedProgressAfterTurn === undefined) {
+        emitProceedProgress(
+          pipelineStageAfterTurn,
+          stageAuto(pipelineStageAfterTurn) ? "running" : "waiting",
+        )
+      }
       const currentStageAutonomous = stageAuto(pipelineStageAfterTurn)
       const materialIngestThisTurn = wroteSynopsisBody || wroteOutlineThisTurn || savedDraft !== undefined
         || savedDraftPublished
@@ -2204,10 +2223,11 @@ export class SynopsisConversationService {
         emitProceedProgress("draft_discuss", "waiting")
         autoContinue = undefined
       } else if (savedDraft === undefined && autoContinue === undefined && appliedFocusSequence === undefined) {
-        if (savedOutlineThisTurn) {
-          emitProceedProgress("outline_discuss", "done")
-        } else if (wroteSynopsisBody && synopsisReadyForOutline) {
+        if (restagedToSynopsisThisTurn || (wroteSynopsisBody && synopsisReadyForOutline && !hasOutlineOnDisk)) {
+          // Rewrite restage / synopsis-only materials: pin「当前」on 梗概 (status done = stage complete for gate text).
           emitProceedProgress("synopsis_discuss", "done")
+        } else if (restagedToOutlineThisTurn || savedOutlineThisTurn) {
+          emitProceedProgress("outline_discuss", "done")
         }
       }
       if (pipelineAuto) {
@@ -5974,9 +5994,14 @@ export class SynopsisConversationService {
     )
     const synopsisReady = hasPlanningContent(synopsisMarkdown, true)
     const outlineReady = hasPlanningContent(outlineMarkdown, false)
-    const draftReady = (latestDraftMarkdown?.trim().length ?? 0) > 0
-      || input.session.draftVersionId !== undefined
-      || publishableDraft !== undefined
+    // Restage clears draftVersionId / draftContentState; orphan revision rows must not keep
+    // the proceed bar on 草稿 after the user rewound to 梗概 or 细纲.
+    const draftReady = input.session.draftVersionId !== undefined
+      && input.session.draftContentState !== "empty"
+      && (
+        (latestDraftMarkdown?.trim().length ?? 0) > 0
+        || publishableDraft !== undefined
+      )
     const chapterPublished = (chapterBodyMarkdown?.trim().length ?? 0) > 0
     const stage = resolveDiscussPipelineStage({
       synopsisReady,

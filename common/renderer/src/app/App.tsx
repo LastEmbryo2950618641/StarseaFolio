@@ -1911,7 +1911,13 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       if (creationDeskSettingsNotice !== undefined) {
         setPostCommitNotice(creationDeskSettingsNotice)
       }
-      setSynopsisStream(undefined)
+      // Apply final materials-derived stage before dropping the stream; otherwise the bar
+      // keeps lastProceedProgress from turn start (often 草稿) after a synopsis rewrite restage.
+      if (sent.proceedProgress !== undefined) {
+        applyDiscussProceedProgress(sent.proceedProgress)
+      } else {
+        setSynopsisStream(undefined)
+      }
       setSynopsisConversationBusy(false)
       void refreshWorkspace().catch(() => undefined)
       // Process gate (e.g. previous chapter still publishing): keep going without asking the user.
