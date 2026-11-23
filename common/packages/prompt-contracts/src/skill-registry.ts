@@ -32,7 +32,8 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     name: "去 AI 味（deslop）",
     summary: "改工整/排比/翻译腔/空洞抒情；写正文或润色时用。",
     injectPolicy: "default",
-    defaultPhases: ["draft", "synopsis_discuss"],
+    // 讨论侧只在写草稿动作时由 service 按轮显式加载，不进 discuss 默认包。
+    defaultPhases: ["draft"],
     primaryResource: `${VENDOR}/skills/deslop.md`,
     referenceResources: [
       `${VENDOR}/references/anti-ai-checklist.md`,
@@ -46,7 +47,8 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     name: "对话与台词",
     summary: "口语化、潜台词、角色声音、禁对白乒乓；写对白或改书面腔时用。",
     injectPolicy: "default",
-    defaultPhases: ["draft", "synopsis_discuss"],
+    // 同 deslop：讨论侧写草稿时由 service 按轮显式加载。
+    defaultPhases: ["draft"],
     primaryResource: `${VENDOR}/skills/dialogue.md`,
     referenceResources: [`${VENDOR}/references/dialogue-library.md`],
     scriptsDir: "resources/skills/webnovel-dialogue/scripts",
@@ -90,8 +92,9 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "book-cold-start",
     name: "开书冷启动",
     summary: "一句话→绑笔风的风格备选→命名/对话硬落盘→卷大纲；未完成禁正文。",
-    injectPolicy: "default",
-    defaultPhases: ["synopsis_discuss"],
+    // 未通过 workStyleGate 时由 discuss service 按轮注入。
+    injectPolicy: "onDemand",
+    defaultPhases: [],
     primaryResource: "resources/skills/book-cold-start/SKILL.md",
     referenceResources: [
       "resources/skills/book-cold-start/references/style-pack-spec.md",
@@ -162,7 +165,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
   },
   {
     id: "plot-synopsis",
-    name: "梗概与细纲指南",
+    name: "梗概与细纲共同指南",
     summary: "写/改梗概或细纲时用。",
     injectPolicy: "default",
     defaultPhases: ["synopsis_discuss"],
@@ -174,8 +177,9 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "user-to-synopsis",
     name: "用户输入→梗概思维链",
     summary: "把用户本轮要求收成章级梗概前的内部思考与落笔闸。",
-    injectPolicy: "default",
-    defaultPhases: ["synopsis_discuss"],
+    // 梗概写入/梗概缺失时由 discuss service 按轮注入。
+    injectPolicy: "onDemand",
+    defaultPhases: [],
     primaryResource: "resources/v1/user-to-synopsis-guide.md",
     referenceResources: [],
     treeVisibility: "primary",
@@ -184,8 +188,9 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "synopsis-to-outline",
     name: "用户+梗概→细纲思维链",
     summary: "写细纲前必须合并用户要求与梗概；禁止只扩写梗概。",
-    injectPolicy: "default",
-    defaultPhases: ["synopsis_discuss"],
+    // 细纲写入/细纲缺失时由 discuss service 按轮注入。
+    injectPolicy: "onDemand",
+    defaultPhases: [],
     primaryResource: "resources/v1/synopsis-to-outline-guide.md",
     referenceResources: [],
     treeVisibility: "primary",
@@ -205,8 +210,9 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "settings-revision",
     name: "设定修订指南",
     summary: "改设定集、对齐冲突设定时用。",
+    // settings_extraction 阶段默认挂载《设定集修订规则》；讨论侧仍由阶段提示点名 load_skill 按需加载。
     injectPolicy: "default",
-    defaultPhases: ["synopsis_discuss"],
+    defaultPhases: ["settings_extraction"],
     primaryResource: "resources/v1/settings-revision-guide.md",
     referenceResources: [],
     treeVisibility: "primary",

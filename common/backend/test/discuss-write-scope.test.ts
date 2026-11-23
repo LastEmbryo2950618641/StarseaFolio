@@ -142,8 +142,13 @@ describe("discussion authorizes and verifies current-turn writes", () => {
         if (!rewrite) return Promise.resolve(modelReply(request, {}))
         const pack = options?.contextMessages?.filter(item => item.content.startsWith("【skill-pack:synopsis_discuss】"))
         expect(pack).toHaveLength(1)
-        expect(pack?.[0]?.content).toContain("通读并抽正典清单")
-        expect(pack?.[0]?.content).toContain("# 用户要求 + 梗概 → 剧情细纲")
+        // 刷新后的基础包只含 3 个共同 skill；梗概改写阶段 skill 只挂在本次 phasePrompt。
+        expect(pack?.[0]?.content).toContain("【skill:discuss-workflow】")
+        expect(pack?.[0]?.content).toContain("【skill:plot-synopsis】")
+        expect(pack?.[0]?.content).not.toContain("【skill:user-to-synopsis】")
+        expect(options?.phasePrompt?.text).toContain("【skill:user-to-synopsis】")
+        expect(options?.phasePrompt?.text).toContain("通读并抽正典清单")
+        expect(options?.phasePrompt?.text).not.toContain("【skill:synopsis-to-outline】")
         rewriteCalls += 1
         return Promise.resolve(modelReply(request, rewriteCalls === 1
           ? { planningWriteIntent: { outline: "rewrite" }, outlineBody: outline }

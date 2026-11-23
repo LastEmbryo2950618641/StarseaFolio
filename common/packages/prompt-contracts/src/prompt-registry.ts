@@ -40,8 +40,8 @@ export const WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES = Object.freeze([
 ] as const)
 
 /**
- * Sticky system_rules only: hard gates + short skill index.
- * Full vendor / discuss guides load via default skill pack or load_skill.
+ * Sticky system_rules only: hard gates shared by every phase.
+ * Skill index is discuss-only (it needs load_skill); writing/query guides load by phase/skill.
  */
 export const PLATFORM_BASE_RULE_RESOURCES = Object.freeze([
   WORLD_RULES_OVERVIEW_RESOURCE,
@@ -49,12 +49,12 @@ export const PLATFORM_BASE_RULE_RESOURCES = Object.freeze([
   CONTENT_HANDLING_RESOURCE,
   WEBNOVEL_PROSE_LOGIC_RESOURCE,
   SETTINGS_QUERY_GUIDE_RESOURCE,
-  SKILL_INDEX_RESOURCE,
 ] as const)
 
-/** Discuss sticky prefix — same thin base; workflow/guides are default skills for synopsis_discuss. */
+/** Discuss sticky prefix — common base plus the skill index (discuss has load_skill). */
 export const SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES = Object.freeze([
   ...PLATFORM_BASE_RULE_RESOURCES,
+  SKILL_INDEX_RESOURCE,
 ] as const)
 
 export type PromptDefinition = {

@@ -18,6 +18,7 @@ import {
   WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES,
   SKILL_INDEX_RESOURCE,
   PLATFORM_BASE_RULE_RESOURCES,
+  SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES,
   PLATFORM_SKILLS,
   defaultSkillIdsForPhase,
   assertFrontierSettlementCoversReview,
@@ -91,23 +92,38 @@ describe("prompt contracts", () => {
     }
   })
 
-  it("keeps platform composites thin (no vendor fulltext; skill index only)", () => {
+  it("keeps platform composites thin (no vendor fulltext; skill index is discuss-only)", () => {
     expect(PLATFORM_BASE_RULE_RESOURCES).toEqual([
       WORLD_RULES_OVERVIEW_RESOURCE,
       BASE_RULES_RESOURCE,
       CONTENT_HANDLING_RESOURCE,
       WEBNOVEL_PROSE_LOGIC_RESOURCE,
       SETTINGS_QUERY_GUIDE_RESOURCE,
-      SKILL_INDEX_RESOURCE,
     ])
+    expect(SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES).toContain(SKILL_INDEX_RESOURCE)
     for (const vendor of WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES) {
       expect(PLATFORM_BASE_RULE_RESOURCES).not.toContain(vendor)
     }
     expect(defaultSkillIdsForPhase("draft")).toEqual(["webnovel-deslop", "webnovel-dialogue", "outline-to-draft"])
-    expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("discuss-workflow")
-    expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("user-to-synopsis")
-    expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("synopsis-to-outline")
-    expect(defaultSkillIdsForPhase("synopsis_discuss")).not.toContain("outline-to-draft")
+    // settings_extraction 需要《设定集修订规则》正式子集；settings-revision 随之由 onDemand 升为阶段默认。
+    expect(defaultSkillIdsForPhase("settings_extraction")).toContain("settings-revision")
+    // discuss 基础包只保留共同指南；阶段 skill 由 service 按本轮动作注入。
+    expect(defaultSkillIdsForPhase("synopsis_discuss")).toEqual([
+      "starsea-writing",
+      "discuss-workflow",
+      "plot-synopsis",
+    ])
+    for (const stageSkillId of [
+      "user-to-synopsis",
+      "synopsis-to-outline",
+      "book-cold-start",
+      "settings-revision",
+      "webnovel-deslop",
+      "webnovel-dialogue",
+      "outline-to-draft",
+    ]) {
+      expect(defaultSkillIdsForPhase("synopsis_discuss")).not.toContain(stageSkillId)
+    }
     expect(PLATFORM_SKILLS.length).toBeGreaterThanOrEqual(7)
   })
 
@@ -170,6 +186,7 @@ describe("prompt contracts", () => {
     const dependencyAudit = readResource(promptDefinitions.dependency_audit.resourcePath)
     const draft = readResource(promptDefinitions.draft.resourcePath)
     const ruleAssembly = readResource(promptDefinitions.rule_assembly.resourcePath)
+    const turnContext = readResource("resources/v1/runtime/turn-context.md")
 
     expect(baseRules).toContain("图的局部组织与查询路径由你自主定义和演化")
     expect(baseRules).toContain("演化过程与当前有效状态")
@@ -193,7 +210,12 @@ describe("prompt contracts", () => {
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("可用 `request_read`")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("不限制**只读查询已发布正文")
     expect(sourceRetrieval).toContain("已有局部图自身形成的组织方式")
-    expect(sourceRetrieval).toContain("检索未命中不等于本轮不能推演")
+    expect(sourceRetrieval).not.toContain("检索未命中不等于本轮不能推演")
+    expect(turnContext).toContain("## source-write")
+    expect(turnContext).toContain("检索未命中不等于本轮不能推演")
+    expect(turnContext).toContain("## source-query")
+    expect(turnContext).toContain("## draft-query")
+    expect(turnContext).toContain("## draft-write")
     expect(sourceRetrieval).toContain("`missingEvidence` 和 `nextExpansionHints` 都必须是数组")
     expect(sourceRetrieval).toContain("应用内部已提交、不可变的原文单元投影")
     expect(sourceRetrieval).toContain("禁止读取工作区章节文件时")
@@ -212,7 +234,7 @@ describe("prompt contracts", () => {
     expect(semanticReview).toContain("不是修改项、节点或连接的逐项清单")
     expect(draft).toContain("不得输出“等待读取资料")
     expect(draft).toContain("遵守内容处理规则")
-    expect(readResource(promptDefinitions.draft.resourcePath)).toContain("采用限知时，每个视点只呈现其能感知")
+    expect(readResource(OUTLINE_TO_DRAFT_GUIDE_RESOURCE)).toContain("采用限知时，每个视点只呈现其能感知")
     expect(readResource(promptDefinitions.interpret.resourcePath)).toContain("遵守内容处理规则")
     expect(semanticReview).toContain("有限预算内")
     expect(semanticReview).toContain("可精确复述或再次指代的正文片段")
@@ -243,16 +265,35 @@ describe("prompt contracts", () => {
     expect(coldStart).toContain("表现输出/笔风规则/")
     expect(coldStart).toContain("时代科技生活")
     expect(coldStart).toContain("不调用 `todo_write`")
-    expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("book-cold-start")
     expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("discuss-workflow")
     expect(defaultSkillIdsForPhase("synopsis_discuss")).toContain("plot-synopsis")
+    expect(defaultSkillIdsForPhase("synopsis_discuss")).not.toContain("book-cold-start")
+    const stageOnlySkills = ["book-cold-start", "user-to-synopsis", "synopsis-to-outline"]
+    for (const skillId of stageOnlySkills) {
+      expect(PLATFORM_SKILLS.find((skill) => skill.id === skillId)?.injectPolicy).toBe("onDemand")
+    }
+    // settings-revision 已升为 settings_extraction 的阶段默认包，讨论侧仍是按需加载。
+    expect(PLATFORM_SKILLS.find((skill) => skill.id === "settings-revision")).toMatchObject({
+      injectPolicy: "default",
+      defaultPhases: ["settings_extraction"],
+    })
+    expect(defaultSkillIdsForPhase("settings_extraction")).toEqual(["settings-revision"])
+    expect(defaultSkillIdsForPhase("synopsis_discuss")).not.toContain("settings-revision")
+    // 阶段提示保留《设定集修订规则》引用，并说明本阶段已默认挂载 settings-revision。
+    const settingsExtractionPrompt = readResource(promptDefinitions.settings_extraction.resourcePath)
+    expect(settingsExtractionPrompt).toContain("《设定集修订规则》")
+    expect(settingsExtractionPrompt).toContain("本阶段默认已挂载 `settings-revision`")
+    expect(readResource(SETTINGS_REVISION_GUIDE_RESOURCE)).toContain("# 设定集修订规则")
+    for (const skillId of ["webnovel-deslop", "webnovel-dialogue"]) {
+      expect(PLATFORM_SKILLS.find((skill) => skill.id === skillId)?.defaultPhases).toEqual(["draft"])
+    }
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).not.toContain("presentationWrites 给出完整 Markdown、`relativePath`（仅 `表现输出/描写规则/*.md`")
     expect(readResource(PLOT_SYNOPSIS_GUIDE_RESOURCE)).toContain("表现输出/本作品描写/")
     expect(readResource(PLOT_SYNOPSIS_GUIDE_RESOURCE)).toContain("作品风格.md")
     expect(readResource(PLOT_SYNOPSIS_GUIDE_RESOURCE)).toContain("具体句段、描写密度和机位由执笔时按场面决定")
     expect(synopsisPrompt).toContain("旧文件里由 AI 写成固定句长、对白比例、视角或描写密度的条目也作为倾向理解")
-    expect(readResource(promptDefinitions.draft.resourcePath)).toContain("具体句式、分段、视点、对白和描写由本章的场景决定")
-    expect(readResource(promptDefinitions.draft.resourcePath)).toContain("参考上一章已发布正文的语感和声口")
+    expect(readResource(OUTLINE_TO_DRAFT_GUIDE_RESOURCE)).toContain("再按本章需要选择段落、视点、句式、对白和描写")
+    expect(readResource(OUTLINE_TO_DRAFT_GUIDE_RESOURCE)).toContain("已发布前文提供连续性事实、语感与声口")
     expect(readResource("resources/v1/outline-to-draft-guide.md")).toContain("含旧文件里由 AI 写成规则的表现偏好")
     expect(readResource("resources/v1/outline-to-draft-guide.md")).toContain("核对用户合同动词")
     expect(readResource("resources/v1/user-to-synopsis-guide.md")).toContain("合同动词可读")
@@ -331,14 +372,14 @@ describe("prompt contracts", () => {
     expect(prompt).toContain("批量推演模式")
   })
 
-  it("requires outline-to-prose translation rules in the draft prompt", () => {
+  it("requires outline-to-prose translation rules in the shared draft guide", () => {
     const packageRoot = resolve(process.cwd(), "common/packages/prompt-contracts")
-    const draft = readFileSync(resolve(packageRoot, promptDefinitions.draft.resourcePath), "utf8")
-    expect(draft).toContain("细纲 → 正文")
-    expect(draft).toContain("翻译，不要照抄")
-    expect(draft).toContain("禁止层")
-    expect(draft).toContain("第X章")
-    expect(draft).toContain("须落笔的核心场景应在正文中实际发生")
+    const guide = readFileSync(resolve(packageRoot, OUTLINE_TO_DRAFT_GUIDE_RESOURCE), "utf8")
+    expect(guide).toContain("细纲 → 正文")
+    expect(guide).toContain("翻译细纲，不要照抄")
+    expect(guide).toContain("禁止层")
+    expect(guide).toContain("第X章")
+    expect(guide).toContain("须落笔的核心场景应在正文中实际发生")
   })
 
   it("preserves explicit user scope, status changes, and chapter length across writing stages", () => {
@@ -348,7 +389,6 @@ describe("prompt contracts", () => {
     const outlineToDraft = readFileSync(resolve(packageRoot, OUTLINE_TO_DRAFT_GUIDE_RESOURCE), "utf8")
     const plotSynopsis = readFileSync(resolve(packageRoot, PLOT_SYNOPSIS_GUIDE_RESOURCE), "utf8")
     const synopsisDiscuss = readFileSync(resolve(packageRoot, promptDefinitions.synopsis_discuss.resourcePath), "utf8")
-    const draft = readFileSync(resolve(packageRoot, promptDefinitions.draft.resourcePath), "utf8")
     const prose = readFileSync(resolve(packageRoot, WEBNOVEL_PROSE_LOGIC_RESOURCE), "utf8")
 
     expect(userToSynopsis).toContain("在其指定范围内以最新指令为准")
@@ -372,13 +412,14 @@ describe("prompt contracts", () => {
     expect(outlineToDraft).toContain("按本章类型与场景功能检查推进是否成立")
     expect(outlineToDraft).toContain("不要求每段都承担相同的推进任务")
     expect(plotSynopsis).toContain("不要求每场都加压或推进同一格情绪")
-    expect(draft).toContain("正文主体按界面口径计数并落在范围内")
-    expect(draft).toContain("阶段结果必须在本章发生")
-    expect(draft).toContain("宏观蒙太奇")
-    expect(draft).toContain("不写成阵营反应清单")
-    expect(draft).toContain("按场景选择写法")
-    expect(draft).toContain("允许场景承担停顿、氛围或铺垫")
-    expect(draft).toContain("场内可用切镜呈现同一事件的跨地域影响")
+    expect(outlineToDraft).toContain("正文主体按界面口径计数并落在范围内")
+    expect(outlineToDraft).toContain("阶段结果必须在本章发生")
+    expect(outlineToDraft).toContain("蒙太奇与场面尺度")
+    expect(outlineToDraft).toContain("宏观场面可用地域或势力跨度")
+    expect(outlineToDraft).toContain("写出各方的具体反应和后果")
+    expect(outlineToDraft).toContain("从输入选择写法")
+    expect(outlineToDraft).toContain("允许场景承担停顿、氛围或铺垫")
+    expect(outlineToDraft).toContain("场内可用切镜呈现同一事件的跨地域影响")
     expect(synopsisDiscuss).toContain("宿主已注入 outline-to-draft")
     expect(synopsisDiscuss).toContain("**禁止**再调 `load_skill`")
     expect(synopsisDiscuss).not.toContain("先调用 `load_skill` 加载 `outline-to-draft`")
@@ -405,7 +446,7 @@ describe("prompt contracts", () => {
     const outlineToDraft = readFileSync(resolve(packageRoot, OUTLINE_TO_DRAFT_GUIDE_RESOURCE), "utf8")
     const synopsisToOutline = readFileSync(resolve(packageRoot, SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE), "utf8")
     const plotSynopsis = readFileSync(resolve(packageRoot, PLOT_SYNOPSIS_GUIDE_RESOURCE), "utf8")
-    const draft = readFileSync(resolve(packageRoot, promptDefinitions.draft.resourcePath), "utf8")
+    const userToSynopsis = readFileSync(resolve(packageRoot, USER_TO_SYNOPSIS_GUIDE_RESOURCE), "utf8")
     const prose = readFileSync(resolve(packageRoot, WEBNOVEL_PROSE_LOGIC_RESOURCE), "utf8")
 
     expect(outlineToDraft).toContain("围绕本章要给读者的体验选写法")
@@ -416,15 +457,15 @@ describe("prompt contracts", () => {
     expect(synopsisToOutline).toContain("按场景功能选择组织方式")
     expect(plotSynopsis).toContain("只有当本章适合留下新悬念时才安排结尾钩")
     expect(plotSynopsis).toContain("一章一主峰仅作为分析工具")
-    expect(plotSynopsis).toContain("不要求每章都制造显著改变")
+    expect(userToSynopsis).toContain("不要求每章都制造显著改变")
     expect(plotSynopsis).not.toContain("短章 1–3 步、常规 3–6 步")
-    expect(plotSynopsis).toContain("不把标题当成每场必须填满的字段")
+    expect(synopsisToOutline).toContain("不把标题当成每场必须填满的字段")
     expect(synopsisToOutline).toContain("不作为每场的固定栏位")
     expect(synopsisToOutline).not.toContain("须至少新增一类")
     expect(outlineToDraft).toContain("不要求每章都有冲突、反转或新钩子")
     expect(outlineToDraft).not.toContain("章末唯一钩是什么")
-    expect(draft).toContain("按场景选择写法")
-    expect(draft).not.toContain("一章一主峰把细纲已锁定场面改软或删掉")
+    expect(outlineToDraft).toContain("从输入选择写法")
+    expect(outlineToDraft).not.toContain("一章一主峰把细纲已锁定场面改软或删掉")
     expect(prose).toContain("章节结尾按当前叙事任务选择落点")
     expect(prose).not.toContain("章末只留一个钩")
     expect(prose).not.toContain("一章一主峰")
@@ -480,10 +521,10 @@ describe("prompt contracts", () => {
     }).success).toBe(true)
   })
 
-  it("requires character personality in settings revision and draft prompts", () => {
+  it("requires character personality in settings revision and the shared draft guide", () => {
     const packageRoot = resolve(process.cwd(), "common/packages/prompt-contracts")
     const revision = readFileSync(resolve(packageRoot, SETTINGS_REVISION_GUIDE_RESOURCE), "utf8")
-    const draft = readFileSync(resolve(packageRoot, promptDefinitions.draft.resourcePath), "utf8")
+    const guide = readFileSync(resolve(packageRoot, OUTLINE_TO_DRAFT_GUIDE_RESOURCE), "utf8")
     const extraction = readFileSync(
       resolve(packageRoot, promptDefinitions.settings_extraction.resourcePath),
       "utf8",
@@ -491,8 +532,8 @@ describe("prompt contracts", () => {
     expect(revision).toContain("## 性格")
     expect(revision).toContain("## 背景")
     expect(revision).toContain("姓名、性别、性格、背景")
-    expect(draft).toContain("人物按性格行事")
-    expect(draft).toContain("姓名与最小档案")
+    expect(guide).toContain("人物按性格行事")
+    expect(guide).toContain("姓名与最小档案")
     expect(extraction).toContain("## 性格")
     expect(extraction).toContain("姓名")
     expect(extraction).toContain("性别")

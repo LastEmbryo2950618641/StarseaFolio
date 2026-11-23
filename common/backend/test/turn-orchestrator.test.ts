@@ -4415,6 +4415,71 @@ describe("TurnOrchestrator", () => {
     expect(proposals).toEqual([{ status: "approved" }])
   })
 
+  it("injects the settings-revision default pack into settings_extraction exactly once", async () => {
+    const fixture = await createFixture()
+    const fake = new FakeAiModelAdapter(randomUUID)
+    const promptsByPhase = new Map<string, string[]>()
+    const model: AIModelPort = {
+      info: fake.info,
+      execute: async (request, options) => {
+        const promptText = options?.phasePrompt?.text ?? ""
+        const captured = promptsByPhase.get(request.phase) ?? []
+        captured.push(promptText)
+        promptsByPhase.set(request.phase, captured)
+        return fake.execute(request, options)
+      },
+    }
+    const first = await fixture.createOrchestrator(model, fixture.commit).execute({
+      projectId: fixture.projectId,
+      workspaceRootRef: fixture.workspaceRoot,
+      internalStore: fixture.store,
+      userInput: "先建立一章可供修订的正文。",
+      chapterSequence: 1,
+      allowWorkspaceChapterReads: false,
+    })
+    if (first.kind !== "turn") throw new Error("Expected a committed turn")
+    // draft 行为不变：仍只挂自己的三个默认 skill。
+    const draftPrompt = promptsByPhase.get("draft")?.[0] ?? ""
+    expect(draftPrompt).toContain("【skill-pack:draft】")
+    for (const skillId of ["webnovel-deslop", "webnovel-dialogue", "outline-to-draft"]) {
+      expect(draftPrompt.match(new RegExp(`【skill:${skillId}】`, "gu"))).toHaveLength(1)
+    }
+    expect(draftPrompt).not.toContain("【skill:settings-revision】")
+
+    const chapter = (await fixture.documentRepository.listCommittedChapters(fixture.projectId))[0]
+    if (chapter === undefined) throw new Error("Expected a committed chapter")
+    const sourceUnits = await fixture.documentRepository.listSourceUnits(fixture.projectId, chapter.sourceId)
+    const result = await fixture.createOrchestrator(model, fixture.commit).execute({
+      workflow: "revision",
+      adaptiveGraphGovernance: true,
+      projectId: fixture.projectId,
+      workspaceRootRef: fixture.workspaceRoot,
+      internalStore: fixture.store,
+      userInput: "# 第一章 修订版\n\n[no-change] 林序第一次走上旧桥。",
+      chapterSequence: 1,
+      existingSourceUnitIds: sourceUnits.map((unit) => unit.id),
+      allowWorkspaceChapterReads: false,
+    })
+    expect(result.kind).toBe("evolution")
+
+    const extractionPrompts = promptsByPhase.get("settings_extraction") ?? []
+    expect(extractionPrompts).toHaveLength(1)
+    const extractionPrompt = extractionPrompts[0]
+    if (extractionPrompt === undefined) throw new Error("Expected a settings_extraction phase prompt")
+    // 阶段提示本身在最前，skill 包追加在同一次请求末尾。
+    expect(extractionPrompt.startsWith("# settings_extraction")).toBe(true)
+    expect(extractionPrompt).toContain("【skill-pack:settings_extraction】")
+    expect(extractionPrompt.match(/【skill:settings-revision】/gu)).toHaveLength(1)
+    expect(extractionPrompt.match(/^# 设定集修订规则$/gmu)).toHaveLength(1)
+    expect(extractionPrompt).toContain("一主题一文件优先")
+    for (const [phase, capturedPrompts] of promptsByPhase) {
+      if (phase === "settings_extraction") continue
+      for (const promptText of capturedPrompts) {
+        expect(promptText, phase).not.toContain("【skill:settings-revision】")
+      }
+    }
+  })
+
   it("commits a self-contained local revision without the full governance chain", async () => {
     const fixture = await createFixture()
     const fake = new FakeAiModelAdapter(randomUUID)

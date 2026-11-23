@@ -34,3 +34,14 @@ describe("static skill index", () => {
     }
   })
 })
+
+describe("settings-revision skill policy row", () => {
+  it("ships the formal settings_extraction pack while discuss stays on demand", () => {
+    const markdown = readSkillIndex()
+    expect(markdown).toMatch(/^\| `settings-revision` \|[^\n]*\| default\(settings_extraction\) \|/mu)
+    expect(markdown).not.toMatch(/^\| `settings-revision` \|[^\n]*\| onDemand \|/mu)
+    // 索引正文说明：阶段默认挂载，讨论侧仍按需加载。
+    expect(markdown).toContain("设定修订 skill 在 `settings_extraction` 阶段默认挂载")
+    expect(markdown).toContain("讨论侧不默认注入")
+  })
+})

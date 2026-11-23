@@ -3043,6 +3043,26 @@ export class SynopsisConversationService {
     const currentWorkDisplayName = await this.dependencies.readDisplayName?.()
     const currentWorkDescription = await this.dependencies.readWorkDescription?.()
     const basePhasePrompt = await this.dependencies.prompts.loadPhase("synopsis_discuss")
+    // 写草稿动作：显式 draft=write，或“无 writeScope/允许推进且已有细纲”的既有条件。
+    // 同一条件既决定 outline-to-draft 指南，也决定 deslop/dialogue 阶段 skill。
+    const shouldAttachDraftGuide = input.writeScope?.draft === "write"
+      || ((input.writeScope === undefined || input.writeScope.advance === true) && hasPlanningContent(input.outlineMarkdown, false))
+    // 阶段 skill 只作用于本次请求：拼进 phasePrompt，不写进持久 discuss context，
+    // 避免每轮把整包 skill 重新落库、把缓存和上下文一起撑大。
+    const stageSkillResources = await Promise.all(resolveDiscussStageSkillIds({
+      workStyleGateActive: input.workStyleGate !== undefined,
+      creativeSetupActive: input.creativeSetup !== undefined,
+      writeScope: input.writeScope,
+      synopsisMarkdown: input.synopsisMarkdown,
+      outlineMarkdown: input.outlineMarkdown,
+      draftAction: shouldAttachDraftGuide,
+    }).map((skillId) => this.dependencies.prompts.loadSkill(skillId, { includeReferences: false })))
+    const stageSkillAppendix = stageSkillResources.length === 0
+      ? undefined
+      : [
+          "# 本轮阶段 Skill（仅本次请求加载）",
+          ...stageSkillResources.map((skill) => skill.text),
+        ].join("\n\n")
     const intentAppendix = chapterNarrativeIntentPhaseAppendix(input.chapterIntent, "synopsis_discuss")
     const presentationAppendix = chapterPresentationPhaseAppendix(input.presentation, "synopsis_discuss")
     const workStyleGateAppendix = buildWorkStyleGatePromptAppendix(input.workStyleGate)
@@ -3063,6 +3083,7 @@ export class SynopsisConversationService {
       workStyleGateAppendix,
       volumePlanningAppendix,
       input.creativeSetup === undefined ? undefined : buildCreativeSetupPrompt(input.creativeSetup),
+      stageSkillAppendix,
     ]
       .filter((part): part is string => part !== undefined)
     const phasePrompt = appendix.length === 0
@@ -3207,8 +3228,6 @@ export class SynopsisConversationService {
       message.kind === "phase_instruction" && message.role === "system"
       && message.content?.startsWith(draftGuideHeader) === true
     ))
-    const shouldAttachDraftGuide = input.writeScope?.draft === "write"
-      || ((input.writeScope === undefined || input.writeScope.advance === true) && hasPlanningContent(input.outlineMarkdown, false))
     const currentDraftResource = shouldAttachDraftGuide || cachedDraftGuides.length > 0
       ? await this.dependencies.prompts.loadOutlineToDraftGuide()
       : undefined
@@ -7371,6 +7390,37 @@ function hasPlanningContent(markdown: string, synopsis: boolean): boolean {
   if (synopsis && isSynopsisPlaceholderDocument(markdown)) return false
   const body = markdown.replace(/^\uFEFF?\s*(?:#|##)\s+[^\n]*\n?/u, "").trim()
   return body.length > 0
+}
+
+/**
+ * discuss 基础包保持 3 个（discuss-workflow + plot-synopsis + starsea-writing），
+ * 阶段 skill 按本轮动作挂到 phasePrompt：冷启动、梗概、细纲、写草稿各取所需。
+ * outline-to-draft 仍由 discussionDraftGuide 注入，这里不重复。
+ * settings-revision 改为 onDemand，由阶段提示点名 load_skill。
+ */
+function resolveDiscussStageSkillIds(input: Readonly<{
+  workStyleGateActive: boolean
+  creativeSetupActive: boolean
+  writeScope: DiscussTurnWriteScope | undefined
+  synopsisMarkdown: string
+  outlineMarkdown: string
+  /** 与 discussionDraftGuide 的注入条件完全一致。 */
+  draftAction: boolean
+}>): readonly string[] {
+  const synopsisReady = hasPlanningContent(input.synopsisMarkdown, true)
+  const outlineReady = hasPlanningContent(input.outlineMarkdown, false)
+  // 创意设定问答生成轮的梗概/细纲是刻意留空的，不能据此判定“材料缺失”。
+  const materialsTrustworthy = !input.creativeSetupActive && !input.workStyleGateActive
+  const ids: string[] = []
+  if (input.workStyleGateActive) ids.push("book-cold-start")
+  if (input.writeScope?.synopsis !== undefined || (materialsTrustworthy && !synopsisReady)) {
+    ids.push("user-to-synopsis")
+  }
+  if (input.writeScope?.outline !== undefined || (materialsTrustworthy && synopsisReady && !outlineReady)) {
+    ids.push("synopsis-to-outline")
+  }
+  if (input.draftAction) ids.push("webnovel-deslop", "webnovel-dialogue")
+  return ids
 }
 
 /** Legacy confirmation metadata only; prerequisite content, not this phrase, controls writes. */

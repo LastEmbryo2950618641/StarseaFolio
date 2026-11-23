@@ -525,6 +525,18 @@ export class QueryDraftAuditExceededError extends Error {
   }
 }
 
+export type WorkflowAppendixSection = "draft-query" | "draft-write" | "source-query" | "source-write"
+
+/** Only the active workflow branch is appended to the phase prompt. */
+export function workflowAppendixSection(
+  phase: AIPhase,
+  workflow: TurnPhaseInput["workflow"] | undefined,
+): WorkflowAppendixSection | undefined {
+  if (phase === "draft") return workflow === "query" ? "draft-query" : "draft-write"
+  if (phase === "source_retrieval") return workflow === "query" ? "source-query" : "source-write"
+  return undefined
+}
+
 export class TurnOrchestrator {
   private readonly verificationProbes = new VerificationProbeCoordinator()
   private readonly chapterContext: ChapterContextResolver
@@ -3028,9 +3040,20 @@ export class TurnOrchestrator {
   private async executePhase(input: ExecutePhaseInput): Promise<ExecutePhaseResult> {
     throwIfExecutionCancelled(input.signal)
     const basePrompt = await this.dependencies.prompts.loadPhase(input.phase)
-    const skillPack = input.phase === "draft"
-      ? await this.dependencies.prompts.loadDefaultSkillPack("draft")
-      : undefined
+    // 只有带默认 skill 包的阶段才加载，避免给其余阶段追加空包噪声。
+    // query draft 只回答事实，不加载 outline-to-draft/deslop/dialogue 写作包。
+    const defaultSkillPackPhase = input.phase === "settings_extraction"
+      ? "settings_extraction"
+      : input.phase === "draft" && input.input.workflow !== "query"
+        ? "draft"
+        : undefined
+    const skillPack = defaultSkillPackPhase === undefined
+      ? undefined
+      : await this.dependencies.prompts.loadDefaultSkillPack(defaultSkillPackPhase)
+    const workflowSection = workflowAppendixSection(input.phase, input.input.workflow)
+    const workflowAppendix = workflowSection === undefined
+      ? undefined
+      : renderRuntimePrompt("turn-context", workflowSection)
     const archiveSessionId = input.input.conversationArchiveSessionId
     const conversation = this.dependencies.synopsisConversation
     const canReadArchive = input.phase === "draft" && archiveSessionId !== undefined && conversation !== undefined
@@ -3041,6 +3064,7 @@ export class TurnOrchestrator {
       ),
       chapterNarrativeIntentPhaseAppendix(input.input.chapterIntent, input.phase),
       chapterPresentationPhaseAppendix(input.input.presentation, input.phase),
+      workflowAppendix,
       skillPack?.text,
       canReadArchive ? renderRuntimePrompt("turn-context", "archive") : undefined,
     ].filter((text): text is string => text !== undefined && text.trim().length > 0)
