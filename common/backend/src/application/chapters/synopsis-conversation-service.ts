@@ -3198,6 +3198,12 @@ export class SynopsisConversationService {
     }
     await compactOlderHistory()
     const draftGuideHeader = "# 用户要求 + 梗概 + 细纲 → 正文草稿"
+    const draftGuideHostNotice = [
+      "【宿主已注入 outline-to-draft】",
+      "正文草稿指南已在本轮上下文（见同轮「# 用户要求 + 梗概 + 细纲 → 正文草稿」）。",
+      "禁止再调 load_skill(outline-to-draft)；禁止因工具列表无 load_skill 而用英文空转或改走捷径。",
+      "直接按该指南全文走思维链后提交 chapterDraftProposal。",
+    ].join("")
     const cachedDraftGuides = storedContext.filter((message) => (
       message.kind === "phase_instruction" && message.role === "system"
       && message.content?.startsWith(draftGuideHeader) === true
@@ -3704,6 +3710,15 @@ export class SynopsisConversationService {
         ...toVisibleDiscussContextMessages(storedContext).filter((message) => (
           outlineToDraftGuideLoaded || message.messageId !== currentDraftGuide?.messageId
         )),
+        ...(discussionDraftGuide === undefined || !outlineToDraftGuideLoaded
+          ? []
+          : [{
+              messageId: this.dependencies.createId(),
+              sequence: storedContext.length,
+              role: "system" as const,
+              kind: "phase_instruction" as const,
+              content: draftGuideHostNotice,
+            }]),
         ...(discussionDraftGuide === undefined || storedContext.some((message) => message.content === discussionDraftGuide?.text)
           ? []
           : [{
@@ -4192,7 +4207,7 @@ export class SynopsisConversationService {
           outlineToDraftGuideLoaded = true
           await noteDiscussBlock(
             "draft_guide_required",
-            "已加载正文草稿指南。请先结合用户本轮要求、梗概、细纲和作品笔风重新核对，再调用正文推演工具；上一轮没有执行该工具。",
+            `${draftGuideHostNotice}请先结合用户本轮要求、梗概、细纲和作品笔风重新核对，再调用正文推演工具；上一轮没有执行该工具。`,
             { source: toolArtifact.data },
           )
           attempt += 1
@@ -4500,7 +4515,7 @@ export class SynopsisConversationService {
           })
           await noteDiscussBlock(
             "draft_guide_required",
-            "已加载正文草稿指南。请按用户本轮要求并结合有效梗概、细纲和作品笔风重新生成完整草稿提案；上一轮草稿没有写入。",
+            `${draftGuideHostNotice}请按用户本轮要求并结合有效梗概、细纲和作品笔风重新生成完整草稿提案；上一轮草稿没有写入。`,
             { held: true },
           )
           attempt += 1

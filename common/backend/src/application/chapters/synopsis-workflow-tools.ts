@@ -258,7 +258,8 @@ const descriptions = {
       includeReferences: "boolean (optional；true 时附带 references 长文，默认 false)",
     },
     writingGuide: [
-      "【load_skill】按需加载平台写作/讨论 skill 全文（去味、对话、人味、情绪、工作流等）。要写正文草稿时必须先加载 outline-to-draft，按完整指南写完后再提交草稿。",
+      "【load_skill】按需加载平台写作/讨论 skill 全文（去味、对话、人味、情绪、工作流等）。",
+      "写正文草稿：若上下文已有「# 用户要求 + 梗概 + 细纲 → 正文草稿」或「宿主已注入 outline-to-draft」，视为已加载，禁止再 load outline-to-draft，也禁止因工具列表无 load_skill 而停顿；仅该标题缺失时才 load。",
       "系统规则只含短索引；默认阶段包可能已挂主 skill，仍缺细则时再 load。",
       "includeReferences=true 会明显增大上下文，仅在主正文不够用时开启。",
       "描写场面卡不在本工具：用 request_read + sourceKinds:[\"rule\"] 读 表现输出/描写规则/。",
