@@ -897,10 +897,25 @@ export class SynopsisConversationService {
         })
         if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
         input.signal?.throwIfAborted()
-        writeScope = discussTurnWriteScopeSchema.parse(scope)
-        runtimeLog("info", "synopsis-conversation", "planning_write_scope.resolved", {
-          projectId: input.projectId, sessionId: session.sessionId, chapterSequence: session.chapterSequence, scope: writeScope,
-        })
+        // The router is a model: never let one malformed enum abort the whole turn.
+        const normalizedScope = scope !== null && typeof scope === "object"
+          && (scope as Record<string, unknown>).draft === "rewrite"
+          ? { ...(scope as Record<string, unknown>), draft: "write" }
+          : scope
+        const parsedScope = discussTurnWriteScopeSchema.safeParse(normalizedScope)
+        if (parsedScope.success) {
+          writeScope = parsedScope.data
+          runtimeLog("info", "synopsis-conversation", "planning_write_scope.resolved", {
+            projectId: input.projectId, sessionId: session.sessionId, chapterSequence: session.chapterSequence, scope: writeScope,
+          })
+        } else {
+          runtimeLog("warn", "synopsis-conversation", "planning_write_scope.invalid", {
+            projectId: input.projectId,
+            sessionId: session.sessionId,
+            chapterSequence: session.chapterSequence,
+            issues: parsedScope.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`),
+          })
+        }
         routingCalls = Math.max(1, usage.modelCalls ?? 1)
         synopsisConversationStreamHub.addUsage(input.projectId, usage, this.dependencies.now())
         const cumulativeUsage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
@@ -909,7 +924,7 @@ export class SynopsisConversationService {
             projectId: input.projectId, usage: cumulativeUsage, updatedAtMs: this.dependencies.now(),
           })
         }
-        if (writeScope.publish === true && Object.keys(writeScope).length === 1 && canPublish) {
+        if (writeScope !== undefined && writeScope.publish === true && Object.keys(writeScope).length === 1 && canPublish) {
           if (candidate === undefined) throw new SynopsisInvalidStateError("当前章没有可发布的草稿。")
           return await publish(candidate.draftVersionId)
         }
