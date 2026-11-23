@@ -52,8 +52,12 @@ import { rememberWorkName } from "../features/projects/work-name-history.js"
 import { useAppUpdate } from "../hooks/useAppUpdate.js"
 import { WorkspaceTree } from "../features/workspace/WorkspaceTree.js"
 import { WorkspaceNameDialog } from "../features/workspace/WorkspaceNameDialog.js"
+import { isSharedPresentationRulePath, resolveWorkspaceAbsolutePath } from "../features/workspace/workspace-paths.js"
 import { AUTO_DESCRIPTION_RULE_PATH, canCreateFolderInDirectory, findDuplicateVolumeSequence, isValidVolumeFolderName, isChapterVolumeContainerPath, isVolumeDirectoryPath, resolveCreateDestination } from "../features/workspace/workspace-locks.js"
 import { EditorArea } from "../features/editor/EditorArea.js"
+import { PromptSaveConfirmDialog } from "../features/editor/PromptSaveConfirmDialog.js"
+import { isWorkspaceDocumentReadOnly } from "../features/editor/document-read-only.js"
+import { saveWorkspaceFile, type PromptSaveRequest } from "../features/editor/prompt-save.js"
 import { closeEditorDocument, MAX_OPEN_EDITOR_DOCUMENTS, openEditorDocument, saveEditorDocument, updateEditorDocument, type EditorDocument } from "../features/editor/editor-document-tabs.js"
 import { ChapterBrowseDetailRail } from "../features/editor/ChapterBrowseDetailRail.js"
 import { mapAiCreationDeskSettings, useCreationDeskPresentationPreferences, reconcileSelectedRulePath } from "../features/editor/creation-desk-presentation-preferences.js"
@@ -224,6 +228,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     kind: "file" | "directory"
     parentPath: string
   }>()
+  const [promptSaveRequest, setPromptSaveRequest] = useState<PromptSaveRequest>()
+  const promptSaveConfirmationRef = useRef<((confirmed: boolean) => void) | undefined>(undefined)
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>()
   const [history, setHistory] = useState<HistoryOverview>()
   const [, setHistoryLoading] = useState(false)
@@ -1395,35 +1401,56 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     }
   }
 
+  const requestPromptSaveConfirmation = (request: PromptSaveRequest): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+      promptSaveConfirmationRef.current?.(false)
+      promptSaveConfirmationRef.current = resolve
+      setPromptSaveRequest(request)
+    })
+
+  const settlePromptSaveConfirmation = (confirmed: boolean): void => {
+    const resolve = promptSaveConfirmationRef.current
+    promptSaveConfirmationRef.current = undefined
+    setPromptSaveRequest(undefined)
+    resolve?.(confirmed)
+  }
+
   const saveFile = async (): Promise<void> => {
     if (project === undefined || selectedPath === undefined) return
     const path = selectedPath
     const submittedContent = content
     try {
-      if (isCharacterProfilePath(path)) {
-        const original = openedDocumentsRef.current.find(document => document.path === path)?.savedContent ?? savedContent
-        const before = parseCharacterProfile(original)
-        const after = parseCharacterProfile(submittedContent)
-        const operations: CharacterUpdate["operations"] = [
-          ...Object.entries(after.fields).filter(([field, value]) => JSON.stringify(before.fields[field]) !== JSON.stringify(value))
-            .map(([field, value]) => ({ op: "set" as const, field, value })),
-          ...Object.keys(before.fields).filter(field => !Object.hasOwn(after.fields, field)).map(field => ({ op: "delete" as const, field })),
-        ]
-        if (operations.length > 0) await invokeBackend("workspace.character.update", {
-          projectId: project.projectId, workspaceRootRef: project.workspaceRootRef, relativePath: path,
-          mode: "update", expectedContent: original, operations,
-        })
-      } else {
-        await invokeBackend("workspace.save", {
-          projectId: project.projectId,
-          workspaceRootRef: project.workspaceRootRef,
-          relativePath: path,
-          content: submittedContent,
-        })
-      }
-      if (documentProjectRef.current !== project.projectId) return
-      replaceOpenedDocuments(saveEditorDocument(openedDocumentsRef.current, path, submittedContent))
-      if (selectedPathRef.current === path) setSavedContent(submittedContent)
+      await saveWorkspaceFile({
+        path,
+        content: submittedContent,
+        confirmPromptSave: requestPromptSaveConfirmation,
+        persist: async (targetPath, targetContent) => {
+          if (isCharacterProfilePath(targetPath)) {
+            const original = openedDocumentsRef.current.find(document => document.path === targetPath)?.savedContent ?? savedContent
+            const before = parseCharacterProfile(original)
+            const after = parseCharacterProfile(targetContent)
+            const operations: CharacterUpdate["operations"] = [
+              ...Object.entries(after.fields).filter(([field, value]) => JSON.stringify(before.fields[field]) !== JSON.stringify(value))
+                .map(([field, value]) => ({ op: "set" as const, field, value })),
+              ...Object.keys(before.fields).filter(field => !Object.hasOwn(after.fields, field)).map(field => ({ op: "delete" as const, field })),
+            ]
+            if (operations.length > 0) await invokeBackend("workspace.character.update", {
+              projectId: project.projectId, workspaceRootRef: project.workspaceRootRef, relativePath: targetPath,
+              mode: "update", expectedContent: original, operations,
+            })
+          } else {
+            await invokeBackend("workspace.save", {
+              projectId: project.projectId,
+              workspaceRootRef: project.workspaceRootRef,
+              relativePath: targetPath,
+              content: targetContent,
+            })
+          }
+          if (documentProjectRef.current !== project.projectId) return
+          replaceOpenedDocuments(saveEditorDocument(openedDocumentsRef.current, targetPath, targetContent))
+          if (selectedPathRef.current === targetPath) setSavedContent(targetContent)
+        },
+      })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -3263,6 +3290,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     setProgressReviewOpen(false)
     setPendingReviewCount(0)
     setPendingGraphLoad(undefined)
+    promptSaveConfirmationRef.current?.(false)
+    promptSaveConfirmationRef.current = undefined
+    setPromptSaveRequest(undefined)
     useWorkbenchStore.getState().closeAllDialogs()
     setProjectSettings(undefined)
     setHistory(undefined)
@@ -3336,13 +3366,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     </>
   }
 
-  const sharedRuleSelected = selectedPath?.startsWith("表现输出/描写规则/") === true
-    || selectedPath?.startsWith("表现输出/笔风规则/") === true
+  const sharedRuleSelected = selectedPath !== undefined && isSharedPresentationRulePath(selectedPath)
   const documentRoot = sharedRuleSelected
     ? report.sharedPresentationRoot ?? project.workspaceRootRef
     : project.workspaceRootRef
-  const readOnly = selectedPath?.startsWith("世界推演规则/基础规则/") === true
-    || (selectedPath?.startsWith("章节正文/") === true && !isChapterPlanningMarkdownPath(selectedPath))
+  const readOnly = isWorkspaceDocumentReadOnly(selectedPath)
   const dirty = content !== savedContent
   const selectedChapterKind = selectedPath === undefined
     ? undefined
@@ -3477,6 +3505,13 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           onCancel={() => { setWorkspaceCreatePrompt(undefined) }}
           onConfirm={(name) => { void confirmWorkspaceCreate(name) }}
         />}
+    {promptSaveRequest === undefined
+      ? null
+      : <PromptSaveConfirmDialog
+          path={promptSaveRequest.path}
+          onConfirm={() => { settlePromptSaveConfirmation(true) }}
+          onCancel={() => { settlePromptSaveConfirmation(false) }}
+        />}
     {postCommitNotice === undefined ? null : <div className="post-commit-notice" role="status">
       <span>{postCommitNotice}</span>
       <div>
@@ -3549,6 +3584,10 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           onCreateMarkdown={(destination) => { createWorkspaceMarkdown(destination) }}
           onCreateDirectory={(parentPath) => { createWorkspaceDirectory(parentPath) }}
           onDeletePath={(path) => { void deleteWorkspaceMarkdown(path) }}
+          resolveAbsolutePath={(path) => resolveWorkspaceAbsolutePath(path, {
+            workspaceRootRef: project.workspaceRootRef,
+            sharedPresentationRoot: report.sharedPresentationRoot,
+          })}
         />
       </Panel>
       <PanelResizeHandle className="resize-handle"><PanelLeftClose size={12} /></PanelResizeHandle>

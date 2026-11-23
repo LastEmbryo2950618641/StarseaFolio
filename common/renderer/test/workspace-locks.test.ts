@@ -19,14 +19,14 @@ describe("workspace locks", () => {
     expect(canCreateMarkdownInDirectory("设定集/人物")).toBe(true)
     expect(canCreateMarkdownInDirectory("设定集/人物/子目录")).toBe(false)
     expect(resolveCreateDestination("设定集/人物/林照.json")).toBe("设定集/人物")
-    expect(resolveWorkspaceLockKind("世界推演规则/人物设定.md")).toBe("platform_readonly")
+    expect(resolveWorkspaceLockKind("世界推演规则/人物设定.md")).toBe("immutable_scaffold")
     expect(canDeleteWorkspacePath("设定集/人物/林照.json")).toBe(true)
   })
   it("locks platform rules and scaffolding without treating every top-level folder as read-only", () => {
     expect(resolveWorkspaceLockKind("设定集")).toBe("immutable_scaffold")
     expect(resolveWorkspaceLockKind("设定集/readme.md")).toBe("immutable_scaffold")
     expect(resolveWorkspaceLockKind("设定集/人物/顾青衡.md")).toBeUndefined()
-    expect(resolveWorkspaceLockKind("世界推演规则/基础规则/base-rules.md")).toBe("platform_readonly")
+    expect(resolveWorkspaceLockKind("世界推演规则/基础规则/base-rules.md")).toBe("immutable_scaffold")
     expect(resolveWorkspaceLockKind("章节正文/第一章 开端.md")).toBe("chapter_workflow")
     expect(resolveWorkspaceLockKind("章节正文/第一章 开端 [剧情梗概].md")).toBeUndefined()
     expect(canDeleteWorkspacePath("设定集/人物/顾青衡.md")).toBe(true)
@@ -43,6 +43,24 @@ describe("workspace locks", () => {
     expect(resolveCreateDestination("设定集/人物/顾青衡.md")).toBe("设定集/人物")
     expect(resolveCreateDestination("世界推演规则/基础规则/base-rules.md")).toBe("设定集")
     expect(resolveCreateDestination("表现输出/笔风规则")).toBe("表现输出/笔风规则")
+  })
+
+  it("treats the prompt library as editable but keeps prompt files from being deleted", () => {
+    expect(resolveWorkspaceLockKind("提示词")).toBeUndefined()
+    expect(resolveWorkspaceLockKind("提示词/系统规则")).toBeUndefined()
+    expect(resolveWorkspaceLockKind("提示词/系统规则/写作基调.md")).toBeUndefined()
+    expect(resolveWorkspaceLockKind("世界推演规则/总览.md")).toBe("immutable_scaffold")
+    expect(resolveWorkspaceLockKind("世界推演规则/基础规则")).toBe("immutable_scaffold")
+    expect(canCreateMarkdownInDirectory("提示词")).toBe(false)
+    expect(canCreateMarkdownInDirectory("提示词/系统规则")).toBe(false)
+    expect(canCreateFolderInDirectory("提示词")).toBe(false)
+    expect(canCreateFolderInDirectory("提示词/运行时提示")).toBe(false)
+    expect(canCreateMarkdownInDirectory("世界推演规则/基础规则")).toBe(false)
+    expect(canDeleteWorkspacePath("提示词/系统规则/写作基调.md")).toBe(false)
+    expect(canDeleteWorkspacePath("世界推演规则/基础规则/base-rules.md")).toBe(false)
+    expect(canDeleteWorkspacePath("世界推演规则/总览.md")).toBe(false)
+    expect(resolveCreateDestination("提示词/系统规则/写作基调.md")).toBe("设定集")
+    expect(resolveCreateDestination("提示词")).toBe("设定集")
   })
 
   it("allows markdown but not nested folders under 本作品描写", () => {
@@ -84,6 +102,42 @@ describe("workspace locks", () => {
     expect(html).not.toContain('aria-label="在 笔风规则 下新建 Markdown"')
     // Collapsed platform-rules folder: no nested lock badge rendered, and no top-level "只读".
     expect(html).not.toContain("只读</span>")
+  })
+
+  it("renders prompt files with a prompt badge instead of the platform read-only lock", () => {
+    const html = renderToStaticMarkup(React.createElement(WorkspaceTree, {
+      entries: [
+        { path: "世界推演规则", kind: "directory" },
+        { path: "世界推演规则/基础规则", kind: "directory" },
+        { path: "世界推演规则/基础规则/base-rules.md", kind: "file" },
+        { path: "提示词", kind: "directory" },
+        { path: "提示词/系统规则", kind: "directory" },
+        { path: "提示词/系统规则/写作基调.md", kind: "file" },
+      ],
+      selectedPath: "提示词/系统规则/写作基调.md",
+      onSelect: () => {},
+      onSelectLineage: () => {},
+      onRefresh: () => {},
+      onCreateMarkdown: () => {},
+      onCreateDirectory: () => {},
+      onDeletePath: () => {},
+    }))
+    expect(html).not.toContain("平台只读")
+    expect(html).not.toContain("tree-row-lock")
+    expect(html).toContain('aria-label="写作基调.md（提示词）"')
+    expect(html).not.toContain('aria-label="在 系统规则 下新建 Markdown"')
+    expect(html).not.toContain('aria-label="在 提示词 下新建文件夹"')
+    expect(html).not.toContain('aria-label="删除 写作基调.md"')
+  })
+
+  it("orders 提示词 right after 世界推演规则", () => {
+    const tree = buildTree([
+      { path: "设定集", kind: "directory" },
+      { path: "提示词", kind: "directory" },
+      { path: "世界推演规则", kind: "directory" },
+    ])
+    expect(tree.filter((node) => node.kind === "directory").map((node) => node.path))
+      .toEqual(["世界推演规则", "提示词", "设定集"])
   })
 
   it("assembles nested inventory even when parents are missing from the list", () => {

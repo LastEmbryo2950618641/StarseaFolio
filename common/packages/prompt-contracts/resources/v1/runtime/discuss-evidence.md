@@ -34,3 +34,96 @@ Agent 须：在回复中直接向用户说明本机路径读取失败及原因�
 
 说明：此结果只描述本次检索或页面读取，不代表网上没有资料，也不能据此编造原作事实。请复用已有正文证据；
 403/验证页应换来源，不要反复读取同一受限网址；超时或连接失败可换来源；关键词不匹配可换人物完整名或原文名。
+
+## web-page-evidence
+
+# 联网页面正文证据
+- 来源：{{title}} {{url}}
+{{notice}}
+{{excerpt}}
+
+## web-search-hit-evidence
+
+# 联网检索结果
+
+- 查询：{{query}}
+- 标题：{{title}}
+- URL：{{url}}
+
+## web-search-hit-snippet
+
+- 摘要：{{snippet}}
+
+## web-disabled-evidence
+
+# 联网检索未执行
+
+- 查询：{{query}}
+- 原因：项目设置已关闭联网检索（retrieval.webResearchEnabled=false）
+
+{{notice}}
+
+## web-diagnostic-evidence
+
+# 联网检索未成功
+
+- 查询：{{query}}
+- 状态：{{summary}}
+
+各来源明细：
+
+## web-diagnostic-no-attempts
+
+- （无搜索引擎明细）
+
+## web-attempt-ok
+
+{{provider}}：{{hitCount}} 条{{detail}}
+
+## web-attempt-empty
+
+{{provider}}：无结果
+
+## web-attempt-error
+
+{{provider}}：失败{{detail}}
+
+## web-failure-no-response
+
+未找到可用公开资料（无搜索引擎响应）
+
+## web-failure-all-errors
+
+联网检索失败：{{details}}
+
+## web-failure-no-matches
+
+未找到可用公开资料（各搜索引擎均无匹配结果）
+
+## web-failure-partial
+
+部分搜索引擎失败：{{details}}；其余来源无匹配结果
+
+## web-failure-none
+
+未找到可用公开资料
+
+## web-port-missing
+
+本地资料未覆盖问题，且联网检索端口未配置
+
+## web-page-excerpt-unmatched
+
+正文未命中该页面对应的问题；标题或搜索摘要不作为正文证据
+
+## web-reference-save-failed
+
+网页已读取，但本地知识资料保存失败：{{reason}}
+
+## web-search-exception
+
+联网检索异常：{{reason}}
+
+## web-page-empty
+
+页面没有返回可读正文

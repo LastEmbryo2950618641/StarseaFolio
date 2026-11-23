@@ -25,6 +25,7 @@ import {
   readChapterBody,
 } from "../../core/index.js"
 import { buildSourceUnitExactKeys } from "../retrieval/index.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 import type { AIModelPort, PromptResourcePort } from "../turns/ports/ai-model-port.js"
 import { revisionReviewArtifactSchema } from "@starseafolio/prompt-contracts"
 import type { ProjectIdAllocatorPort } from "../ids/index.js"
@@ -611,7 +612,7 @@ export class ChapterRevisionService {
       remainingBudget: createReviewBudget(input.maxModelCalls ?? 3, deadlineAtMs),
       input: {
         workflow: "revision",
-        userInput: "审核用户编辑后的章节正文，并给出连续性建议。",
+        userInput: renderRuntimePrompt("turn-context", "revision-review-user-input"),
         chapterSequence: revision.chapterSequence ?? 0,
         allowWorkspaceChapterReads: false,
         sourceUnitIds: [],

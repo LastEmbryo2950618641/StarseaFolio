@@ -1,17 +1,21 @@
-/** UI-side lock classification — keep aligned with backend workspace-policy. */
+/**
+ * UI-side lock classification.
+ *
+ * 平台提示词（`提示词/**` 与 `世界推演规则` 镜像）在 UI 里可编辑；保存由
+ * backend 的 prompt-library 路由写入全局库，因此这里不再产出 `platform_readonly`。
+ */
 import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, WORLD_RULES_OVERVIEW_PATH, isCharacterProfilePath } from "@starseafolio/contracts"
 
 import {
   isChapterPlanningMarkdownPath,
   isSynopsisMarkdownPath,
 } from "../editor/synopsis-path.js"
+import { isPromptPath, normalizeWorkspacePath } from "./prompt-paths.js"
 
-export { isSynopsisMarkdownPath }
+export { isSynopsisMarkdownPath, normalizeWorkspacePath }
 
 /** Dropdown「自动」maps to this file; hide it from the selectable list. */
 export const AUTO_DESCRIPTION_RULE_PATH = "表现输出/描写规则/自动.md"
-
-const BASE_RULES_PREFIX = "世界推演规则/基础规则"
 
 /** Fixed scaffold files: content editable, path not deletable. */
 const IMMUTABLE_FILE_PATHS = new Set([
@@ -52,17 +56,7 @@ const IMMUTABLE_DIRECTORY_PATHS = new Set([
   "大纲",
 ])
 
-export type WorkspaceLockKind = "platform_readonly" | "immutable_scaffold" | "chapter_workflow"
-
-export function normalizeWorkspacePath(path: string): string {
-  return path.replaceAll("\\", "/").replace(/^\.\//u, "").replace(/\/+$/u, "")
-}
-
-export function isPlatformLockedPath(path: string): boolean {
-  const normalized = normalizeWorkspacePath(path)
-  return normalized === CHARACTER_RULE_PATH || normalized === WORLD_RULES_OVERVIEW_PATH
-    || normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
-}
+export type WorkspaceLockKind = "immutable_scaffold" | "chapter_workflow"
 
 const VOLUME_FOLDER_PATTERN = /^第(?:\d+|[零一二三四五六七八九十百]+)卷\s+\S.*$/u
 const VOLUME_LABEL_PREFIX = /^第(?:\d+|[零一二三四五六七八九十百]+)卷(?:\s|$)/u
@@ -123,7 +117,6 @@ function parseChineseVolumeNumeral(value: string): number | undefined {
 
 export function resolveWorkspaceLockKind(path: string): WorkspaceLockKind | undefined {
   const normalized = normalizeWorkspacePath(path)
-  if (isPlatformLockedPath(normalized)) return "platform_readonly"
   if (isChapterVolumeContainerPath(normalized)) return undefined
   if (normalized === "章节正文" || (normalized.startsWith("章节正文/") && !isChapterPlanningMarkdownPath(normalized))) {
     return "chapter_workflow"
@@ -136,8 +129,6 @@ export function resolveWorkspaceLockKind(path: string): WorkspaceLockKind | unde
 
 export function lockTooltip(kind: WorkspaceLockKind): string {
   switch (kind) {
-    case "platform_readonly":
-      return "平台只读"
     case "immutable_scaffold":
       return "固定文件，可编辑内容但不可删除"
     case "chapter_workflow":
@@ -175,7 +166,6 @@ function isUnderRoot(path: string, root: string): boolean {
 export function canCreateMarkdownInDirectory(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
   if (normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) return false
-  if (isPlatformLockedPath(normalized)) return false
   if (normalized === "章节正文" || normalized.startsWith("章节正文/")) return false
   return USER_WRITABLE_CREATE_ROOTS.some((root) => isUnderRoot(normalized, root))
 }
@@ -183,7 +173,6 @@ export function canCreateMarkdownInDirectory(path: string): boolean {
 export function canCreateFolderInDirectory(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
   if (normalized === CHARACTER_DIRECTORY || normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) return false
-  if (isPlatformLockedPath(normalized)) return false
   // Volume folders are created directly under 章节正文 with「第N卷 标题」names.
   if (normalized === "章节正文") return true
   return USER_FOLDER_CREATE_ROOTS.some((root) => isUnderRoot(normalized, root) && root !== "章节正文")
@@ -217,7 +206,7 @@ export function findDuplicateVolumeSequence(
 export function resolveCreateDestination(selectedPath: string | undefined): string {
   if (selectedPath === undefined || selectedPath.trim().length === 0) return "设定集"
   const normalized = normalizeWorkspacePath(selectedPath)
-  if (isPlatformLockedPath(normalized) || normalized === "章节正文" || normalized.startsWith("章节正文/")) {
+  if (normalized === "章节正文" || normalized.startsWith("章节正文/")) {
     return "设定集"
   }
   const directory = normalized.endsWith(".md") || isCharacterProfilePath(normalized)
@@ -235,6 +224,8 @@ export function canDeleteWorkspacePath(
   options?: Readonly<{ hasChapterBodies?: boolean }>,
 ): boolean {
   const normalized = normalizeWorkspacePath(path)
+  // Prompt files are global scaffolding; editing is fine, deleting would break the mirror/library.
+  if (isPromptPath(normalized)) return false
   if (isChapterVolumeContainerPath(normalized)) {
     return options?.hasChapterBodies !== true
   }

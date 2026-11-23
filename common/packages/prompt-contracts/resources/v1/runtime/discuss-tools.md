@@ -156,6 +156,10 @@
 
 设定集/人物/人物名.json
 
+## character-update-parameter-mode
+
+create | update
+
 ## character-update-parameter-operations
 
 Array<{op:"set",field:string,value:JSON值}|{op:"delete",field:string}>
@@ -164,17 +168,57 @@ Array<{op:"set",field:string,value:JSON值}|{op:"delete",field:string}>
 
 可选，读取到的原文作基线；若已有并发写入，服务端会重读最新内容后按顺序叠加本次操作
 
+## chapter-workflow-parameter-user-input
+
+string (required)
+
+## chapter-workflow-parameter-heading
+
+string (optional)
+
 ## chapter-workflow-parameter-chapter-sequences
 
 number[] (optional；批量时一次产出多章草稿)
+
+## publish-draft-parameter-revision-task-id
+
+string (required)
+
+## publish-draft-parameter-draft-version-id
+
+string (required)
+
+## restage-chapter-parameter-target-stage
+
+"synopsis" | "outline" (required)
+
+## restage-chapter-parameter-reason
+
+string (required)
+
+## bash-parameter-command
+
+string (required)
 
 ## bash-parameter-cwd
 
 string (optional, default=工作区根)
 
+## bash-parameter-timeout-ms
+
+number (optional, default 30000, max 120000)
+
+## todo-write-parameter-todos
+
+Array<{ id: string, content: string, status: "pending"|"in_progress"|"completed"|"cancelled" }> (required)
+
 ## todo-write-parameter-merge
 
 boolean (optional, default false；true=按 id 合并更新，false=整表替换)
+
+## memory-write-parameter-target
+
+"index" | "topic" (required)
 
 ## memory-write-parameter-markdown
 

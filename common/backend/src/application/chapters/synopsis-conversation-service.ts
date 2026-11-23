@@ -3202,12 +3202,7 @@ export class SynopsisConversationService {
     }
     await compactOlderHistory()
     const draftGuideHeader = "# 用户要求 + 梗概 + 细纲 → 正文草稿"
-    const draftGuideHostNotice = [
-      "【宿主已注入 outline-to-draft】",
-      "正文草稿指南已在本轮上下文（见同轮「# 用户要求 + 梗概 + 细纲 → 正文草稿」）。",
-      "禁止再调 load_skill(outline-to-draft)；禁止因工具列表无 load_skill 而用英文空转或改走捷径。",
-      "直接按该指南全文走思维链后提交 chapterDraftProposal。",
-    ].join("")
+    const draftGuideHostNotice = renderRuntimePrompt("discuss-repairs", "draft-guide-host-notice")
     const cachedDraftGuides = storedContext.filter((message) => (
       message.kind === "phase_instruction" && message.role === "system"
       && message.content?.startsWith(draftGuideHeader) === true

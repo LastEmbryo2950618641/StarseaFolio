@@ -29,3 +29,24 @@
 
 【同人原作核验·第2层】网络没有提供足够可核对证据。
 按上下文推断原作名，先 action=describe 再 invoke original_work_search；候选唯一且版本吻合时再 invoke original_work_download，传入 bookId、标题和显式 chapterLimit，首次 1–3 章。下载完成后必须 request_read 读取 参考文件/原作资料/ 下的章节正文，索引和搜索/下载回执本身不算正文证据。
+
+## search-summary
+
+nikowenku-archive：匹配 {{total}} 本；请核对书籍 ID、标题、作者和简介，搜索结果不是原文证据。
+
+## download-summary
+
+nikowenku-archive 原文{{state}}；导入 {{count}} 个章节/片段，请 request_read 按需读取原文。
+
+## download-state-cached
+
+缓存已复用
+
+## download-state-downloaded
+
+已下载
+
+## readme-rules
+
+- 已下载全本缓存；只有实际读取的章节才是核实依据，不把整本原文注入模型。
+- 后续可用 startChapter、chapterLimit 分段导入同一本书，已有原文缓存会复用。

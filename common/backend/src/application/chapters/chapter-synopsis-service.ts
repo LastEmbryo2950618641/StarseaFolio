@@ -22,6 +22,7 @@ import {
 } from "../../core/chapters/synopsis-path.js"
 import { runtimeLog } from "../../infrastructure/diagnostics/index.js"
 import { digest } from "../../core/identity/digest.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 export type ChapterSynopsisServiceDependencies = Readonly<{
   synopsis: SqliteChapterSynopsisRepository
@@ -361,12 +362,7 @@ export class ChapterSynopsisService {
       planningHeading: planning.titleLabel,
       planningPaths: candidates.map((entry) => entry.path),
       recommendedTarget: "body",
-      remediation: [
-        "同章正文与梗概/细纲标题不一致；右侧关联栏可能误显示「尚未创建」。",
-        "先用 choices 请用户选择统一到正文或统一到细纲。",
-        "用户确认后输出 titleAlignTarget=body|planning（可辅以 chapterTitle）。",
-        "验收：文件树同章只剩一个折叠入口，关联栏梗概/细纲变为已创建。",
-      ].join(" "),
+      remediation: renderRuntimePrompt("discuss-repairs", "title-alignment-remediation"),
     }
   }
 

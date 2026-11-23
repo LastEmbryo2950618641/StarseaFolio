@@ -8,6 +8,28 @@ const bundledPackageRoot = dirname(dirname(require.resolve("@starseafolio/prompt
 const runtimeDirectory = "resources/v1/runtime"
 const promptFiles = new Map<string, { modifiedAt: number; size: number; sections: Map<string, string> }>()
 
+export type PromptOverrideResolver = Readonly<{
+  runtimePath(file: string): string | undefined
+  resourcePath(resourcePath: string): string | undefined
+}>
+
+let promptOverrideResolver: PromptOverrideResolver | undefined
+
+/** Wire the global prompt library in once at backend startup. */
+export function setPromptOverrideResolver(resolver: PromptOverrideResolver | undefined): void {
+  promptOverrideResolver = resolver
+}
+
+function shouldUseOverride(packageRoot: string): boolean {
+  return promptOverrideResolver !== undefined && packageRoot === defaultPromptRoot()
+}
+
+function resolveMarkdownPath(relativePath: string, packageRoot: string): string {
+  return shouldUseOverride(packageRoot)
+    ? promptOverrideResolver?.resourcePath(relativePath) ?? join(packageRoot, relativePath)
+    : join(packageRoot, relativePath)
+}
+
 function defaultPromptRoot(): string {
   const electronResources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
   const packagedRoot = electronResources === undefined ? undefined : join(electronResources, "prompt-contracts")
@@ -19,7 +41,7 @@ export async function readBundledPromptMarkdown(
   resourcePath: string,
   packageRoot: string = defaultPromptRoot(),
 ): Promise<string> {
-  return (await readFile(join(packageRoot, resourcePath), "utf8")).replaceAll("\r\n", "\n")
+  return (await readFile(resolveMarkdownPath(resourcePath, packageRoot), "utf8")).replaceAll("\r\n", "\n")
 }
 
 /** Resolve a named Markdown section and substitute the current request's values once. */
@@ -30,7 +52,9 @@ export function renderRuntimePrompt(
   packageRoot: string = defaultPromptRoot(),
 ): string {
   if (!/^[a-z][a-z0-9-]*$/u.test(file)) throw new Error(`Invalid runtime prompt name: ${file}`)
-  const path = join(packageRoot, runtimeDirectory, `${file}.md`)
+  const path = shouldUseOverride(packageRoot)
+    ? promptOverrideResolver?.runtimePath(file) ?? join(packageRoot, runtimeDirectory, `${file}.md`)
+    : join(packageRoot, runtimeDirectory, `${file}.md`)
   const { mtimeMs, size } = statSync(path)
   let cached = promptFiles.get(path)
   if (cached?.modifiedAt !== mtimeMs || cached.size !== size) {

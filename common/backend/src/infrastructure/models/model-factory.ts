@@ -12,7 +12,7 @@ import { AnthropicMessagesModelAdapter } from "./anthropic/anthropic-model-adapt
 import { EnvironmentSecretProvider, DeepSeekAiModelAdapter } from "./deepseek/deepseek-model-adapter.js"
 import { FakeAiModelAdapter } from "./fake-ai-model-adapter.js"
 import { UnavailableAiModelAdapter } from "./unavailable-ai-model-adapter.js"
-import { NodePromptResourceAdapter } from "../prompts/index.js"
+import { NodePromptResourceAdapter, type PromptLibraryService } from "../prompts/index.js"
 
 export type DeepSeekModelSelection = Readonly<{
   baseUrl: string
@@ -29,16 +29,30 @@ export type DeepSeekModelSelection = Readonly<{
 
 export function createModelFromEnvironment(
   promptPackageRoot: string,
+  values?: DeepSeekEnvironment,
+): AIModelPort
+export function createModelFromEnvironment(
+  promptPackageRoot: string,
+  promptLibrary: PromptLibraryService,
+  values?: DeepSeekEnvironment,
+): AIModelPort
+export function createModelFromEnvironment(
+  promptPackageRoot: string,
+  promptLibraryOrValues?: PromptLibraryService | DeepSeekEnvironment,
   values: DeepSeekEnvironment = process.env,
 ): AIModelPort {
-  if (values.WORLDSEED_FAKE_MODEL?.trim() === "1") {
+  const promptLibrary = isPromptLibrary(promptLibraryOrValues) ? promptLibraryOrValues : undefined
+  const environment = promptLibrary === undefined && promptLibraryOrValues !== undefined
+    ? promptLibraryOrValues as DeepSeekEnvironment
+    : values
+  if (environment.WORLDSEED_FAKE_MODEL?.trim() === "1") {
     return new FakeAiModelAdapter()
   }
-  const config = deepSeekRuntimeConfigFromEnvironment(values)
+  const config = deepSeekRuntimeConfigFromEnvironment(environment)
   if (config === undefined) return new UnavailableAiModelAdapter()
 
-  const secrets = new EnvironmentSecretProvider(values)
-  const prompts = new NodePromptResourceAdapter(resolve(promptPackageRoot))
+  const secrets = new EnvironmentSecretProvider(environment)
+  const prompts = new NodePromptResourceAdapter(resolve(promptPackageRoot), promptLibrary)
   if (config.apiProtocol === "anthropic_messages") {
     return new AnthropicMessagesModelAdapter(config, secrets, prompts)
   }
@@ -48,6 +62,7 @@ export function createModelFromEnvironment(
 export function createModelFromSelection(
   promptPackageRoot: string,
   selection: DeepSeekModelSelection,
+  promptLibrary: PromptLibraryService | undefined = undefined,
 ): AIModelPort {
   const apiKey = selection.apiKey.trim()
   if (apiKey.length === 0) throw new Error("DeepSeek API key is empty")
@@ -65,9 +80,13 @@ export function createModelFromSelection(
     serviceTier: selection.serviceTier ?? defaultDeepSeekRuntimeConfig.serviceTier,
   })
   const secrets = { getSecret: (reference: string) => Promise.resolve(reference === "turn-api-key" ? apiKey : "") }
-  const prompts = new NodePromptResourceAdapter(resolve(promptPackageRoot))
+  const prompts = new NodePromptResourceAdapter(resolve(promptPackageRoot), promptLibrary)
   if (config.apiProtocol === "anthropic_messages") {
     return new AnthropicMessagesModelAdapter(config, secrets, prompts)
   }
   return new DeepSeekAiModelAdapter(config, secrets, prompts)
+}
+
+function isPromptLibrary(value: PromptLibraryService | DeepSeekEnvironment | undefined): value is PromptLibraryService {
+  return value !== undefined && typeof (value as PromptLibraryService).readOverride === "function"
 }

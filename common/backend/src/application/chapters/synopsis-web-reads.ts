@@ -65,7 +65,12 @@ export async function executeSynopsisWebReads(input: Readonly<{
     }
     const port = input.webResearch
     if (port === undefined) {
-      collected.push(buildDiagnosticEvidence(queryLabel, "本地资料未覆盖问题，且联网检索端口未配置", [], input.createId))
+      collected.push(buildDiagnosticEvidence(
+        queryLabel,
+        renderRuntimePrompt("discuss-evidence", "web-port-missing"),
+        [],
+        input.createId,
+      ))
       continue
     }
 
@@ -130,15 +135,19 @@ export async function executeSynopsisWebReads(input: Readonly<{
             : referenceExcerpt(page.text, candidate.queries)
           if (!referenceCoversQueries(excerpt, [])
             || (candidate.queries.length > 0 && !candidate.queries.some((query) => referenceCoversQueries(excerpt, [query])))) {
-            pageFailures.push({ provider: candidate.url, status: "empty", message: "正文未命中该页面对应的问题；标题或搜索摘要不作为正文证据" })
+            pageFailures.push({
+              provider: candidate.url,
+              status: "empty",
+              message: renderRuntimePrompt("discuss-evidence", "web-page-excerpt-unmatched"),
+            })
             continue
           }
-          const semanticText = [
-            "# 联网页面正文证据",
-            `- 来源：${page.title} ${page.url}`,
-            renderRuntimePrompt("discuss-evidence", "web-page"),
+          const semanticText = renderRuntimePrompt("discuss-evidence", "web-page-evidence", {
+            title: page.title,
+            url: page.url,
+            notice: renderRuntimePrompt("discuss-evidence", "web-page"),
             excerpt,
-          ].join("\n")
+          })
           const item: TurnReadEvidence = {
             readId: input.createId(), visibility: "committed", ownerKind: "web:page", ownerId: page.url,
             exactKeys: [page.url, ...queries], semanticText, digest: digest(semanticText),
@@ -155,7 +164,14 @@ export async function executeSynopsisWebReads(input: Readonly<{
         try {
           await saveOriginalWorkWebReferences({ local: input.localReferences, queries: queries.length > 0 ? queries : explicitUrls, pages: savedPages })
         } catch (error) {
-          collected.push(buildDiagnosticEvidence(queryLabel, `网页已读取，但本地知识资料保存失败：${error instanceof Error ? error.message : String(error)}`, [], input.createId))
+          collected.push(buildDiagnosticEvidence(
+            queryLabel,
+            renderRuntimePrompt("discuss-evidence", "web-reference-save-failed", {
+              reason: error instanceof Error ? error.message : String(error),
+            }),
+            [],
+            input.createId,
+          ))
         }
       }
       for (const { query, hit } of rankedHits.slice(0, maxResults)) {
@@ -191,7 +207,7 @@ export async function executeSynopsisWebReads(input: Readonly<{
       const message = error instanceof Error ? error.message : String(error)
       const diagnostic = buildDiagnosticEvidence(
         queryLabel,
-        `联网检索异常：${message}`,
+        renderRuntimePrompt("discuss-evidence", "web-search-exception", { reason: message }),
         [{ provider: "composite", status: "error", message }],
         input.createId,
       )
@@ -231,7 +247,7 @@ async function fetchWebPageDetailed(port: WebResearchPort, url: string): Promise
   if (port.fetchPageDetailed !== undefined) return port.fetchPageDetailed(input)
   const page = await port.fetchPage(input)
   return page === undefined
-    ? { attempts: [{ provider: "HTTP", status: "empty", message: "页面没有返回可读正文" }] }
+    ? { attempts: [{ provider: "HTTP", status: "empty", message: renderRuntimePrompt("discuss-evidence", "web-page-empty") }] }
     : { page, attempts: [] }
 }
 
@@ -313,14 +329,10 @@ function buildDiagnosticEvidence(
 }
 
 function buildDisabledEvidence(query: string, createId: () => string): TurnReadEvidence {
-  const semanticText = [
-    "# 联网检索未执行",
-    "",
-    `- 查询：${query}`,
-    "- 原因：项目设置已关闭联网检索（retrieval.webResearchEnabled=false）",
-    "",
-    renderRuntimePrompt("discuss-evidence", "web-disabled"),
-  ].join("\n")
+  const semanticText = renderRuntimePrompt("discuss-evidence", "web-disabled-evidence", {
+    query,
+    notice: renderRuntimePrompt("discuss-evidence", "web-disabled"),
+  })
   const ownerId = `web:disabled:${query}`
   return {
     readId: createId(),
@@ -335,28 +347,41 @@ function buildDisabledEvidence(query: string, createId: () => string): TurnReadE
 }
 
 function formatFailureSummary(attempts: readonly WebResearchProviderAttempt[]): string {
-  if (attempts.length === 0) return "未找到可用公开资料（无搜索引擎响应）"
+  if (attempts.length === 0) return renderRuntimePrompt("discuss-evidence", "web-failure-no-response")
   const errors = attempts.filter((attempt) => attempt.status === "error")
   if (errors.length === attempts.length) {
-    return `联网检索失败：${errors.map(formatAttempt).join("；")}`
+    return renderRuntimePrompt("discuss-evidence", "web-failure-all-errors", {
+      details: errors.map(formatAttempt).join("；"),
+    })
   }
   const empties = attempts.filter((attempt) => attempt.status === "empty")
   if (empties.length === attempts.length) {
-    return "未找到可用公开资料（各搜索引擎均无匹配结果）"
+    return renderRuntimePrompt("discuss-evidence", "web-failure-no-matches")
   }
   if (errors.length > 0) {
-    return `部分搜索引擎失败：${errors.map(formatAttempt).join("；")}；其余来源无匹配结果`
+    return renderRuntimePrompt("discuss-evidence", "web-failure-partial", {
+      details: errors.map(formatAttempt).join("；"),
+    })
   }
-  return "未找到可用公开资料"
+  return renderRuntimePrompt("discuss-evidence", "web-failure-none")
 }
 
 function formatAttempt(attempt: WebResearchProviderAttempt): string {
   const detail = attempt.message === undefined ? "" : `（${attempt.message}）`
   if (attempt.status === "ok") {
-    return `${attempt.provider}：${String(attempt.hitCount ?? 0)} 条${detail}`
+    return renderRuntimePrompt("discuss-evidence", "web-attempt-ok", {
+      provider: attempt.provider,
+      hitCount: attempt.hitCount ?? 0,
+      detail,
+    })
   }
-  if (attempt.status === "empty") return `${attempt.provider}：无结果`
-  return `${attempt.provider}：失败${detail}`
+  if (attempt.status === "empty") {
+    return renderRuntimePrompt("discuss-evidence", "web-attempt-empty", { provider: attempt.provider })
+  }
+  return renderRuntimePrompt("discuss-evidence", "web-attempt-error", {
+    provider: attempt.provider,
+    detail,
+  })
 }
 
 function formatWebSearchHitEvidence(
@@ -364,15 +389,17 @@ function formatWebSearchHitEvidence(
   hit: Readonly<{ title: string; url: string; snippet: string }>,
 ): string {
   return [
-    "# 联网检索结果",
-    "",
-    `- 查询：${query}`,
-    `- 标题：${hit.title}`,
-    `- URL：${hit.url}`,
-    hit.snippet.length === 0 ? undefined : `- 摘要：${hit.snippet}`,
+    renderRuntimePrompt("discuss-evidence", "web-search-hit-evidence", {
+      query,
+      title: hit.title,
+      url: hit.url,
+    }),
+    ...(hit.snippet.length === 0
+      ? []
+      : [renderRuntimePrompt("discuss-evidence", "web-search-hit-snippet", { snippet: hit.snippet })]),
     "",
     renderRuntimePrompt("discuss-evidence", "web-search-snippet"),
-  ].filter((line): line is string => line !== undefined).join("\n")
+  ].join("\n")
 }
 
 function formatWebDiagnosticEvidence(
@@ -381,15 +408,10 @@ function formatWebDiagnosticEvidence(
   attempts: readonly WebResearchProviderAttempt[],
 ): string {
   const attemptLines = attempts.length === 0
-    ? ["- （无搜索引擎明细）"]
+    ? [renderRuntimePrompt("discuss-evidence", "web-diagnostic-no-attempts")]
     : attempts.map((attempt) => `- ${formatAttempt(attempt)}`)
   return [
-    "# 联网检索未成功",
-    "",
-    `- 查询：${query}`,
-    `- 状态：${summary}`,
-    "",
-    "各来源明细：",
+    renderRuntimePrompt("discuss-evidence", "web-diagnostic-evidence", { query, summary }),
     ...attemptLines,
     "",
     renderRuntimePrompt("discuss-evidence", "web-diagnostic"),

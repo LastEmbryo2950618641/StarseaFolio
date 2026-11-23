@@ -23,6 +23,7 @@ function message(result: Record<string, unknown>, role: "system" | "assistant" =
 
 function setup() {
   const callbacks = {
+    updateCharacter: vi.fn(async () => ({ relativePath: "设定集/人物/示例.json", content: "{}" })),
     executeWorkflowTool: vi.fn(async () => draft),
     publishDraft: vi.fn(async () => ({ ...draft, status: "graph_sync_pending" })),
     restageChapter: vi.fn(async () => ({
@@ -315,6 +316,45 @@ describe("synopsis workflow progressive disclosure", () => {
     visibleMessages.push(message(description, "assistant"))
     expect(await execute(request)).toMatchObject({ code: "describe_required" })
     expect(callbacks.executeWorkflowTool).not.toHaveBeenCalled()
+  })
+
+  it("describes every tool parameter from the shared runtime prompt copy", async () => {
+    const { describeTool } = setup()
+    expect(await describeTool("character_update")).toMatchObject({
+      parameters: { mode: "create | update" },
+    })
+    expect(await describeTool("chapter_workflow")).toMatchObject({
+      parameters: {
+        userInput: "string (required)",
+        heading: "string (optional)",
+      },
+    })
+    expect(await describeTool("publish_draft")).toMatchObject({
+      parameters: {
+        revisionTaskId: "string (required)",
+        draftVersionId: "string (required)",
+      },
+    })
+    expect(await describeTool("restage_chapter")).toMatchObject({
+      parameters: {
+        targetStage: "\"synopsis\" | \"outline\" (required)",
+        reason: "string (required)",
+      },
+    })
+    expect(await describeTool("bash")).toMatchObject({
+      parameters: {
+        command: "string (required)",
+        timeoutMs: "number (optional, default 30000, max 120000)",
+      },
+    })
+    expect(await describeTool("todo_write")).toMatchObject({
+      parameters: {
+        todos: "Array<{ id: string, content: string, status: \"pending\"|\"in_progress\"|\"completed\"|\"cancelled\" }> (required)",
+      },
+    })
+    expect(await describeTool("memory_write")).toMatchObject({
+      parameters: { target: "\"index\" | \"topic\" (required)" },
+    })
   })
 
   it("allows repeated invocations using visible persisted describe evidence and captured model and chapter", async () => {

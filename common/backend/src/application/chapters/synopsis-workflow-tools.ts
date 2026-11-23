@@ -166,47 +166,54 @@ const protocol = "synopsis-tools-v1"
 export const DESCRIBE_REQUIRED_MESSAGE = renderRuntimePrompt("discuss-tools", "describe-required")
 const descriptions = {
   character_update: {
-    parameters: { relativePath: renderRuntimePrompt("discuss-tools", "character-update-parameter-relative-path"), mode: "create | update",
-      operations: renderRuntimePrompt("discuss-tools", "character-update-parameter-operations"), expectedContent: renderRuntimePrompt("discuss-tools", "character-update-parameter-expected-content") },
+    parameters: {
+      relativePath: renderRuntimePrompt("discuss-tools", "character-update-parameter-relative-path"),
+      mode: renderRuntimePrompt("discuss-tools", "character-update-parameter-mode"),
+      operations: renderRuntimePrompt("discuss-tools", "character-update-parameter-operations"),
+      expectedContent: renderRuntimePrompt("discuss-tools", "character-update-parameter-expected-content"),
+    },
     writingGuide: renderRuntimePrompt("discuss-tools", "character-update-guide"),
   },
   chapter_workflow: {
     parameters: {
-      userInput: "string (required)",
-      heading: "string (optional)",
+      userInput: renderRuntimePrompt("discuss-tools", "chapter-workflow-parameter-user-input"),
+      heading: renderRuntimePrompt("discuss-tools", "chapter-workflow-parameter-heading"),
       chapterSequences: renderRuntimePrompt("discuss-tools", "chapter-workflow-parameter-chapter-sequences"),
     },
     writingGuide: renderRuntimePrompt("discuss-tools", "chapter-workflow-guide"),
   },
   publish_draft: {
-    parameters: { revisionTaskId: "string (required)", draftVersionId: "string (required)" },
+    parameters: {
+      revisionTaskId: renderRuntimePrompt("discuss-tools", "publish-draft-parameter-revision-task-id"),
+      draftVersionId: renderRuntimePrompt("discuss-tools", "publish-draft-parameter-draft-version-id"),
+    },
     writingGuide: renderRuntimePrompt("discuss-tools", "publish-draft-guide"),
   },
   restage_chapter: {
     parameters: {
-      targetStage: '"synopsis" | "outline" (required)',
-      reason: "string (required)",
+      targetStage: renderRuntimePrompt("discuss-tools", "restage-chapter-parameter-target-stage"),
+      reason: renderRuntimePrompt("discuss-tools", "restage-chapter-parameter-reason"),
     },
     writingGuide: renderRuntimePrompt("discuss-tools", "restage-chapter-guide"),
   },
   bash: {
     parameters: {
-      command: "string (required)",
+      command: renderRuntimePrompt("discuss-tools", "bash-parameter-command"),
       cwd: renderRuntimePrompt("discuss-tools", "bash-parameter-cwd"),
-      timeoutMs: "number (optional, default 30000, max 120000)",
+      timeoutMs: renderRuntimePrompt("discuss-tools", "bash-parameter-timeout-ms"),
     },
     writingGuide: renderRuntimePrompt("discuss-tools", "bash-guide"),
   },
   todo_write: {
     parameters: {
-      todos: 'Array<{ id: string, content: string, status: "pending"|"in_progress"|"completed"|"cancelled" }> (required)',
+      todos: renderRuntimePrompt("discuss-tools", "todo-write-parameter-todos"),
       merge: renderRuntimePrompt("discuss-tools", "todo-write-parameter-merge"),
     },
     writingGuide: renderRuntimePrompt("discuss-tools", "todo-write-guide"),
   },
   memory_write: {
     parameters: {
-      target: '"index" | "topic" (required)',
+      target: renderRuntimePrompt("discuss-tools", "memory-write-parameter-target"),
       markdown: renderRuntimePrompt("discuss-tools", "memory-write-parameter-markdown"),
       filename: renderRuntimePrompt("discuss-tools", "memory-write-parameter-filename"),
     },

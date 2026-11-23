@@ -72,7 +72,7 @@ describe("Node workspace adapter", () => {
 
     expect(report.issues).toEqual([])
     expect(report.inventory.filter((entry) => !entry.path.includes("/") && entry.kind === "directory"))
-      .toHaveLength(7)
+      .toHaveLength(8)
     expect(await adapter.readMarkdown(workspaceRoot, "世界推演规则/基础规则/base-rules.md"))
       .toBe(defaults.baseRules)
     expect(await adapter.readMarkdown(workspaceRoot, "世界推演规则/基础规则/batch-volume-deduction-plan.md"))

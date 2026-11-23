@@ -61,3 +61,25 @@ Source retrieval still reports missing evidence, so a definitive answer cannot b
 {{notes}}
 
 请据此更新弧大纲/暂存，并建议下一章；不要自动开始正式推演。
+
+## published-outline-note
+
+本章已发布；请对照开推前梗概核对兑现与偏差。
+
+## deduction-goal-constraint
+
+## 推演目标约束（第 {{chapterSequence}} 章）
+
+{{goals}}{{empty}}
+
+## deduction-goal-empty
+
+（本轮无活跃推演目标）
+
+## revision-review-user-input
+
+审核用户编辑后的章节正文，并给出连续性建议。
+
+## handoff-no-outline-note
+
+（无额外大纲备注）

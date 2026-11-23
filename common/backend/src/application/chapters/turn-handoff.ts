@@ -18,7 +18,7 @@ export function buildTurnMonitorPhases(
 
 export function formatTurnHandoffSystemMessage(brief: TurnHandoffBrief): string {
   const notes = brief.outlineNotes.length === 0
-    ? "（无额外大纲备注）"
+    ? renderRuntimePrompt("turn-context", "handoff-no-outline-note")
     : brief.outlineNotes.map((note) => `- ${note}`).join("\n")
   return renderRuntimePrompt("turn-context", "published-handoff", {
     sequence: brief.chapterSequence,

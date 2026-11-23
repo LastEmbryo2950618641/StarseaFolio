@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { CHARACTER_DIRECTORY, isCharacterProfilePath } from "@starseafolio/contracts"
 import { Eye, EyeOff, FilePlus2, Folder, FolderOpen, FolderPlus, History, LockKeyhole, RefreshCw, Trash2 } from "lucide-react"
 
@@ -15,6 +15,9 @@ import {
 } from "./workspace-locks.js"
 import { filterInventoryForSkillView } from "./skill-tree-filter.js"
 import { isChapterBodyMarkdownPath } from "../editor/synopsis-path.js"
+import { WorkspaceTreeContextMenu } from "./WorkspaceTreeContextMenu.js"
+import { workspaceTreeLabel } from "./workspace-tree-labels.js"
+import { isPromptPath } from "./prompt-paths.js"
 
 export const SETTINGS_LINEAGE_VIRTUAL_PATH = "__virtual__/设定沿革"
 
@@ -28,6 +31,7 @@ type Props = Readonly<{
   onCreateMarkdown?: ((destination?: string) => void) | undefined
   onCreateDirectory?: ((parentPath?: string) => void) | undefined
   onDeletePath?: ((path: string) => void) | undefined
+  resolveAbsolutePath?: ((path: string) => string) | undefined
 }>
 
 type TreeNode = {
@@ -57,14 +61,23 @@ export function WorkspaceTree({
   onCreateMarkdown,
   onCreateDirectory,
   onDeletePath,
+  resolveAbsolutePath,
 }: Props): React.JSX.Element {
   const [showSceneCards, setShowSceneCards] = useState(false)
+  const [contextMenu, setContextMenu] = useState<Readonly<{ path: string; x: number; y: number }> | undefined>(undefined)
   const visibleEntries = useMemo(
     () => filterInventoryForSkillView(entries, { showSceneCards }),
     [entries, showSceneCards],
   )
   const tree = useMemo(() => buildTree(visibleEntries), [visibleEntries])
   const expandedBySelection = useMemo(() => ancestorDirectoryPaths(selectedPath), [selectedPath])
+  const closeContextMenu = useCallback((): void => { setContextMenu(undefined) }, [])
+  const openContextMenu = useCallback((event: React.MouseEvent, path: string): void => {
+    if (resolveAbsolutePath === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    setContextMenu({ path, x: event.clientX, y: event.clientY })
+  }, [resolveAbsolutePath])
 
   return <aside className="workspace-tree">
     <div className="workspace-tree-header">
@@ -114,8 +127,17 @@ export function WorkspaceTree({
       onCreateMarkdown={onCreateMarkdown}
       onCreateDirectory={onCreateDirectory}
       onDeletePath={onDeletePath}
+      onRowContextMenu={openContextMenu}
       depth={0}
     />)}</div>
+    {contextMenu !== undefined && resolveAbsolutePath !== undefined
+      ? <WorkspaceTreeContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          absolutePath={resolveAbsolutePath(contextMenu.path)}
+          onClose={closeContextMenu}
+        />
+      : null}
   </aside>
 }
 
@@ -129,6 +151,7 @@ function TreeRow({
   onCreateMarkdown,
   onCreateDirectory,
   onDeletePath,
+  onRowContextMenu,
   depth,
 }: {
   node: TreeNode
@@ -140,10 +163,15 @@ function TreeRow({
   onCreateMarkdown?: ((destination?: string) => void) | undefined
   onCreateDirectory?: ((parentPath?: string) => void) | undefined
   onDeletePath?: ((path: string) => void) | undefined
+  onRowContextMenu: (event: React.MouseEvent, path: string) => void
   depth: number
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(() => expandedBySelection.has(node.path))
   const lockKind = resolveWorkspaceLockKind(node.path)
+  // Prompt files are editable; show a「提示词」badge instead of the scaffold lock.
+  const promptFile = node.kind === "file" && isPromptPath(node.path)
+  const displayName = workspaceTreeLabel(node.path, node.name)
+  const displayNameTitle = displayName === node.name ? undefined : `${displayName}（${node.name}）`
   const selected = node.kind === "file" && !lineageActive && selectedPath === node.path
   const virtualSelected = node.kind === "virtual" && lineageActive
   const hasChapterBodies = node.kind === "directory"
@@ -186,19 +214,26 @@ function TreeRow({
       className={`tree-row tree-row-file ${selected ? "selected" : ""}`}
       style={{ paddingLeft: 8 + depth * 10 }}
       data-tree-path={node.path}
+      onContextMenu={(event) => { onRowContextMenu(event, node.path) }}
     >
       <button
         type="button"
         className="tree-row-main"
-        aria-label={lockKind === undefined ? node.name : `${node.name}（${lockTooltip(lockKind)}）`}
+        aria-label={promptFile
+          ? `${displayName}（提示词）`
+          : lockKind === undefined ? displayName : `${displayName}（${lockTooltip(lockKind)}）`}
         onClick={() => { onSelect(node.path); }}
       >
         <span className="tree-row-icon tree-row-file-dot" aria-hidden="true" />
-        <span className="tree-row-label">{node.name}</span>
+        <span className="tree-row-label" title={displayNameTitle}>{displayName}</span>
       </button>
-      {lockKind === undefined
-        ? null
-        : <LockBadge kind={lockKind} />}
+      {promptFile
+        ? <UiTooltip label="平台提示词，可编辑；保存前会确认写入全局提示词库">
+            <span className="tree-row-virtual-badge">提示词</span>
+          </UiTooltip>
+        : lockKind === undefined
+          ? null
+          : <LockBadge kind={lockKind} />}
       {deletable
         ? <UiTooltip label="删除">
             <button
@@ -218,12 +253,16 @@ function TreeRow({
   }
 
   return <div className="tree-node">
-    <div className="tree-row tree-row-directory" style={{ paddingLeft: 8 + depth * 10 }}>
+    <div
+      className="tree-row tree-row-directory"
+      style={{ paddingLeft: 8 + depth * 10 }}
+      onContextMenu={(event) => { onRowContextMenu(event, node.path) }}
+    >
       <button
         type="button"
         className="tree-row-main"
         aria-expanded={expanded}
-        aria-label={lockKind === "platform_readonly" || lockKind === "chapter_workflow"
+        aria-label={lockKind === "chapter_workflow"
           ? `${node.name}（${lockTooltip(lockKind)}）`
           : node.name}
         onClick={() => { setExpanded((value) => !value); }}
@@ -238,7 +277,7 @@ function TreeRow({
       {node.path === "表现输出/描写规则" || node.path === "表现输出/笔风规则"
         ? <UiTooltip label="所有作品共享，修改会对所有作品生效"><span className="tree-row-virtual-badge">共享</span></UiTooltip>
         : null}
-      {lockKind === "platform_readonly" || lockKind === "chapter_workflow"
+      {lockKind === "chapter_workflow"
         ? <LockBadge kind={lockKind} />
         : null}
       {canCreateFile
@@ -300,6 +339,7 @@ function TreeRow({
       onCreateMarkdown={onCreateMarkdown}
       onCreateDirectory={onCreateDirectory}
       onDeletePath={onDeletePath}
+      onRowContextMenu={onRowContextMenu}
       depth={depth + 1}
     />) : null}
   </div>
@@ -314,7 +354,7 @@ function LockBadge({ kind }: { kind: WorkspaceLockKind }): React.JSX.Element {
 /** Order-independent tree assembly: ensure parent directories exist before linking children. */
 export function buildTree(entries: readonly InventoryEntry[]): TreeNode[] {
   const rootOrder = new Map(
-    ["世界推演规则", "设定集", "设定沿革", "大纲", "暂存区", "参考文件", "表现输出", "章节正文"]
+    ["世界推演规则", "提示词", "设定集", "设定沿革", "大纲", "暂存区", "参考文件", "表现输出", "章节正文"]
       .map((path, index): readonly [string, number] => [path, index]),
   )
   const nodes = new Map<string, TreeNode>()

@@ -11,5 +11,9 @@ export default defineConfig({
       "scripts/**/test/**/*.test.mjs",
     ],
     passWithNoTests: false,
+    // Integration-heavy chapter/turn suites seed a workspace prompt library and
+    // SQLite fixtures; 5s default is too tight on Windows filesystems.
+    testTimeout: 15000,
+    hookTimeout: 15000,
   },
 })

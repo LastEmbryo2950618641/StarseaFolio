@@ -24,6 +24,7 @@ export class NodeWorkspaceCatalogAdapter implements WorkspaceCatalogPort {
     }
 
     const entries = await Promise.all([...report.inventory]
+      .filter((entry) => entry.path !== "提示词" && !entry.path.startsWith("提示词/"))
       .sort((left, right) => left.path.localeCompare(right.path, "zh-CN"))
       .map(async (entry): Promise<WorkspaceCatalogEntry> => {
         if (entry.kind === "directory") {

@@ -20,6 +20,10 @@
 
 检测到标题分叉：正文「{{bodyHeading}}」≠ 规划「{{planningHeading}}」。优先用 choices 征询，用户确认后输出 titleAlignTarget（推荐 {{target}}）。
 
+## title-alignment-remediation
+
+同章正文与梗概/细纲标题不一致；右侧关联栏可能误显示「尚未创建」。 先用 choices 请用户选择统一到正文或统一到细纲。 用户确认后输出 titleAlignTarget=body|planning（可辅以 chapterTitle）。 验收：文件树同章只剩一个折叠入口，关联栏梗概/细纲变为已创建。
+
 ## budget-grace
 
 模型调用轮次较多：请 outcome=continue 直接给出完整 artifact，避免继续 request_read。
@@ -59,6 +63,10 @@
 ## tool-contract
 
 toolRequest 必须单独使用 outcome=continue，不能与 request_read 同回。这一轮没有落盘。
+
+## draft-guide-host-notice
+
+【宿主已注入 outline-to-draft】正文草稿指南已在本轮上下文（见同轮「# 用户要求 + 梗概 + 细纲 → 正文草稿」）。禁止再调 load_skill(outline-to-draft)；禁止因工具列表无 load_skill 而用英文空转或改走捷径。直接按该指南全文走思维链后提交 chapterDraftProposal。
 
 ## draft-guide-for-tool
 

@@ -28,9 +28,13 @@ import {
 import type { LoadedSkillResource, PromptResource, PromptResourcePort } from "../../application/index.js"
 import { digest } from "../../core/index.js"
 import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
+import type { PromptLibraryService } from "./prompt-library.js"
 
 export class NodePromptResourceAdapter implements PromptResourcePort {
-  public constructor(private readonly promptPackageRoot: string) {}
+  public constructor(
+    private readonly promptPackageRoot: string,
+    private readonly promptLibrary?: PromptLibraryService,
+  ) {}
 
   public async loadWorldRulesOverview(): Promise<PromptResource> {
     return this.load(WORLD_RULES_OVERVIEW_RESOURCE)
@@ -161,7 +165,8 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
   }
 
   private async load(resourcePath: string): Promise<PromptResource> {
-    const text = normalizePrompt(await readFile(resolve(this.promptPackageRoot, resourcePath), "utf8"))
+    const override = await this.promptLibrary?.readOverride(resourcePath)
+    const text = normalizePrompt(override ?? await readFile(resolve(this.promptPackageRoot, resourcePath), "utf8"))
     return {
       ref: `${PROMPT_CONTRACT_VERSION}:${resourcePath}`,
       version: PROMPT_CONTRACT_VERSION,

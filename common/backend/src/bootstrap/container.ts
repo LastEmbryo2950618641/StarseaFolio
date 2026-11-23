@@ -12,13 +12,14 @@ import {
 import type { InternalProjectStore, ProjectRepositoryFactory, WorkspaceDefaultDocuments, WorkspacePort } from "../application/workspace/index.js"
 import type { RegisteredProject } from "../application/projects/index.js"
 import { NodeInternalStoreAdapter, NodeWorkspaceAdapter } from "../infrastructure/filesystem/index.js"
+import { NodePromptResourceAdapter, PromptLibraryService } from "../infrastructure/prompts/index.js"
+import { setPromptOverrideResolver } from "../core/runtime-prompt.js"
 import {
   createModelFromEnvironment,
   createModelFromSelection,
   DeepSeekModelCatalogAdapter,
   type DeepSeekModelSelection,
 } from "../infrastructure/models/index.js"
-import { NodePromptResourceAdapter } from "../infrastructure/prompts/index.js"
 import {
   SqliteProjectRegistryRepository,
   SqliteModelProfileStore,
@@ -59,6 +60,8 @@ export class BackendContainer {
   private readonly applicationDataRoot: string
   private readonly nikowenkuRuntimeDirectory: string | undefined
   private readonly workspaceDefaults: WorkspaceDefaultDocuments | undefined
+  private readonly promptLibrary: PromptLibraryService
+  private cachedDefaults: Readonly<{ revision: number; defaults: WorkspaceDefaultDocuments }> | undefined
   private currentRuntime: ProjectRuntime | undefined
 
   private constructor(
@@ -73,15 +76,24 @@ export class BackendContainer {
     this.workspace = new NodeWorkspaceAdapter(this.sharedPresentation.root)
     this.internalStore = new NodeInternalStoreAdapter(options.applicationDataRoot)
     this.applicationDataRoot = resolve(options.applicationDataRoot)
+    this.promptPackageRoot = resolve(options.promptPackageRoot)
+    this.promptLibrary = new PromptLibraryService(
+      this.promptPackageRoot,
+      join(this.applicationDataRoot, "prompt-library"),
+    )
+    setPromptOverrideResolver({
+      runtimePath: (file) => this.promptLibrary.runtimeOverridePath(file),
+      resourcePath: (path) => this.promptLibrary.resourceOverridePath(path),
+    })
     this.nikowenkuRuntimeDirectory = options.nikowenkuRuntimeDirectory
     this.model = options.model ?? createModelFromEnvironment(
-      options.promptPackageRoot,
+      this.promptPackageRoot,
+      this.promptLibrary,
     )
     this.modelCatalog = options.modelCatalog ?? new DeepSeekModelCatalogAdapter()
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? Date.now
     this.modelProfiles = options.modelProfiles ?? new SqliteModelProfileStore(this.registryDatabase, this.now)
-    this.promptPackageRoot = resolve(options.promptPackageRoot)
     this.workspaceDefaults = options.workspaceDefaults
     this.projectRepositoryFactory = new SqliteProjectRepositoryFactory()
     this.lifecycle = new ProjectLifecycleService(
@@ -182,7 +194,7 @@ export class BackendContainer {
   }
 
   public createModelFromSelection(selection: DeepSeekModelSelection): AIModelPort {
-    return createModelFromSelection(this.promptPackageRoot, selection)
+    return createModelFromSelection(this.promptPackageRoot, selection, this.promptLibrary)
   }
 
   public async close(): Promise<void> {
@@ -205,6 +217,7 @@ export class BackendContainer {
       this.workspace,
       this.applicationDataRoot,
       this.nikowenkuRuntimeDirectory,
+      this.promptLibrary,
     )
     await this.currentRuntime.ensureSettingsLineageSeeded()
     await this.currentRuntime.rematerializeMissingPublishedBodies()
@@ -212,7 +225,11 @@ export class BackendContainer {
 
   private async resolveWorkspaceDefaults(): Promise<WorkspaceDefaultDocuments> {
     if (this.workspaceDefaults !== undefined) return this.workspaceDefaults
-    const prompts = new NodePromptResourceAdapter(this.promptPackageRoot)
+    await this.promptLibrary.ensureSeeded()
+    if (this.cachedDefaults?.revision === this.promptLibrary.currentRevision) {
+      return this.cachedDefaults.defaults
+    }
+    const prompts = new NodePromptResourceAdapter(this.promptPackageRoot, this.promptLibrary)
     const [
       worldRulesOverview,
       baseRules,
@@ -262,7 +279,7 @@ export class BackendContainer {
       readSeed("staging-world"),
       readSeed("staging-promotion"),
     ])
-    return {
+    const defaults: WorkspaceDefaultDocuments = {
       worldRulesOverview: worldRulesOverview.text,
       baseRules: baseRules.text,
       contentHandling: contentHandling.text,
@@ -284,6 +301,9 @@ export class BackendContainer {
       stagingCharacters,
       stagingWorld,
       stagingPromoteIndex,
+      promptLibraryFiles: await this.promptLibrary.buildWorkspaceMirrorFiles(),
     }
+    this.cachedDefaults = { revision: this.promptLibrary.currentRevision, defaults }
+    return defaults
   }
 }

@@ -7,6 +7,11 @@ import type {
 } from "../../../core/index.js"
 import type { ProjectRepository } from "../../projects/index.js"
 
+export type PromptWorkspaceFile = Readonly<{
+  relativePath: string
+  markdown: string
+}>
+
 export type WorkspaceDefaultDocuments = Readonly<{
   worldRulesOverview: string
   baseRules: string
@@ -29,6 +34,8 @@ export type WorkspaceDefaultDocuments = Readonly<{
   stagingCharacters: string
   stagingWorld: string
   stagingPromoteIndex: string
+  /** Global prompt library mirrors (`提示词/` + platform rule projections). */
+  promptLibraryFiles?: readonly PromptWorkspaceFile[] | undefined
 }>
 
 export type WorkspaceValidationReport = Readonly<{
@@ -52,6 +59,8 @@ export interface WorkspacePort {
   /** Character files can only be written through field operations. */
   updateCharacter?(workspaceRootRef: string, update: CharacterUpdate): Promise<string>
   saveUserMarkdown(workspaceRootRef: string, relativePath: string, content: string): Promise<void>
+  /** Write a platform-owned prompt mirror, bypassing user read-only rules. */
+  savePromptMirror?(workspaceRootRef: string, relativePath: string, content: string): Promise<void>
   createUserDirectory(workspaceRootRef: string, relativePath: string): Promise<void>
   removeUserMarkdown(workspaceRootRef: string, relativePath: string): Promise<void>
   /** Delete a volume directory under「章节正文/」when it has no formal chapter bodies. */

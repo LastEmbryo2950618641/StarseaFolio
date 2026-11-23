@@ -2727,7 +2727,7 @@ export class TurnOrchestrator {
                 chapterHeading: current.chapterHeading,
                 bodyDigest: truncateChapterBodyDigest(body),
                 outlineNotes: [
-                  "本章已发布；请对照开推前梗概核对兑现与偏差。",
+                  renderRuntimePrompt("turn-context", "published-outline-note"),
                 ],
                 createdAtMs: this.dependencies.now(),
               },
@@ -5799,27 +5799,28 @@ function formatWebSearchHitEvidence(
   hit: Readonly<{ title: string; url: string; snippet: string }>,
 ): string {
   return [
-    `# 联网检索结果`,
-    ``,
-    `- 查询：${query}`,
-    `- 标题：${hit.title}`,
-    `- URL：${hit.url}`,
-    hit.snippet.length === 0 ? undefined : `- 摘要：${hit.snippet}`,
-    ``,
-    `说明：这是公开互联网资料，仅作背景参考，不能覆盖已提交世界图中的当前状态，也不能直接当作作品内已发生事实。`,
-  ].filter((line): line is string => line !== undefined).join("\n")
+    renderRuntimePrompt("evidence-format", "web-search-hit", {
+      query,
+      title: hit.title,
+      url: hit.url,
+    }),
+    ...(hit.snippet.length === 0
+      ? []
+      : [renderRuntimePrompt("evidence-format", "web-search-hit-snippet", { snippet: hit.snippet })]),
+    "",
+    renderRuntimePrompt("evidence-format", "web-disclaimer"),
+  ].join("\n")
 }
 
 function formatWebPageEvidence(page: Readonly<{ title: string; url: string; text: string }>): string {
   return [
-    `# 联网页面摘录`,
-    ``,
-    `- 标题：${page.title}`,
-    `- URL：${page.url}`,
-    ``,
-    page.text,
-    ``,
-    `说明：这是公开互联网资料，仅作背景参考，不能覆盖已提交世界图中的当前状态，也不能直接当作作品内已发生事实。`,
+    renderRuntimePrompt("evidence-format", "web-page", {
+      title: page.title,
+      url: page.url,
+      text: page.text,
+    }),
+    "",
+    renderRuntimePrompt("evidence-format", "web-disclaimer"),
   ].join("\n")
 }
 
@@ -6834,15 +6835,16 @@ function formatDeductionGoalConstraintMarkdown(bundle: TurnDeductionGoalBundle):
   const progressByGoal = new Map(
     bundle.chapterProgress.map((item) => [item.goalId, item] as const),
   )
-  const lines = bundle.activeGoals.map((goal) => {
+  const goals = bundle.activeGoals.map((goal) => {
     const progress = progressByGoal.get(goal.goalId)
     const expectation = progress === undefined || progress.summary.trim().length === 0
       ? "（未填写本章 planned）"
       : `${progress.summary}${progress.lockedAtMs === undefined ? "" : "（locked）"}`
     return `- ${formatDeductionGoalTaxonomyPrefix(goal)}${goal.content} — 本章预期：${expectation}`
+  }).join("\n")
+  return renderRuntimePrompt("turn-context", "deduction-goal-constraint", {
+    chapterSequence: bundle.chapterSequence,
+    goals,
+    empty: goals.length === 0 ? renderRuntimePrompt("turn-context", "deduction-goal-empty") : "",
   })
-  if (lines.length === 0) {
-    return `## 推演目标约束（第 ${String(bundle.chapterSequence)} 章）\n\n（本轮无活跃推演目标）`
-  }
-  return `## 推演目标约束（第 ${String(bundle.chapterSequence)} 章）\n\n${lines.join("\n")}`
 }

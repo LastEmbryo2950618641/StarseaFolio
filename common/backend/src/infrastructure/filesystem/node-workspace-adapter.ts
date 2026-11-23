@@ -198,9 +198,11 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
       encoding: "utf8",
       flag: "wx",
     })
+    await Promise.all((defaults.promptLibraryFiles ?? []).map((file) => (
+      ensurePromptFile(root, file.relativePath, file.markdown)
+    )))
     return this.validate(root)
   }
-
   public async ensurePlatformDocuments(
     workspaceRootRef: string,
     defaults: WorkspaceDefaultDocuments,
@@ -251,6 +253,10 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     await writeFileIfMissing(resolveInside(root, "暂存区/人物草稿.md"), defaults.stagingCharacters)
     await writeFileIfMissing(resolveInside(root, "暂存区/世界与规则草稿.md"), defaults.stagingWorld)
     await writeFileIfMissing(resolveInside(root, "暂存区/待落盘清单.md"), defaults.stagingPromoteIndex)
+    await mkdir(resolveInside(root, "提示词"), { recursive: true })
+    await Promise.all((defaults.promptLibraryFiles ?? []).map((file) => (
+      refreshPromptFile(root, file.relativePath, file.markdown)
+    )))
     await migrateLegacyWorldPlanFolder(root)
   }
 
@@ -308,6 +314,16 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     if (normalized === "设定集/作品简介.md" && content.replace(/^\s*#\s*作品简介\s*/u, "").trim().length > 300) {
       throw new Error("作品简介不能超过 300 字")
     }
+    const path = resolveInside(root, normalized)
+    await assertParentChainContainsNoLinks(root, path)
+    await mkdir(resolve(path, ".."), { recursive: true })
+    await writeFile(path, content, { encoding: "utf8" })
+  }
+
+  /** Platform-owned prompt mirror: bypass user read-only rules, still validate path shape. */
+  public async savePromptMirror(workspaceRootRef: string, relativePath: string, content: string): Promise<void> {
+    const normalized = assertWorkspaceMutationAllowed(relativePath, "file", "platform")
+    const root = await realpath(resolve(workspaceRootRef))
     const path = resolveInside(root, normalized)
     await assertParentChainContainsNoLinks(root, path)
     await mkdir(resolve(path, ".."), { recursive: true })
@@ -712,6 +728,19 @@ async function writeFileIfMissing(path: string, content: string): Promise<void> 
   } catch (error) {
     if (!isAlreadyExistsError(error)) throw error
   }
+}
+
+async function ensurePromptFile(root: string, relativePath: string, markdown: string): Promise<void> {
+  const path = resolveInside(root, relativePath)
+  await assertParentChainContainsNoLinks(root, path)
+  await mkdir(resolve(path, ".."), { recursive: true })
+  await writeFileIfMissing(path, markdown)
+}
+
+async function refreshPromptFile(root: string, relativePath: string, markdown: string): Promise<void> {
+  const path = resolveInside(root, relativePath)
+  await mkdir(resolve(path, ".."), { recursive: true })
+  await refreshPlatformRule(root, relativePath, markdown)
 }
 
 async function refreshPlatformRule(root: string, relativePath: string, markdown: string): Promise<void> {

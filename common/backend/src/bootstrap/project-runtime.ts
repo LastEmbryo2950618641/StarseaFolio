@@ -49,6 +49,7 @@ import {
   extractWorkStyleSelectionFromMarkdown,
 } from "../core/workspace/work-style-gate-state.js"
 import { isWorkStyleComplete } from "../core/workspace/work-style-gate.js"
+import { setPromptOverrideResolver } from "../core/runtime-prompt.js"
 import {
   incrementVolumePlanningWriteCount,
   parseVolumePlanningState,
@@ -82,7 +83,7 @@ import {
   openProjectDatabase,
 } from "../infrastructure/sqlite/index.js"
 import type { StoredPhaseRun, StoredTask, TaskCheckpointRecord, TurnFinalizationRecord } from "../application/turns/ports/index.js"
-import { NodePromptResourceAdapter } from "../infrastructure/prompts/index.js"
+import { NodePromptResourceAdapter, PromptLibraryService } from "../infrastructure/prompts/index.js"
 import { createDefaultWebResearchPort } from "../infrastructure/web-research/index.js"
 import { buildTurnMonitorPhases } from "../application/chapters/turn-handoff.js"
 import type { Kysely } from "kysely"
@@ -693,10 +694,15 @@ export class ProjectRuntime {
     private readonly internalStorePort: InternalStorePort,
     private readonly promptPackageRoot: string,
     applicationDataRoot: string,
+    private readonly promptLibrary: PromptLibraryService,
     nikowenkuRuntimeDirectory?: string,
   ) {
     this.nikowenku = new NikowenkuReferenceService(applicationDataRoot, {
       ...(nikowenkuRuntimeDirectory === undefined ? {} : { runtimeDirectory: nikowenkuRuntimeDirectory }),
+    })
+    setPromptOverrideResolver({
+      runtimePath: (file) => this.promptLibrary.runtimeOverridePath(file),
+      resourcePath: (path) => this.promptLibrary.resourceOverridePath(path),
     })
   }
 
@@ -713,6 +719,7 @@ export class ProjectRuntime {
     workspace: WorkspacePort = new NodeWorkspaceAdapter(),
     applicationDataRoot = resolve(internalStore.projectDatabaseRef, "..", "..", ".."),
     nikowenkuRuntimeDirectory?: string,
+    promptLibrary?: PromptLibraryService,
   ): Promise<ProjectRuntime> {
     const database = await openProjectDatabase(internalStore.projectDatabaseRef)
     const runtime = new ProjectRuntime(
@@ -724,6 +731,7 @@ export class ProjectRuntime {
       internalStorePort,
       promptPackageRoot,
       applicationDataRoot,
+      promptLibrary ?? new PromptLibraryService(promptPackageRoot, resolve(applicationDataRoot, "prompt-library")),
       nikowenkuRuntimeDirectory,
     )
     await runtime.ensureCommittedSourceUnitIndexes()
@@ -1121,6 +1129,20 @@ export class ProjectRuntime {
   }
 
   public async saveMarkdown(relativePath: string, content: string): Promise<void> {
+    const promptTarget = this.promptLibrary.resolveWorkspacePath(relativePath)
+    if (promptTarget !== undefined) {
+      const saveMirror = this.workspace.savePromptMirror
+      if (saveMirror === undefined) throw new Error("Workspace does not support prompt mirror writes")
+      await this.promptLibrary.write(promptTarget.entry.libraryPath, content)
+      for (const mirrorPath of promptTarget.workspacePaths) {
+        await saveMirror.call(this.workspace, this.workspaceRootRef, mirrorPath, content)
+      }
+      return
+    }
+    const normalizedPromptPath = relativePath.replaceAll("\\", "/").replace(/^\.\//u, "")
+    if (normalizedPromptPath === "提示词" || normalizedPromptPath.startsWith("提示词/")) {
+      throw new Error("提示词库只允许编辑已登记的平台提示词；新增文件不会进入生成链路")
+    }
     const chapterWrite = resolveChapterWriteContext(relativePath)
     if (chapterWrite !== undefined) {
       await this.assertVolumePlanningGateReady(chapterWrite.chapterSequence, chapterWrite.volumeFolderName)
@@ -1714,7 +1736,7 @@ export class ProjectRuntime {
   }
 
   private createPromptResourcePort(): PromptResourcePort {
-    return new NodePromptResourceAdapter(this.promptPackageRoot)
+    return new NodePromptResourceAdapter(this.promptPackageRoot, this.promptLibrary)
   }
 
   private createHistoryRepository(): SqliteHistoryRepository {

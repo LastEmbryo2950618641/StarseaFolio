@@ -45,8 +45,15 @@ export type WorkspaceLockKind = "platform_readonly" | "immutable_scaffold" | "ch
 export class WorkspacePolicyError extends Error {}
 
 const BASE_RULES_PREFIX = "世界推演规则/基础规则"
+const PROMPT_LIBRARY_ROOT = "提示词"
 const BOOK_COVER_PATH_PATTERN = /^\.worldseed\/cover\.(?:png|jpg|jpeg|webp|gif|bmp)$/iu
 const FOLIO_HOST_ROOT = ".folio"
+
+/** Global prompt library mirrors live under `提示词/` and are editable but not deletable. */
+export function isPromptLibraryPath(path: string): boolean {
+  const normalized = normalizeWorkspacePath(path)
+  return normalized === PROMPT_LIBRARY_ROOT || normalized.startsWith(`${PROMPT_LIBRARY_ROOT}/`)
+}
 
 /** Valid app-owned assets, not writing documents or AI/history evidence. */
 export function isBookCoverInventoryEntry(path: string, kind: WorkspaceInventoryEntry["kind"]): boolean {
@@ -202,6 +209,9 @@ export function assertUserCanEditContent(path: string): string {
 /** User may create a new markdown file at this path. */
 export function assertUserCanCreateMarkdown(path: string): string {
   const normalized = normalizeWorkspacePath(path)
+  if (isPromptLibraryPath(normalized)) {
+    throw new WorkspacePolicyError("提示词库只允许编辑已登记的平台提示词，不能新建文件")
+  }
   if (isPathImmutable(normalized)) {
     throw new WorkspacePolicyError(`不能覆盖固定脚手架文件：${normalized}`)
   }
@@ -211,6 +221,9 @@ export function assertUserCanCreateMarkdown(path: string): string {
 /** User may create a new directory at this path (not a fixed scaffold directory). */
 export function assertUserCanCreateDirectory(path: string): string {
   const normalized = normalizeWorkspacePath(path)
+  if (isPromptLibraryPath(normalized)) {
+    throw new WorkspacePolicyError("提示词库分类由平台维护，不能新建目录")
+  }
   if (isPathImmutable(normalized)) {
     throw new WorkspacePolicyError(`不能创建或覆盖固定脚手架目录：${normalized}`)
   }
@@ -226,6 +239,9 @@ export function assertUserCanCreateDirectory(path: string): string {
  */
 export function assertUserCanDeleteMarkdown(path: string): string {
   const normalized = normalizeWorkspacePath(path)
+  if (isPromptLibraryPath(normalized)) {
+    throw new WorkspacePolicyError("提示词库文件不可删除；可以在原文件中修改内容")
+  }
   if (isPlatformLockedPath(normalized)) {
     throw new WorkspacePolicyError("基础规则为平台只读投影，不能删除")
   }

@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { WorkspacePort } from "../../application/workspace/ports/workspace-port.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 const defaultSite = "https://111.229.32.85/nikowenku-archive/"
 const maxTextBytes = 64 * 1024 * 1024
@@ -46,7 +47,8 @@ export class NikowenkuReferenceService {
     const runtime = await this.runtime(signal)
     const result = await this.run(runtime, ["search", title, "--limit", "20", "--json"], this.directory(workspaceRootRef), signal)
     const parsed = JSON.parse(result.stdout) as { books?: unknown; total?: unknown }
-    if (!Array.isArray(parsed.books) || !Number.isSafeInteger(parsed.total) || Number(parsed.total) < 0 || parsed.books.length > 20) throw new Error("小说书库返回了无效的搜索结果")
+    const total = typeof parsed.total === "number" ? parsed.total : Number.NaN
+    if (!Array.isArray(parsed.books) || !Number.isSafeInteger(total) || total < 0 || parsed.books.length > 20) throw new Error("小说书库返回了无效的搜索结果")
     const candidates = parsed.books.map(bookRecord).map((book): Candidate => ({
       bookId: book.id, title: book.title, url: new URL(`?book=${encodeURIComponent(book.id)}`, this.site).href,
       ...(book.description ? { synopsis: book.description.slice(0, 4000) } : {}),
@@ -60,7 +62,7 @@ export class NikowenkuReferenceService {
     const score = (candidate: Candidate) => candidate.title.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "") === normalized ? 2 : candidate.title.toLocaleLowerCase().includes(title.toLocaleLowerCase()) ? 1 : 0
     candidates.sort((a, b) => score(b) - score(a))
     this.candidates.set(key, new Map(candidates.map(candidate => [candidate.bookId, candidate])))
-    return { title, candidates, candidateUrls: candidates.map(candidate => candidate.url), output: `nikowenku-archive：匹配 ${String(parsed.total)} 本；请核对书籍 ID、标题、作者和简介，搜索结果不是原文证据。` }
+    return { title, candidates, candidateUrls: candidates.map(candidate => candidate.url), output: renderRuntimePrompt("original-work-evidence", "search-summary", { total }) }
   }
 
   public async download(input: Readonly<{ bookId: string; title: string; workspaceRootRef: string; workspace: WorkspacePort; chapterLimit?: number; startChapter?: number; signal?: AbortSignal }>) {
@@ -143,11 +145,23 @@ export class NikowenkuReferenceService {
       `# ${info.title}`, "", `- 书库：nikowenku-archive`, `- 书籍 ID：${info.id}`, `- 作者：${info.author ?? "未标注"}`,
       `- 来源：${candidate.url}`, `- 下载时间：${new Date().toISOString()}`, `- 本地原文：${localTextPath}`,
       `- 原文共 ${String(chapters.length)} 个章节/片段；本次导入 ${String(start)}..${String(start + selected.length - 1)}`,
-      "- 已下载全本缓存；只有实际读取的章节才是核实依据，不把整本原文注入模型。",
-      "- 后续可用 startChapter、chapterLimit 分段导入同一本书，已有原文缓存会复用。", "",
+      renderRuntimePrompt("original-work-evidence", "readme-rules"), "",
       ...imported.map(path => `- [${basename(path, ".md")}](${path.slice(destination.length + 1)})`), "",
     ].join("\n"))
-    return { title: info.title, bookId: info.id, localTextPath, cached, importedFiles: [indexPath, ...imported], output: `nikowenku-archive 原文${cached ? "缓存已复用" : "已下载"}；导入 ${String(selected.length)} 个章节/片段，请 request_read 按需读取原文。` }
+    return {
+      title: info.title,
+      bookId: info.id,
+      localTextPath,
+      cached,
+      importedFiles: [indexPath, ...imported],
+      output: renderRuntimePrompt("original-work-evidence", "download-summary", {
+        state: renderRuntimePrompt(
+          "original-work-evidence",
+          cached ? "download-state-cached" : "download-state-downloaded",
+        ),
+        count: selected.length,
+      }),
+    }
   }
 
   private directory(workspace: string) { return join(this.dataRoot, createHash("sha256").update(resolve(workspace)).digest("hex").slice(0, 20)) }

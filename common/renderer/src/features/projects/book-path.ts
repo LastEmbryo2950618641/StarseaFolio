@@ -6,7 +6,8 @@ export function folderLabelFromPath(path: string): string {
 
 export function joinWorkspacePath(parent: string, child: string): string {
   const separator = parent.includes("\\") ? "\\" : "/"
-  return `${parent.replace(/[\\/]+$/u, "")}${separator}${child.replace(/^[\\/]+/u, "")}`
+  const normalizedChild = child.replaceAll("\\", "/").replace(/^\/+|\/+$/gu, "")
+  return `${parent.replace(/[\\/]+$/u, "")}${separator}${normalizedChild.split("/").join(separator)}`
 }
 
 function normalizePath(path: string): string {

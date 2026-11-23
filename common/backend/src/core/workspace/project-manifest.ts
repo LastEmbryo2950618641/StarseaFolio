@@ -6,6 +6,7 @@ export const PROJECT_MANIFEST_VERSION = 1 as const
 export type WorkspaceEntryRole =
   | "world_rules"
   | "base_rules"
+  | "prompt_library"
   | "user_rules"
   | "agent_memory"
   | "settings"
@@ -43,6 +44,8 @@ export type ProjectManifest = Readonly<{
 export const fixedWorkspaceEntries: readonly FixedWorkspaceEntry[] = Object.freeze([
   { key: "world-rules-overview", role: "base_rules", relativePath: WORLD_RULES_OVERVIEW_PATH, entryKind: "file",
     immutablePath: true, allowedExtensions: [".md"], allowUserFolders: false, allowUserMarkdown: false },
+  { key: "prompt-library", role: "prompt_library", relativePath: "提示词", entryKind: "directory",
+    immutablePath: true, allowedExtensions: [".md"], allowUserFolders: true, allowUserMarkdown: true },
   { key: "characters", role: "settings", relativePath: "设定集/人物", entryKind: "directory",
     immutablePath: true, allowedExtensions: [".json"], allowUserFolders: false, allowUserMarkdown: false },
   { key: "character-guide", role: "world_rules", relativePath: "世界推演规则/人物设定.md", entryKind: "file",
@@ -391,6 +394,7 @@ export const fixedWorkspaceEntries: readonly FixedWorkspaceEntry[] = Object.free
 
 export const fixedTopLevelDirectories = Object.freeze([
   "世界推演规则",
+  "提示词",
   "设定集",
   "参考文件",
   "章节正文",

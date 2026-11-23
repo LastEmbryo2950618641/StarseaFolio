@@ -1,6 +1,6 @@
 import type { AIPhase } from "@starseafolio/contracts"
 
-/** Short index always injected into system_rules (not full skill bodies). */
+/** Short index always injected into system_rules (not full skill bodies). Static Markdown is the single source of truth; no code-side generator. */
 export const SKILL_INDEX_RESOURCE = "resources/v1/skill-index.md" as const
 
 export type SkillInjectPolicy = "always" | "default" | "onDemand"
@@ -227,33 +227,6 @@ export function defaultSkillIdsForPhase(phase: AIPhase | "synopsis_discuss"): re
   return PLATFORM_SKILLS
     .filter((skill) => skill.injectPolicy === "default" && skill.defaultPhases.includes(phase))
     .map((skill) => skill.id)
-}
-
-/** Render the always-on skill index markdown (also shipped as skill-index.md). */
-export function renderSkillIndexMarkdown(skills: readonly SkillDefinition[] = PLATFORM_SKILLS): string {
-  const lines = [
-    "# 平台 Skill 索引（按需加载）",
-    "",
-    "完整 skill 正文**不**常驻系统规则。需要时用工具 `load_skill`（先 describe 再 invoke），或由宿主按阶段默认挂载。",
-    "arguments 示例：`{\"skillId\":\"webnovel-dialogue\",\"includeReferences\":false}`。",
-    "",
-    "| id | 名称 | 策略 | 何时用 |",
-    "|----|------|------|--------|",
-  ]
-  for (const skill of skills) {
-    const policy = skill.injectPolicy === "default"
-      ? `default(${skill.defaultPhases.join(",")})`
-      : skill.injectPolicy
-    lines.push(`| \`${skill.id}\` | ${skill.name} | ${policy} | ${skill.summary} |`)
-  }
-  lines.push(
-    "",
-    "## 描写场面卡（工作区）",
-    "",
-    "Auto 模式只注入 `表现输出/描写规则/自动.md` + 感官/去AI味基线；其他场面卡用 `request_read`（`sourceKinds:[\"rule\"]`）或锁定下拉按需加载。",
-    "",
-  )
-  return `${lines.join("\n")}\n`
 }
 
 export function formatSkillEvidenceHeader(skillId: string, includeReferences: boolean): string {
