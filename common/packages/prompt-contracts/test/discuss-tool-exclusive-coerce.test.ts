@@ -8,6 +8,14 @@ import {
 } from "../src/index.js"
 
 describe("synopsis discuss toolRequest exclusive coerce", () => {
+  it("accepts the advertised on-demand skill tool", () => {
+    expect(synopsisDiscussArtifactSchema.parse({
+      assistantMessage: "查阅角色声口指南",
+      finalSelfReview: "按需加载技能",
+      toolRequest: { name: "load_skill", action: "invoke", arguments: '{"skillId":"style-bible"}' },
+    }).toolRequest?.name).toBe("load_skill")
+  })
+
   it("strips write fields when toolRequest is present", () => {
     const coerced = coerceSynopsisDiscussToolExclusive({
       assistantMessage: "先读目录",

@@ -177,8 +177,9 @@ describe("chapter coordination trace", () => {
 
       const internalStorePort = new NodeInternalStoreAdapter(applicationDataRoot)
       const persistence = new SqliteTurnPersistence(kysely, randomUUID)
-      const chain = await persistence.ensureModelContextChain({ projectId, createdAtMs: Date.now() })
-      const messages = await persistence.listModelContextMessages(chain.chainId)
+      const chain = await kysely.selectFrom("model_context_chains").select("id")
+        .where("project_id", "=", projectId).executeTakeFirstOrThrow()
+      const messages = await persistence.listModelContextMessages(chain.id)
       const resolver = new ChapterContextResolver({
         documents: new SqliteDocumentRepository(kysely),
         internalStore: internalStorePort,

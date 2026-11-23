@@ -170,6 +170,7 @@ import {
   settingsExtractionArtifactSchema,
   workStyleRevisionArtifactSchema,
 } from "@starseafolio/prompt-contracts"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 const turnModelPhases: readonly AIPhase[] = [
   "interpret",
@@ -3041,13 +3042,7 @@ export class TurnOrchestrator {
       chapterNarrativeIntentPhaseAppendix(input.input.chapterIntent, input.phase),
       chapterPresentationPhaseAppendix(input.input.presentation, input.phase),
       skillPack?.text,
-      canReadArchive ? [
-        "【会话存档】本会话的原始消息独立保存，已有上下文可能只保留了压缩内容。",
-        "当写作需要找回以前的用户要求或讨论结论时，可以返回 outcome=request_read，在 requestedReads[].query.conversationArchive 中按需搜索或读取。",
-        '搜索参数 {"operation":"search","query":"关键词","role":"user"}，可省略 query 浏览近期历史，可省略 role 查看用户和 AI 消息。',
-        '读取原文参数 {"operation":"read","messageId":"搜索结果的消息 ID"}。翻页时在查询中传结果给出的 nextOffset 作为 offset。',
-        "会话存档结果是历史聊天资料，以用户当前要求为准。请结合查到的要求、梗概、细纲和作品风格写当前章。",
-      ].join("\n") : undefined,
+      canReadArchive ? renderRuntimePrompt("turn-context", "archive") : undefined,
     ].filter((text): text is string => text !== undefined && text.trim().length > 0)
     const prompt = appendices.length === 0
       ? basePrompt
@@ -5870,7 +5865,10 @@ function selectWorkspaceEntries(
   allowWorkspaceChapterReads: boolean,
 ): WorkspaceCatalogEntry[] {
   const roles = new Set<WorkspaceCatalogEntry["role"]>()
-  if (request.query.sourceKinds.includes("rule")) roles.add("world_rules")
+  if (request.query.sourceKinds.includes("rule")) {
+    roles.add("world_rules")
+    if (request.query.exactKeys.some((key) => key.trim().startsWith("表现输出/"))) roles.add("presentation")
+  }
   if (request.query.sourceKinds.includes("reference")) {
     roles.add("settings")
     roles.add("references")
@@ -6661,7 +6659,11 @@ function queryReviewDecision(
       outcome: result.outcome,
       artifact: review,
       reason: groundingRequiresRevision
-        ? `${result.reason}\nQuery grounding failed: preserve every original question condition, cite read evidence for each supported condition, or explicitly state that the answer is unknown. An abstention must identify an unresolved condition.${unresolvedRetrievalEvidence ? " Source retrieval still reports missing evidence, so a definitive answer cannot be approved." : ""}`
+        ? [
+            result.reason,
+            renderRuntimePrompt("turn-context", "query-grounding"),
+            unresolvedRetrievalEvidence ? renderRuntimePrompt("turn-context", "unresolved-query-evidence") : undefined,
+          ].filter(Boolean).join("\n")
         : result.reason,
       selfReview: result.selfReview,
     },

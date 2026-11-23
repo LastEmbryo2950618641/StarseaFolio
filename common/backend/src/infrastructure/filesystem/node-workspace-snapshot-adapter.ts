@@ -1,9 +1,9 @@
-import { CHARACTER_RULE_PATH, isCharacterProfilePath, parseCharacterProfile } from "@starseafolio/contracts"
+import { isCharacterProfilePath, parseCharacterProfile } from "@starseafolio/contracts"
 import { Buffer } from "node:buffer"
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { isAbsolute, relative, resolve } from "node:path"
 
-import { digest, isSharedPresentationPath, normalizeWorkspacePath } from "../../core/index.js"
+import { digest, isPlatformLockedPath, isSharedPresentationPath, normalizeWorkspacePath } from "../../core/index.js"
 import type { WorkspacePort, WorkspaceSnapshot, WorkspaceSnapshotPort } from "../../application/index.js"
 
 const baseRulesPath = "世界推演规则/基础规则/base-rules.md"
@@ -17,7 +17,7 @@ export class NodeWorkspaceSnapshotAdapter implements WorkspaceSnapshotPort {
       throw new Error(`Cannot save invalid Markdown workspace: ${report.issues.map((issue) => issue.path).join(", ")}`)
     }
     const paths = report.inventory
-      .filter((entry) => entry.kind === "file" && entry.path !== baseRulesPath && !isSharedPresentationPath(entry.path))
+      .filter((entry) => entry.kind === "file" && !isPlatformLockedPath(entry.path) && !isSharedPresentationPath(entry.path))
       .map((entry) => entry.path)
       .sort()
     const files = await Promise.all(paths.map(async (relativePath) => {
@@ -58,14 +58,17 @@ async function replaceWorkspaceFiles(
   current: WorkspaceSnapshot,
   target: WorkspaceSnapshot,
 ): Promise<void> {
-  // Legacy snapshots may contain project-local copies of the now shared presets.
-  const targetFiles = target.files.filter((file) => !isSharedPresentationPath(normalizeHistoryPath(file.relativePath)))
+  // Older snapshots may contain copies of platform rules or shared presets.
+  const targetFiles = target.files.filter((file) => {
+    const path = normalizeHistoryPath(file.relativePath)
+    return !isPlatformLockedPath(path) && !isSharedPresentationPath(path)
+  })
   const targetByPath = new Map(targetFiles.map((file) => [normalizeHistoryPath(file.relativePath), file]))
   if (targetByPath.size !== targetFiles.length) throw new Error("History snapshot contains duplicate workspace paths")
   for (const file of current.files) {
     const relativePath = normalizeHistoryPath(file.relativePath)
     if (isSharedPresentationPath(relativePath)) continue
-    if (relativePath !== CHARACTER_RULE_PATH && !targetByPath.has(relativePath)) await rm(resolveInside(root, relativePath), { force: true })
+    if (!isPlatformLockedPath(relativePath) && !targetByPath.has(relativePath)) await rm(resolveInside(root, relativePath), { force: true })
   }
   for (const [relativePath, file] of targetByPath) {
     if (digest(file.content) !== file.digest || Buffer.byteLength(file.content, "utf8") !== file.size) {

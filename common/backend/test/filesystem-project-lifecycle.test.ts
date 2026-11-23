@@ -31,6 +31,7 @@ const sourceId = "00000000-0000-4000-8000-000000000002"
 const temporaryDirectories: string[] = []
 
 const defaults = {
+  worldRulesOverview: "# 世界推演规则总览\n",
   baseRules: "# Worldseed V1 基础规则\n\n平台只读规则。\n",
   contentHandling: "# 内容处理规则\n\n平台只读规则。\n",
   webnovelProseLogic: "# 中文网文正文质量与逻辑\n\n平台只读规则。\n",
@@ -287,7 +288,8 @@ describe("project lifecycle", () => {
     try {
       const manifest = (await session.repository.readManifest(projectId))!
       const legacyFixedEntries = manifest.fixedEntries.filter((entry) => (
-        entry.key !== "content-handling"
+        entry.key !== "world-rules-overview"
+        && entry.key !== "content-handling"
         && entry.key !== "webnovel-prose-logic"
         && entry.key !== "plot-synopsis-guide"
         && entry.key !== "settings-query-guide"
@@ -313,7 +315,8 @@ describe("project lifecycle", () => {
     }
 
     // Simulate an older on-disk workspace that never received the new platform guides.
-    unlinkSync(join(workspaceRoot, "世界推演规则", "基础规则", "content-handling.md"))
+    unlinkSync(join(workspaceRoot, "世界推演规则", "总览.md"))
+    writeFileSync(join(workspaceRoot, "世界推演规则", "基础规则", "content-handling.md"), "# 旧平台规则\n", "utf8")
     unlinkSync(join(workspaceRoot, "世界推演规则", "基础规则", "webnovel-prose-logic.md"))
     unlinkSync(join(workspaceRoot, "世界推演规则", "基础规则", "plot-synopsis-guide.md"))
     unlinkSync(join(workspaceRoot, "世界推演规则", "基础规则", "settings-query-guide.md"))
@@ -352,6 +355,8 @@ describe("project lifecycle", () => {
       .toBe(defaults.proseStyleRules)
     expect(readFileSync(join(workspaceRoot, "世界推演规则", "基础规则", "content-handling.md"), "utf8"))
       .toBe(defaults.contentHandling)
+    expect(readFileSync(join(workspaceRoot, "世界推演规则", "总览.md"), "utf8"))
+      .toBe(defaults.worldRulesOverview)
     expect(readFileSync(join(workspaceRoot, "世界推演规则", "基础规则", "webnovel-prose-logic.md"), "utf8"))
       .toBe(defaults.webnovelProseLogic)
     expect(readFileSync(join(workspaceRoot, "世界推演规则", "基础规则", "settings-query-guide.md"), "utf8"))

@@ -7,6 +7,7 @@ import {
   type ProjectSuggestDisplayNameResult,
 } from "@starseafolio/contracts"
 import { workNamingArtifactSchema } from "@starseafolio/prompt-contracts"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 import type { AIModelPort, PromptResourcePort } from "../turns/ports/ai-model-port.js"
 import type { WorkspacePort } from "../workspace/index.js"
@@ -76,12 +77,11 @@ export class WorkNameSuggestService {
       },
       input: {
         workflow: "synopsis",
-        userInput: [
-          "请为当前作品生成一个新的作品名。",
-          `当前作品名：${currentDisplayName}`,
-          `当前作品简介：${currentDescription || "（暂无）"}`,
-          `请避开：${avoidNames.join("、")}`,
-        ].join("\n"),
+        userInput: renderRuntimePrompt("turn-context", "work-name", {
+          title: currentDisplayName,
+          description: currentDescription || "（暂无）",
+          avoid: avoidNames.join("、"),
+        }),
         chapterSequence: 1,
         allowWorkspaceChapterReads: false,
         sourceUnitIds: [],

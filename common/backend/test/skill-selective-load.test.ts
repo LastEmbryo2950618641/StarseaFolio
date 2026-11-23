@@ -23,6 +23,10 @@ describe("skill selective loading", () => {
   it("loads skill bodies and default packs from adapter", async () => {
     const adapter = new NodePromptResourceAdapter(packageRoot)
     const system = await adapter.loadTurnSystemRules()
+    const overview = await adapter.loadWorldRulesOverview()
+    expect(system.text).toContain(overview.text.trim())
+    expect((await adapter.loadSynopsisDiscussSystemRules()).text).toContain(overview.text.trim())
+    expect(overview.text).toContain("你负责虚构小说的创作与续写")
     expect(system.text).toContain("平台 Skill 索引")
     expect(system.text).not.toContain("# 去 AI 味（deslop）")
     expect(system.text).toContain("不得把明确意思改写成抽象概念、象征或口号")

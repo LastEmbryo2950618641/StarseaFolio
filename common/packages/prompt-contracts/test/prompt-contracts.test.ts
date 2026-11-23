@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   BASE_RULES_RESOURCE,
+  WORLD_RULES_OVERVIEW_RESOURCE,
   CONTENT_HANDLING_RESOURCE,
   OUTLINE_TO_DRAFT_GUIDE_RESOURCE,
   PLOT_SYNOPSIS_GUIDE_RESOURCE,
@@ -70,6 +71,7 @@ describe("prompt contracts", () => {
   it("ships one immutable resource for every phase", () => {
     const packageRoot = resolve(process.cwd(), "common/packages/prompt-contracts")
     const resources = [
+      WORLD_RULES_OVERVIEW_RESOURCE,
       BASE_RULES_RESOURCE,
       CONTENT_HANDLING_RESOURCE,
       WEBNOVEL_PROSE_LOGIC_RESOURCE,
@@ -81,7 +83,7 @@ describe("prompt contracts", () => {
       ...aiPhaseValues.map((phase) => promptDefinitions[phase].resourcePath),
     ]
 
-    expect(new Set(resources).size).toBe(aiPhaseValues.length + 7 + WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES.length)
+    expect(new Set(resources).size).toBe(aiPhaseValues.length + 8 + WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES.length)
     for (const resource of resources) {
       const path = resolve(packageRoot, resource)
       expect(existsSync(path), resource).toBe(true)
@@ -91,6 +93,7 @@ describe("prompt contracts", () => {
 
   it("keeps platform composites thin (no vendor fulltext; skill index only)", () => {
     expect(PLATFORM_BASE_RULE_RESOURCES).toEqual([
+      WORLD_RULES_OVERVIEW_RESOURCE,
       BASE_RULES_RESOURCE,
       CONTENT_HANDLING_RESOURCE,
       WEBNOVEL_PROSE_LOGIC_RESOURCE,
@@ -174,15 +177,15 @@ describe("prompt contracts", () => {
     expect(baseRules).toContain("本轮实际读取的图信息是过去万事万物的演化和当前有效状态的首要依据")
     expect(baseRules).toContain("一句话可以是世界生成的起点")
     expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("当前任务是虚构长篇的世界生成与正文交付")
-    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("都是失败输出，删掉重写")
+    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("在适用的内容规则内直接回应作者要求")
     expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("第一句就是交付物本身")
-    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("禁止在思考中讨论题材是否可写")
-    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("用户规则若明确限制某些内容，仅在该明确范围内遵守")
+    expect(readResource(CONTENT_HANDLING_RESOURCE)).not.toContain("禁止在思考中讨论题材是否可写")
+    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("在明确适用范围内遵守用户规则")
     expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("人物身心状态由世界因果推出")
     expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("禁止为体面补选择")
     expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("一夜如常")
-    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("自行切黑")
-    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("不能用「角色不该知道」")
+    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("《世界推演规则总览》的 T0–T4 条件")
+    expect(readResource(CONTENT_HANDLING_RESOURCE)).toContain("可用可信的信息来源或按作者授权切换视点呈现指定场面")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("遵守内容处理规则")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("chapterBodyMarkdown")
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).toContain("1 ≤ N ≤ 当前焦点章序")
@@ -209,7 +212,7 @@ describe("prompt contracts", () => {
     expect(semanticReview).toContain("不是修改项、节点或连接的逐项清单")
     expect(draft).toContain("不得输出“等待读取资料")
     expect(draft).toContain("遵守内容处理规则")
-    expect(readResource(promptDefinitions.draft.resourcePath)).toContain("不能用「角色未知」")
+    expect(readResource(promptDefinitions.draft.resourcePath)).toContain("采用限知时，每个视点只呈现其能感知")
     expect(readResource(promptDefinitions.interpret.resourcePath)).toContain("遵守内容处理规则")
     expect(semanticReview).toContain("有限预算内")
     expect(semanticReview).toContain("可精确复述或再次指代的正文片段")
@@ -335,7 +338,7 @@ describe("prompt contracts", () => {
     expect(draft).toContain("翻译，不要照抄")
     expect(draft).toContain("禁止层")
     expect(draft).toContain("第X章")
-    expect(draft).toContain("服从细纲 = 演出其要求的场面与约束")
+    expect(draft).toContain("须落笔的核心场景应在正文中实际发生")
   })
 
   it("preserves explicit user scope, status changes, and chapter length across writing stages", () => {

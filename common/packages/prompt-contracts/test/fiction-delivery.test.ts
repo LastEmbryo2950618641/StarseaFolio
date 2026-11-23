@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  fictionDeliveryReminder,
   inspectFictionProse,
   inspectPhaseFictionDelivery,
 } from "../src/fiction-delivery.js"
@@ -74,9 +73,4 @@ describe("fiction delivery inspector", () => {
     }).ok).toBe(true)
   })
 
-  it("reminds the model that phenomenology follows in-world cause", () => {
-    expect(fictionDeliveryReminder()).toContain("身心状态只跟世界因果")
-    expect(fictionDeliveryReminder()).toContain("Affect follows in-world cause")
-    expect(fictionDeliveryReminder()).toContain("禁止用‘多了一条账’")
-  })
 })

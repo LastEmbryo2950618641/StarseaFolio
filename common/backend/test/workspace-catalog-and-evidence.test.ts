@@ -50,6 +50,7 @@ describe("workspace catalog", () => {
     const workspaceRoot = join(root, "workspace")
     const workspace = new NodeWorkspaceAdapter()
     await workspace.createLayout(workspaceRoot, {
+      worldRulesOverview: "# 世界推演规则总览\n",
       baseRules: "# 基础规则\n",
       contentHandling: "# 内容处理规则\n",
       webnovelProseLogic: "# 中文网文正文质量与逻辑\n",
@@ -155,6 +156,7 @@ describe("sqlite workspace catalog snapshot repository", () => {
     const appDataRoot = join(root, "app-data")
     const workspace = new NodeWorkspaceAdapter()
     await workspace.createLayout(workspaceRoot, {
+      worldRulesOverview: "# 世界推演规则总览\n",
       baseRules: "# 基础规则\n",
       contentHandling: "# 内容处理规则\n",
       webnovelProseLogic: "# 中文网文正文质量与逻辑\n",
@@ -241,6 +243,7 @@ describe("sqlite evidence store", () => {
     const appDataRoot = join(root, "app-data")
     const workspace = new NodeWorkspaceAdapter()
     await workspace.createLayout(workspaceRoot, {
+      worldRulesOverview: "# 世界推演规则总览\n",
       baseRules: "# 基础规则\n",
       contentHandling: "# 内容处理规则\n",
       webnovelProseLogic: "# 中文网文正文质量与逻辑\n",

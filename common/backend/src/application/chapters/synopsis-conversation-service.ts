@@ -93,6 +93,7 @@ import {
   assessWorkStyleMarkdown,
   WORK_STYLE_RULE_PATH,
 } from "../../core/index.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 import {
   applyColdStartStyleGate,
   resolveColdStartStyleSelectionPath,
@@ -2199,23 +2200,25 @@ export class SynopsisConversationService {
       const autoContinueMessage = !shouldAutoContinue || (savedDraftPublished && !nextChapterAuto)
         ? undefined
         : continueRequestedFocusTask
-          ? `焦点已切换到第${String(appliedFocusSequence)}章。继续完成用户本次原始请求：\n${input.message}\n先读取当前焦点章的已保存材料；只完成本次请求。未入库前不要进入下一阶段材料，也不要自动跳章。推进模式仍保持原设置。`
+          ? renderRuntimePrompt("discuss-messages", "focus-changed-resume", {
+              focusSequence: String(appliedFocusSequence), userMessage: input.message,
+            })
           : styleSelectionCompleted
-            ? "继续：作品风格已由用户选定并通过审核，现在进入主角罗盘，逐项询问并等待用户确认核心设定，再询问本卷主线与支线。"
+            ? renderRuntimePrompt("discuss-messages", "style-approved")
             : volumeStoryNeedsUser
-              ? "继续：当前卷必须先由用户确认主线与支线。请依次询问开场场景、一个或多个高潮、卷末结局及支线事件与时机，给出贴合主题的选项并等待用户发送。"
+              ? renderRuntimePrompt("discuss-messages", "volume-story-required")
             : volumePlanningCompletedThisTurn
-              ? "继续：当前卷首次规划已通过写入门禁。从第一章新章要求阶段开始讨论；梗概入库前不要把本轮当成梗概讨论，也不要越级写细纲或草稿。"
+              ? renderRuntimePrompt("discuss-messages", "volume-planning-complete")
               : savedDraftPublished && nextChapterAuto
                 ? appliedFocusSequence !== undefined && appliedFocusSequence !== session.chapterSequence
-                  ? `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成，焦点已切换到第${String(appliedFocusSequence)}章。进入该章新章要求阶段；先对齐本章要写什么，梗概入库前不要写入细纲或草稿。`
-                  : `继续：第${String(session.chapterSequence)}章正文已发布且图治理已完成。若当前卷仍有未完成章节，本轮只切换焦点到第${String(session.chapterSequence + 1)}章并设置 continueTurn=true，下一回合从新章要求阶段开始；不要同轮向旧焦点写入新章材料。若当前卷已完成则结束任务或开新卷。`
+                  ? renderRuntimePrompt("discuss-messages", "published-focus-changed", { chapterSequence: session.chapterSequence, focusSequence: appliedFocusSequence })
+                  : renderRuntimePrompt("discuss-messages", "published-advance", { chapterSequence: session.chapterSequence, nextSequence: session.chapterSequence + 1 })
               : savedDraft !== undefined
-                ? `继续：当前章草稿已入库（${savedDraft.draftLabel}），进入草稿阶段。请用户确认「草稿可以，发布正文」后才开始章节入库（正文确认）；确认前不要调用 publish_draft，也不要进入下一章。`
+                ? renderRuntimePrompt("discuss-messages", "draft-saved", { draftLabel: savedDraft.draftLabel })
                 : synopsisProgressCompleted
-                  ? `继续：第${String(session.chapterSequence)}章剧情梗概已入库，进入梗概阶段。先针对已落盘梗概讨论；若推进模式允许自动，再写入细纲入库以进入细纲阶段——未细纲入库前不要写草稿。`
+                  ? renderRuntimePrompt("discuss-messages", "synopsis-saved", { chapterSequence: session.chapterSequence })
                   : outlineProgressCompleted
-                    ? `继续：第${String(session.chapterSequence)}章细纲已入库，进入细纲阶段。先针对已落盘细纲讨论；若推进模式允许自动，再生成草稿入库——草稿入库前不要发布正文。`
+                    ? renderRuntimePrompt("discuss-messages", "outline-saved", { chapterSequence: session.chapterSequence })
                     : stayInStageContinueMessage
       let autoContinue: { message: string } | undefined = autoContinueMessage === undefined
         ? undefined
@@ -2883,7 +2886,7 @@ export class SynopsisConversationService {
     const synopsisMarkdown = await this.readSynopsisFile(workspaceRootRef, session.synopsisPath)
     if (outlineMarkdown.trim().length > 0) {
       const synopsisAppendix = synopsisMarkdown.trim().length > 0
-        ? `\n\n---\n\n## 剧情梗概（附录·冲突以细纲为准，用户合同仍须覆盖）\n\n${synopsisMarkdown.trim()}\n`
+        ? "\n\n" + renderRuntimePrompt("discuss-messages", "workflow-synopsis-appendix", { synopsis: synopsisMarkdown.trim() }) + "\n"
         : ""
       return {
         chapterSequence: session.chapterSequence,
@@ -2908,7 +2911,7 @@ export class SynopsisConversationService {
     if (history.matches.length > 0) {
       return {
         chapterSequence: session.chapterSequence,
-        userInput: "继续当前章的正文推演。需要前情或旧要求时查阅会话存档。",
+        userInput: renderRuntimePrompt("discuss-messages", "workflow-continue-from-archive"),
         source: "conversation",
       }
     }
@@ -3175,6 +3178,7 @@ export class SynopsisConversationService {
       catalog,
       ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
     })
+    await this.dependencies.conversation.refreshDiscussSystemRules(input.sessionId, systemRules.text)
     let storedContext = await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)
     const compactOlderHistory = async (): Promise<void> => {
       const compacted = compactDiscussContextHistory(storedContext)
@@ -3382,33 +3386,31 @@ export class SynopsisConversationService {
     })
     if (input.batchAutomation === true) {
       repairHints.push(
-        "【批量推演模式】卷规划用 volumeChapterPlans 一次写齐多章 synopsisBody+outlineBody；正文默认用 chapterDraftProposals（或焦点章 chapterDraftProposal）写草稿，禁止优先 chapter_workflow；勿 publish_draft（图治理由前端按章串行）；少给需点击的 choices；禁止输出 set_focus / focusChange（焦点由前端推进）；不要停在等待用户确认梗概。",
+        renderRuntimePrompt("discuss-repairs", "batch-automation"),
       )
     } else if (input.creativeSetup === undefined && !hasPlanningContent(input.synopsisMarkdown, true)) {
       repairHints.push(
-        "当前剧情梗概缺失或仍是占位内容：本轮只写 synopsisBody，不得输出 outlineBody/bodyEdits 或正文。给出符合用户当前诉求的后续选项；不能要求用户使用固定口令确认梗概。",
+        renderRuntimePrompt("discuss-repairs", "synopsis-missing"),
       )
-      } else if (input.creativeSetup === undefined && !hasPlanningContent(input.outlineMarkdown, false)) {
+    } else if (input.creativeSetup === undefined && !hasPlanningContent(input.outlineMarkdown, false)) {
       repairHints.push(
-        "当前剧情梗概已存在：须按 synopsis-to-outline-guide，合并「用户本次要求 + 梗概」写细纲，禁止只对着梗概扩写。梗概确认按钮只是便捷选项，不是门禁。用户明确要求提取、补全或继续写细纲时，本轮应输出合格 outlineBody（引导 §4.1：必填章定位/分场/信息边界/风险待决；不适用节写「本节：无」；须含相对梗概的增量，禁止同构扩写；用户合同∪梗概事件须被分场覆盖），尊重用户这轮具体要求，不要要求固定确认说法或重复询问。细纲尚未写入前不要输出正文草稿。",
+        renderRuntimePrompt("discuss-repairs", "outline-missing"),
       )
     }
     if (titleAlignmentIssue !== undefined) {
-      repairHints.push(
-        (input.agentMode ?? "auto") === "auto"
-          ? `检测到标题分叉：正文「${titleAlignmentIssue.bodyHeading}」≠ 规划「${titleAlignmentIssue.planningHeading}」。Auto 模式：直接输出 titleAlignTarget=${titleAlignmentIssue.recommendedTarget} 完成对齐，不要用 choices 征询。`
-          : `检测到标题分叉：正文「${titleAlignmentIssue.bodyHeading}」≠ 规划「${titleAlignmentIssue.planningHeading}」。优先用 choices 征询，用户确认后输出 titleAlignTarget（推荐 ${titleAlignmentIssue.recommendedTarget}）。`,
-      )
+      const section = (input.agentMode ?? "auto") === "auto" ? "title-alignment-auto" : "title-alignment-confirm"
+      repairHints.push(renderRuntimePrompt("discuss-repairs", section, {
+        bodyHeading: titleAlignmentIssue.bodyHeading,
+        planningHeading: titleAlignmentIssue.planningHeading,
+        target: titleAlignmentIssue.recommendedTarget,
+      }))
     }
     const carriedTodos = synopsisConversationStreamHub.carriedTodos(input.projectId)
     const carriedTodoNotice = input.workStyleGate !== undefined || carriedTodos.length === 0
       ? undefined
-      : [
-          "【上轮未完成 Todo 已带入本轮】",
-          ...carriedTodos.map((item) => `- [${item.status}] ${item.content}`),
-          "处理完本条用户消息（如岔路选择）后，继续推进这些项；用 todo_write merge=true 更新状态。",
-          "要放弃某项须显式标 cancelled，不能用新列表把它覆盖丢掉。仍有未完成项而本轮做不完时设 continueTurn=true。",
-        ].join("\n")
+      : renderRuntimePrompt("discuss-messages", "carried-todos", {
+          todos: carriedTodos.map((item) => `- [${item.status}] ${item.content}`).join("\n"),
+        })
     let latestBudgetAdvisory: SynopsisConversationBudgetAdvisory | undefined
     let latestToolDraft: SynopsisWorkflowToolResult | undefined
     const noteDiscussBlock = async (
@@ -3603,10 +3605,10 @@ export class SynopsisConversationService {
         budgetGraceUsed = true
         remainingCalls = 1
         repairHints.push(
-          "模型调用轮次较多：请 outcome=continue 直接给出完整 artifact，避免继续 request_read。",
+          renderRuntimePrompt("discuss-repairs", "budget-grace"),
         )
       } else if (remainingCalls === 1) {
-        repairHints.push("这是最后一轮模型调用：必须 outcome=continue，禁止 request_read。")
+        repairHints.push(renderRuntimePrompt("discuss-repairs", "last-call"))
       }
       const request = phaseRequestEnvelopeSchema.parse({
         schemaVersion: SCHEMA_VERSION,
@@ -3695,7 +3697,7 @@ export class SynopsisConversationService {
         && !(currentTodosSettled && hint === DISCUSS_TODO_INCOMPLETE_HINT)
       ))
       if (pendingWrites !== undefined) {
-        activeRepairHints.push("【已暂存写入提案】上一轮结构化内容已暂存，尚未落盘。本轮只需补齐提示要求的 Todo、choices 或写作设置；未修改的正文与规划无需重复输出。写入前仍会重新验证全部门禁。")
+        activeRepairHints.push(renderRuntimePrompt("discuss-repairs", "held-proposals"))
       }
       const contextWindowTokens = input.model.info?.contextWindowTokens ?? 64_000
       const triggerRatio = settings?.execution.contextCompactionThresholdRatio
@@ -3755,10 +3757,7 @@ export class SynopsisConversationService {
           sequence: storedContext.length,
           role: "system" as const,
           kind: "phase_instruction" as const,
-          content: [
-            `【本轮写入范围】${JSON.stringify(input.writeScope)}`,
-            "按以上范围交付。只改指定材料，旧文件与 Todo 完成状态不计入本轮写入。已有前置材料仅供引用。批量规划保留用户手改材料，先读这些文件并以其内容为准。只有 advance=true 才可按推进模式主动延伸。草稿发布、卷首写及必答问答由宿主管理。",
-          ].join("\n"),
+          content: renderRuntimePrompt("discuss-messages", "write-scope", { writeScope: JSON.stringify(input.writeScope) }),
         }]),
         ...(carriedTodoNotice === undefined || currentTodosSettled
           ? []
@@ -3776,13 +3775,10 @@ export class SynopsisConversationService {
               role: "system" as const,
               kind: "system_rules" as const,
               content: [
-                "创作台 ReAct 提醒：",
-                `- 当前已可见 readEvidence ${String(readEvidence.length)} 条；优先基于这些证据给出正式结论。`,
-                "- 若仍缺文件，使用 outcome=request_read；工具调用用 outcome=continue + artifact.toolRequest；否则返回最终 artifact。artifact 至少含 assistantMessage 与 finalSelfReview。",
-                "- 禁止把「我先去读设定/索引」写进 assistantMessage 当作最终回复。",
+                renderRuntimePrompt("discuss-messages", "react-reminder", { evidenceCount: readEvidence.length }),
                 ...activeRepairHints.slice(-2),
                 ...(currentTodosSettled
-                  ? ["- 当前 Todo 已全部结清。请交付当前阶段的结构化 artifact；无需再次调用 todo_write 结清清单。"]
+                  ? [renderRuntimePrompt("discuss-messages", "todo-settled")]
                   : []),
               ].join("\n"),
             }]
@@ -3894,7 +3890,7 @@ export class SynopsisConversationService {
           remainingCalls -= 1
           await noteDiscussBlock(
             "missing_artifact",
-            "上一轮模型结果无效：outcome=continue 时缺少 artifact 对象。请立即返回完整 JSON，artifact 内必须有 assistantMessage 与 finalSelfReview。这一轮没有落盘。",
+            renderRuntimePrompt("discuss-repairs", "artifact-missing"),
           )
           runtimeLog("warn", "synopsis-conversation", "missing_artifact.retry", {
             projectId: input.projectId,
@@ -3946,7 +3942,7 @@ export class SynopsisConversationService {
         }
         await noteDiscussBlock(
           "model_result_rejected",
-          `模型结果被拒绝，没有落盘。原因：${(error instanceof Error ? error.message : String(error)).slice(0, 800)}`,
+          renderRuntimePrompt("discuss-repairs", "model-result-rejected", { reason: (error instanceof Error ? error.message : String(error)).slice(0, 800) }),
         )
         throw error
       }
@@ -3992,11 +3988,9 @@ export class SynopsisConversationService {
         })
       }
       if ((execution.schemaRepairs?.length ?? 0) > 0) {
-        await noteDiscussBlock("schema_validation", [
-          "上一份模型输出没有通过校验，系统已要求重生成。被拒绝的那份没有落盘。",
-          ...(execution.schemaRepairs ?? []).map((item, index) => `${String(index + 1)}. ${item}`),
-          "后面这条通过校验的结果才算数；不要把被拒绝的那份说成已写入。",
-        ].join("\n"))
+        await noteDiscussBlock("schema_validation", renderRuntimePrompt("discuss-repairs", "schema-validation", {
+          issues: (execution.schemaRepairs ?? []).map((item, index) => `${String(index + 1)}. ${item}`).join("\n"),
+        }))
       }
       remainingCalls = Math.max(0, remainingCalls - Math.max(1, execution.usage.modelCalls ?? 1))
       synopsisConversationStreamHub.addUsage(input.projectId, {
@@ -4070,7 +4064,7 @@ export class SynopsisConversationService {
       if (manualFocusChange && (pendingUserFocusSequence !== undefined
         || (proposedFocusSequence !== undefined && proposedFocusSequence !== input.chapterSequence))) {
         // Resolve navigation before draft/todo/reference repairs can replay work for the captured old chapter.
-        await releaseHeldWrites("本轮先处理换章，先前暂存的旧章写入已取消，没有落盘。")
+        await releaseHeldWrites(renderRuntimePrompt("discuss-repairs", "release-held-on-focus"))
         if (toolArtifact.success && proposedFocusSequence !== undefined && proposedFocusSequence !== input.chapterSequence
           && isCurrentUserFocusChange(toolArtifact.data.focusChange, input.userMessage)) {
           const transition = prepareUserFocusTransition(toolArtifact.data, input.chapterSequence, input.userMessage)
@@ -4098,7 +4092,7 @@ export class SynopsisConversationService {
           pendingUserFocusSequence = proposedFocusSequence
           await noteDiscussBlock(
             "focus_change_quote",
-            `【换章指令补正，仅一次】上一轮提出切到第${String(proposedFocusSequence)}章，但 focusChange.userRequestQuote 缺失或不在本轮 userMessage 中。先核对本轮用户是否要求换章；若是，原样摘录该指令到 userRequestQuote，只返回 focusChange、assistantMessage、finalSelfReview 和可选 choices，用户还要求目标章写作时加 continueTurn=true；只换章不续跑。不要提交任何章节内容，不要补交旧章草稿，也不要调用工具。若本轮用户未要求换章，撤回该动作并说明。系统仅补正一次，仍不合格就停止且不应用该回复的章节改动。`,
+            renderRuntimePrompt("discuss-repairs", "focus-change-quote", { focusSequence: String(proposedFocusSequence) }),
             { source: toolArtifact.success ? toolArtifact.data : undefined },
           )
           runtimeLog("warn", "synopsis-conversation", "focus_change.quote_repair", {
@@ -4119,7 +4113,7 @@ export class SynopsisConversationService {
           || (input.creativeSetup.status === "awaiting_write" && input.creativeSetup.scope === "protagonist"
             && toolArtifact.data.protagonistSupplementFields === undefined)) {
           if (remainingCalls > 0 && attempt < 2) {
-            await noteDiscussBlock("creative_setup", "当前是用户必答的主角罗盘/卷主支线问答，禁止调用工具或写章节。请只提出当前字段问题和至少两个贴合主题的 continue_discuss 选项；收集完成时仅补充 protagonistSupplementFields，必须有非空姓名，身份、能力、人物关系等分别填入字段，不得替换用户核心。本轮章节写入没有落盘。", { source: toolArtifact.success ? toolArtifact.data : undefined })
+            await noteDiscussBlock("creative_setup", renderRuntimePrompt("discuss-repairs", "creative-setup"), { source: toolArtifact.success ? toolArtifact.data : undefined })
             attempt += 1
             continue
           }
@@ -4177,7 +4171,7 @@ export class SynopsisConversationService {
           await noteDiscussBlock(
             "original_work_evidence",
             originalWorkStage === "archive_imported"
-              ? "【同人原作核验·读取结果】nikowenku-archive 已导入资料，但本轮尚未把本地索引/章节读入 readEvidence。请 outcome=request_read，exactKeys 指向 参考文件/原作资料/ 下与当前问题相关的 Markdown，只读所需片段后再作答。"
+              ? renderRuntimePrompt("discuss-repairs", "original-work-archive-import")
               : originalWorkEvidenceRepairHint({
                   stage: repairStage,
                   hasWebResearch: this.dependencies.webResearch !== undefined,
@@ -4195,7 +4189,7 @@ export class SynopsisConversationService {
       if (toolArtifact.success && toolArtifact.data.toolRequest !== undefined) {
         if (parsedResult.outcome !== "continue" || requestedReads.length > 0) {
           await recordStepOutcome("tool_contract", "工具调用必须单独返回，不能与读取请求混合")
-          await noteDiscussBlock("tool_contract", "toolRequest 必须单独使用 outcome=continue，不能与 request_read 同回。这一轮没有落盘。", { source: toolArtifact.data })
+          await noteDiscussBlock("tool_contract", renderRuntimePrompt("discuss-repairs", "tool-contract"), { source: toolArtifact.data })
           attempt += 1
           continue
         }
@@ -4207,14 +4201,14 @@ export class SynopsisConversationService {
           outlineToDraftGuideLoaded = true
           await noteDiscussBlock(
             "draft_guide_required",
-            `${draftGuideHostNotice}请先结合用户本轮要求、梗概、细纲和作品笔风重新核对，再调用正文推演工具；上一轮没有执行该工具。`,
+            `${draftGuideHostNotice}${renderRuntimePrompt("discuss-repairs", "draft-guide-for-tool")}`,
             { source: toolArtifact.data },
           )
           attempt += 1
           continue
         }
         if (toolRequest.action === "invoke" && toolRequest.name !== "todo_write") {
-          await releaseHeldWrites(`本轮改为调用 ${toolRequest.name}，先前暂存的写入已取消，没有落盘。`)
+          await releaseHeldWrites(renderRuntimePrompt("discuss-repairs", "release-held-on-tool", { toolName: toolRequest.name }))
         }
         await recordStepOutcome("tool_contract")
         if (toolRequest.name !== "todo_write") {
@@ -4363,7 +4357,7 @@ export class SynopsisConversationService {
           if (toolFailed && !isPrecedingChapterPublishGateError(new Error(toolErrorMessage))) {
             await noteDiscussBlock(
               "tool_failed",
-              `${toolRequest.name} 执行失败，没有产生落盘结果。原因：${toolErrorMessage || "工具执行失败"}`,
+              renderRuntimePrompt("discuss-repairs", "tool-failed-without-result", { toolName: toolRequest.name, reason: toolErrorMessage || "工具执行失败" }),
             )
           }
           if (toolResult.status === "reference_imported" || toolResult.status === "character_updated") {
@@ -4451,7 +4445,7 @@ export class SynopsisConversationService {
           }, this.dependencies.now())
           await noteDiscussBlock(
             "tool_failed",
-            `${toolRequest.name} 执行失败，没有落盘。原因：${(error instanceof Error ? error.message : String(error)).slice(0, 800)}`,
+            renderRuntimePrompt("discuss-repairs", "tool-failed", { toolName: toolRequest.name, reason: (error instanceof Error ? error.message : String(error)).slice(0, 800) }),
           )
           throw error
         } finally {
@@ -4473,7 +4467,7 @@ export class SynopsisConversationService {
               "invalid_artifact",
               zodHint.includes("toolRequest")
                 ? discussPhaseContractRepairHint(zodHint)
-                : `上一轮缺少合法 artifact（${zodHint}）。请 outcome=continue 并返回完整 artifact（assistantMessage、finalSelfReview 必填）。这一轮没有落盘。`,
+                : renderRuntimePrompt("discuss-repairs", "artifact-invalid", { validationIssues: zodHint }),
             )
             attempt += 1
             continue
@@ -4497,7 +4491,7 @@ export class SynopsisConversationService {
             return await stopDiscussLoop(`本轮写入未通过校验，文件未保存。${message}`)
           }
           pendingWrites = undefined
-          await noteDiscussBlock("planning_write_scope", `【本轮写入范围】${message}。请按宿主提供的范围重新交付。待办标记与旧文件不能代替本轮产物。`, { source: artifact.data })
+          await noteDiscussBlock("planning_write_scope", renderRuntimePrompt("discuss-repairs", "write-scope", { issues: message }), { source: artifact.data })
           writeScopeRetries += 1
           attempt += 1
           continue
@@ -4515,7 +4509,7 @@ export class SynopsisConversationService {
           })
           await noteDiscussBlock(
             "draft_guide_required",
-            `${draftGuideHostNotice}请按用户本轮要求并结合有效梗概、细纲和作品笔风重新生成完整草稿提案；上一轮草稿没有写入。`,
+            `${draftGuideHostNotice}${renderRuntimePrompt("discuss-repairs", "draft-guide-for-proposal")}`,
             { held: true },
           )
           attempt += 1
@@ -4540,7 +4534,7 @@ export class SynopsisConversationService {
             return await stopDiscussLoop(`草稿未保存。${message}。`)
           }
           pendingWrites = retainDiscussWrites({ ...artifact.data, chapterDraftProposal: undefined, chapterDraftProposals: undefined })
-          await noteDiscussBlock("draft_word_count", `【草稿字数】${message}。按正文去除空白后计数。请调整后提交完整正文，保留用户指定情节和笔风。`, { held: true })
+          await noteDiscussBlock("draft_word_count", renderRuntimePrompt("discuss-repairs", "draft-word-count", { issues: message }), { held: true })
           draftLengthRetries += 1
           attempt += 1
           continue
@@ -4559,7 +4553,7 @@ export class SynopsisConversationService {
           if (!completeVolumePlan && missingVolumePlanRetries < 1 && remainingCalls > 0) {
             await noteDiscussBlock(
               "volume_plan_required",
-              "【卷规划首写必交】当前仍处于卷级规划阶段，不能只解释门禁或继续讨论第一章。本轮请根据用户构思主动提出一份可修改的第一卷方案，并一次提交 volumePlanMeta（targetChapterCount、targetWordCount）、volumeSynopsis.markdown、arcPlan.markdown 三项完整结构化内容；缺少用户细节时合理估算并标明可调整，不要反问后停住。禁止输出任何章节级梗概、细纲、草稿或正文。已提交的章节内容没有落盘。",
+              renderRuntimePrompt("discuss-repairs", "volume-plan-required"),
               { source: artifact.data },
             )
             missingVolumePlanRetries += 1
@@ -4590,7 +4584,7 @@ export class SynopsisConversationService {
               pendingWrites = retainDiscussWrites(artifact.data)
               await noteDiscussBlock(
                 "creation_desk_settings",
-                "【卷规划写作设置必交】你刚才只在 assistantMessage 中声称切换设置，系统没有应用该文字。必须在 artifact.creationDeskSettings 返回完整字段：descriptionRulePath、proseStyleRulePath、novelMajorCategoryRulePath、novelSubcategoryRulePath、minimumWordCount、maximumWordCount、boundaryPace、causalityFocus。规则路径必须逐字来自本轮工作区真实 Markdown 文件；字数按卷总字数/章节数估算；未返回前禁止声称已切换或已同步。",
+                renderRuntimePrompt("discuss-repairs", "creation-desk-settings-required"),
                 { source: artifact.data, held: true },
               )
               attempt += 1
@@ -4615,7 +4609,7 @@ export class SynopsisConversationService {
               await recordStepOutcome("style_recommendations", "风格候选未通过门禁，缺少有效的推荐选项")
               await noteDiscussBlock(
                 "style_recommendations",
-                "风格门禁要求你先阅读全部 workspace:presentation_style_candidate 证据，再给至少两个分别绑定大类、次大类、笔风真实 Markdown 路径的 continue_discuss 推荐；只做风格评估，不写任何文件。本轮文件写入没有落盘。",
+                renderRuntimePrompt("discuss-repairs", "style-recommendations-required"),
                 { source: artifact.data },
               )
               attempt += 1
@@ -4634,7 +4628,7 @@ export class SynopsisConversationService {
               await recordStepOutcome("style_write", "作品风格写入未通过门禁")
               await noteDiscussBlock(
                 "style_write",
-                `审核所选笔风「${selectedPath ?? "（缺失）"}」后，必须给出完整合格的 ${WORK_STYLE_RULE_PATH}，且保留所选路径；若不适配，提供至少两个绑定真实候选路径的替代方案。禁止写章节内容。本轮章节内容没有落盘。`,
+                renderRuntimePrompt("discuss-repairs", "style-write-required", { selectedPath: selectedPath ?? "（缺失）", workStylePath: WORK_STYLE_RULE_PATH }),
                 { source: artifact.data },
               )
               attempt += 1
@@ -4686,12 +4680,9 @@ export class SynopsisConversationService {
               sessionId: input.sessionId,
               issues: scheduleIssues.length,
             })
-            await noteDiscussBlock("goal_schedule", [
-              "【门禁·钩子时限】goalProposals 中以下伏笔/高潮缺起势章或兑现章（设置要求完整）：",
-              ...scheduleIssues.map((issue) => `- ${issue}`),
-              "请根据卷规划/细纲自行推断并补齐 plantChapterSequence 与 payoffChapterSequence（起势 ≤ 兑现），重新输出完整 artifact；",
-              "确实无法确定的，改为 narrativeKind=general 或暂不提该条，不要询问用户。这次提交没有落盘。",
-            ].join("\n"), { source: artifact.data })
+            await noteDiscussBlock("goal_schedule", renderRuntimePrompt("discuss-repairs", "goal-schedule", {
+              issues: scheduleIssues.map((issue) => `- ${issue}`).join("\n"),
+            }), { source: artifact.data })
             attempt += 1
             continue
           }
@@ -4718,10 +4709,7 @@ export class SynopsisConversationService {
           && missingSynopsisArtifactRetries < 1
           && !budgetGraceUsed
         ) {
-          await noteDiscussBlock("synopsis_required", [
-            `【剧情梗概必交】用户要求写入当前焦点第${String(input.chapterSequence)}章剧情梗概，但当前文件仍是空占位。本轮必须在 synopsisBody 提交完整、非空的梗概 Markdown；assistantMessage、暂存区、细纲或正文都不能代替。不得声称已写入，也不得推进细纲或草稿。`,
-            "请直接返回结构化 synopsisBody，不要再 request_read 或继续规划后续章节。",
-          ].join("\n"), { source: artifact.data })
+          await noteDiscussBlock("synopsis_required", renderRuntimePrompt("discuss-repairs", "synopsis-required", { chapterSequence: input.chapterSequence }), { source: artifact.data })
           missingSynopsisArtifactRetries += 1
           attempt += 1
           continue
@@ -4740,10 +4728,7 @@ export class SynopsisConversationService {
           && missingOutlineArtifactRetries < 1
           && !budgetGraceUsed
         ) {
-          await noteDiscussBlock("outline_required", [
-            `【剧情细纲必交】用户已要求为当前焦点第${String(input.chapterSequence)}章写入细纲，但文件仍为空。必须在 outlineBody 提交完整、非空的细纲 Markdown；assistantMessage、暂存区或正文草稿都不能代替。不得声称已写入，也不得推进正文草稿。`,
-            "请直接返回结构化 outlineBody，不要再 request_read 或继续规划后续章节。",
-          ].join("\n"), { source: artifact.data })
+          await noteDiscussBlock("outline_required", renderRuntimePrompt("discuss-repairs", "outline-required", { chapterSequence: input.chapterSequence }), { source: artifact.data })
           missingOutlineArtifactRetries += 1
           attempt += 1
           continue
@@ -4768,10 +4753,7 @@ export class SynopsisConversationService {
           || latestToolDraft !== undefined
         const missingRequiredDraftProposal = draftProposalRequired && !hasCurrentChapterDraftProposal
         if (missingRequiredDraftProposal && missingDraftProposalRetries < 1 && !budgetGraceUsed) {
-          await noteDiscussBlock("draft_required", [
-            `【草稿提案必交】用户已明确要求为当前焦点第${String(input.chapterSequence)}章写正文草稿。必须在 artifact.chapterDraftProposal 中提交完整、非空正文（或在 chapterDraftProposals 中提交 chapterSequence=${String(input.chapterSequence)} 的完整正文）；assistantMessage、暂存区文件或工具说明都不能代替草稿提案。没有结构化提案就不会创建草稿版本，也不得声称已写入或已保存。`,
-            "请直接返回完整提案，不要再 request_read 或重复解释流程。",
-          ].join("\n"), { source: artifact.data })
+          await noteDiscussBlock("draft_required", renderRuntimePrompt("discuss-repairs", "draft-required", { chapterSequence: input.chapterSequence }), { source: artifact.data })
           missingDraftProposalRetries += 1
           attempt += 1
           continue
@@ -4824,7 +4806,7 @@ export class SynopsisConversationService {
           })) {
             repairHints.push([
               gateHint,
-              `【草稿序号修复】当前焦点是第${String(input.chapterSequence)}章，但本轮草稿提案均未通过顺序门禁。请重新输出当前焦点章完整正文到 chapterDraftProposal；若用 chapterDraftProposals，chapterSequence 必须为 ${String(input.chapterSequence)}。被拒绝的提案没有进入草稿轴，assistantMessage 不得声称已生成或已保存草稿。`,
+              renderRuntimePrompt("discuss-repairs", "draft-sequence", { chapterSequence: input.chapterSequence }),
             ].join("\n"))
             runtimeLog("warn", "synopsis-conversation", "chapter_sequence.gate_retry", {
               projectId: input.projectId,
@@ -4860,7 +4842,7 @@ export class SynopsisConversationService {
           pendingWrites = retainDiscussWrites(artifact.data)
           await noteDiscussBlock(
             "choices_required",
-            "【停止前选项必交】本轮将结束并等待用户。请基于当前阶段补充至少两个彼此有区别、可直接执行的 choices，通常提供推荐路径与调整路径；每个 action 用 continue_discuss。不要只在 assistantMessage 中列选项。",
+            renderRuntimePrompt("discuss-repairs", "choices-required"),
             { source: artifact.data, held: true },
           )
           attempt += 1
@@ -4956,7 +4938,7 @@ export class SynopsisConversationService {
         })
       }
 
-      await releaseHeldWrites("本轮改为读取，先前暂存的写入已取消，没有落盘。")
+      await releaseHeldWrites(renderRuntimePrompt("discuss-repairs", "release-held-on-read"))
       if (retrievalRounds >= maxRetrievalRounds || budgetGraceUsed) {
         runtimeLog("warn", "synopsis-conversation", "retrieval.exhausted", {
           projectId: input.projectId,
@@ -5041,7 +5023,7 @@ export class SynopsisConversationService {
           missingChoicesRetries += 1
           await noteDiscussBlock(
             "choices_required",
-            "【停止前选项必交】本轮将结束并等待用户。请基于当前阶段补充至少两个彼此有区别、可直接执行的 choices，通常提供推荐路径与调整路径；每个 action 用 continue_discuss。不要只在 assistantMessage 中列选项。本轮还没有落盘。",
+            renderRuntimePrompt("discuss-repairs", "choices-required-before-write"),
             { source: artifact.data },
           )
           attempt += 1
@@ -5678,12 +5660,9 @@ export class SynopsisConversationService {
       projectId: input.projectId,
       workspaceRootRef: input.workspaceRootRef,
       sessionId: session.sessionId,
-      userMessage: [
-        "正式推演已完成，请根据系统交接消息分析正文落成情况。",
-        "更新弧大纲/暂存区笔记，并建议下一章梗概修订；禁止开始正式推演。",
-        "",
-        formatTurnHandoffSystemMessage(input.brief),
-      ].join("\n"),
+      userMessage: renderRuntimePrompt("discuss-messages", "post-turn-handoff", {
+        handoff: formatTurnHandoffSystemMessage(input.brief),
+      }),
       heading: session.title,
       chapterSequence: session.chapterSequence,
       synopsisMarkdown,
@@ -6592,13 +6571,9 @@ export function isRecoverableDiscussPhaseContractError(error: unknown): boolean 
 export function discussPhaseContractRepairHint(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   if (isDiscussToolExclusiveContractError(error)) {
-    return [
-      "上一轮 phase contract 失败：toolRequest 不可与章节写入、草稿提案、choices、focusChange 等动作同回。",
-      "本轮只做一件事：若需工具，outcome=continue 且 artifact 仅含 assistantMessage、finalSelfReview、toolRequest；",
-      "若已可交付，不要带 toolRequest，直接返回写入类字段。先等工具结果再继续。",
-    ].join("")
+    return renderRuntimePrompt("discuss-repairs", "phase-contract-tool-exclusive")
   }
-  return `上一轮 phase contract 失败：${message.slice(0, 400)}。请按校验错误整份重写合法 artifact，不要复述无效 JSON。`
+  return renderRuntimePrompt("discuss-repairs", "phase-contract-invalid", { validationIssue: message.slice(0, 400) })
 }
 
 function isDiscussToolExclusiveContractError(error: unknown): boolean {
@@ -6733,28 +6708,17 @@ function buildWorkStyleGatePromptAppendix(input: Readonly<{
   novelSubcategoryRulePath?: string
 }> | undefined): string | undefined {
   if (input === undefined) return undefined
-  const sharedRules = [
-    "这是作品创作门禁，不是普通剧情讨论。必须逐份阅读本轮 readEvidence 中 ownerKind=workspace:presentation_style_candidate 的真实规则正文，再结合用户构思判断适配度；禁止按文件名、题材关键词或固定排序猜选。",
-    "风格备选必须引用 readEvidence 中真实存在的完整路径；每条推荐说明适配点与需要规避的风险。不得声称已落盘，除非实际输出 presentationWrites。",
-    "风格门禁期间 Todo 不适用：不要创建、更新或结清 Todo，也不要调用 todo_write 或任何 toolRequest；工具列表为空是预期行为，直接按本阶段要求返回 artifact。已有 Todo 暂停处理，不得因此阻止门禁交付。",
-    "门禁未通过：禁止输出 synopsisBody、outlineBody、bodyEdits、chapterDraftProposal(s)、appendedDraft、volumeChapterPlans、arcPlan、focusChange 或 continueTurn；不得调用工作流工具。presentationWrites 是本阶段唯一允许的结构化写入，不是工具调用。",
-  ]
+  const sharedRules = renderRuntimePrompt("discuss-appendices", "work-style-gate")
   if (input.status === "awaiting_choice") {
-    return [
-      "【风格门禁阶段：尚未选择文风，引导用户选择】",
-      ...sharedRules,
-      "本轮优先告诉用户：当前还没有选择文风，需要先选定小说大类、次大类和笔风，不能直接写梗概/大纲/正文。不要报系统门禁错误，也不要假装已选好。",
-      "先比较大类、次大类与笔风候选规则正文和用户构思的兼容程度，挑出最合适的 2–3 个组合供用户选择。assistantMessage 必须先点明「尚未选择文风」，再简要呈现评估依据、推荐顺序以及规则是否需要适配。",
-      "choices 必须有 2–3 个 continue_discuss 选项；每个选项的 workStyleSelection 必须结构化给出 novelMajorCategoryRulePath、novelSubcategoryRulePath、proseStyleRulePath 三条精确路径，label 显示三份规则文件名并写明推荐理由。路径必须逐项匹配真实 readEvidence。不要写入作品风格文件或章节内容；用户选择后再进入下一阶段。",
-    ].join("\n")
+    return renderRuntimePrompt("discuss-appendices", "work-style-awaiting-choice", { sharedRules })
   }
-  return [
-    "【风格门禁阶段：审核用户所选预定义笔风】",
-    ...sharedRules,
-    `用户选择的小说大类、次大类和笔风规则分别是：${input.novelMajorCategoryRulePath ?? "（缺失）"}、${input.novelSubcategoryRulePath ?? "（缺失）"}、${input.selectedProseStylePath ?? "（缺失）"}。必须基于三条路径对应的真实规则正文判断是否适用于本书。`,
-    `若适配，只返回 assistantMessage、finalSelfReview 与一个 presentationWrites 项，更新「${WORK_STYLE_RULE_PATH}」，将选定规则整合为符合 8 个必需章节的完整本书风格方案，并在语体笔风章节保留三条精确规则路径，分别写为「小说大类规则：」「小说次大类规则：」「小说笔风：」；不允许同轮输出梗概、大纲或正文。`,
-    "若不适配或必须大幅违背预定义规则才能使用，不写作品风格文件；解释冲突并用 choices 给出新的 2–3 个真实候选路径供用户改选。",
-  ].join("\n")
+  return renderRuntimePrompt("discuss-appendices", "work-style-selected", {
+    sharedRules,
+    majorCategoryPath: input.novelMajorCategoryRulePath ?? "（缺失）",
+    subcategoryPath: input.novelSubcategoryRulePath ?? "（缺失）",
+    proseStylePath: input.selectedProseStylePath ?? "（缺失）",
+    workStylePath: WORK_STYLE_RULE_PATH,
+  })
 }
 
 function buildVolumeFirstWriteGateReply(
@@ -6801,26 +6765,23 @@ function buildVolumePlanningPromptAppendix(
 ): string | undefined {
   if (planning === undefined) return undefined
   const storyline = planning.storyline
-  const confirmedArc = storyline === undefined ? [] : [
-    "## 本卷用户确认的主线与支线（权威创作约束）",
-    `当前卷：${planning.volumeFolderName}`,
-    `主线开场：${storyline.opening}`,
-    `主线高潮（可以多个）：${storyline.climaxes}`,
-    `主线结局：${storyline.ending}`,
-    `支线事件与时机：${storyline.subplots}`,
-    "后续卷梗概、卷大纲、章节梗概、大纲、草稿和正文必须围绕以上主支线推演。主线从头到尾贯穿本卷；可合理向外扩展和增加支线、设定其起止时机，但不得擅自替换用户确认的核心走向。调整核心须先向用户提供选项确认。",
-  ]
-  if (planning.ready) return confirmedArc.join("\n") || undefined
-  return [
-    ...confirmedArc,
-    "## 当前阶段：第一卷卷级规划（高优先级，覆盖其他章节推进指令）",
-    `当前卷：${planning.volumeFolderName}`,
-    `缺少首次写入：${planning.missing.length === 0 ? "无" : planning.missing.join("、")}`,
-    `已记录目标：章节数=${planning.targetChapterCount ?? "待规划"}，预计总字数=${planning.targetWordCount ?? "待规划"}；卷梗概写入次数=${planning.synopsisWriteCount}，卷大纲写入次数=${planning.outlineWriteCount}。`,
-    "请同时根据题材与卷目标主动选定合适的创作台写作设置，并通过 artifact.creationDeskSettings 更新小说大类规则、小说次大类规则、描写规则、笔风规则、单章字数范围、边界节奏、因果焦点；字数范围必须同时给最小值与最大值，按预计总字数/章节数估算单章容量。四个规则路径必须来自工作区真实存在的 Markdown 文件。系统会同步到创作台现有可编辑控件，用户随时可以自行修改；不要再让用户手动切换刚选定的笔风。",
-    "你必须主动完成卷规划，而不是只重复门禁提示、要求用户重新输入构思，或继续写第一章。依据已有构思给出可调整的合理估算；本轮直接通过 volumePlanMeta.targetChapterCount/targetWordCount 写入目标、volumeSynopsis.markdown 写入卷梗概、arcPlan.markdown 写入卷大纲。卷规划中的章节数和字数是本卷总目标，卷梗概和卷大纲描述本卷，不是第一章内容。",
-    "卷规划完成前不得输出 synopsisBody、outlineBody、bodyEdits、chapterDraftProposal(s)、volumeChapterPlans、appendedDraft、focusChange、continueTurn 或章节工作流工具。规划三项可以在一次回复中全部提交；系统会在下一轮开始第一章剧情梗概。不得要求用户点击不存在的常驻规划按钮。",
-  ].join("\n")
+  const confirmedArc = storyline === undefined ? undefined : renderRuntimePrompt("discuss-appendices", "confirmed-volume-story", {
+    volumeFolderName: planning.volumeFolderName,
+    opening: storyline.opening,
+    climaxes: storyline.climaxes,
+    ending: storyline.ending,
+    subplots: storyline.subplots,
+  })
+  if (planning.ready) return confirmedArc
+  const firstWrite = renderRuntimePrompt("discuss-appendices", "first-volume-planning", {
+    volumeFolderName: planning.volumeFolderName,
+    missing: planning.missing.length === 0 ? "无" : planning.missing.join("、"),
+    chapterCount: planning.targetChapterCount ?? "待规划",
+    wordCount: planning.targetWordCount ?? "待规划",
+    synopsisWriteCount: planning.synopsisWriteCount,
+    outlineWriteCount: planning.outlineWriteCount,
+  })
+  return confirmedArc === undefined ? firstWrite : [confirmedArc, firstWrite].join("\n")
 }
 
 function formatVolumePlanningWriteCount(count: number | undefined): string {
@@ -6878,15 +6839,7 @@ function resolveRefreshTargetMessage(
 
 export function buildRefreshChoicesPrompt(choices: readonly SynopsisConversationChoice[]): string {
   const labels = choices.map((choice) => `- ${choice.label}`).join("\n")
-  return [
-    "请换一批决策选项。",
-    "要求：",
-    "1. 新选项的含义不得与下列已有选项重复，也避免同义改写：",
-    labels,
-    "2. 仍用 choices 返回可点选按钮；方向类用 continue_discuss，结构性动作（如 confirm_synopsis / confirm_arc_plan / start_turn / promote_staging）仅在仍适用时保留。",
-    "3. assistantMessage 一两句说明换了什么方向即可，不要长篇铺垫，也不要改写梗概文件，除非为支撑新选项所必需。",
-    "4. 这是静默刷新：只产出新 choices，不要假设用户会看到完整对话气泡。",
-  ].join("\n")
+  return renderRuntimePrompt("discuss-messages", "refresh-choices", { labels })
 }
 
 export function mergeSynopsisChoices(
@@ -7243,22 +7196,22 @@ const PUBLISHABLE_DRAFT_STATUSES = new Set([
 ])
 
 function publishedChapterAutoContinueMessage(chapterSequence: number): string {
-  return `继续：第${String(chapterSequence)}章正文已发布且图治理已完成。若当前卷仍有未完成章节，本轮只切换焦点到第${String(chapterSequence + 1)}章并设置 continueTurn=true，下一回合从新章要求阶段开始讨论；梗概入库前不要把本轮当成梗概讨论，也不要越级写细纲或草稿。若当前卷已完成则结束任务或开新卷。`
+  return renderRuntimePrompt("discuss-messages", "advance-after-publication", { chapterSequence, nextSequence: chapterSequence + 1 })
 }
 
 function buildStayInStageContinueMessage(stage: DiscussProceedStage): string {
   const label = DISCUSS_PIPELINE_STAGE_LABELS[stage]
   switch (stage) {
     case "chapter_requirements":
-      return `继续：仍在${label}阶段。先与用户对齐本章要写什么；在梗概入库前不要写入剧情梗概以外的下一阶段材料，也不要把本轮当成梗概讨论。`
+      return renderRuntimePrompt("discuss-messages", "stay-in-chapter-requirements", { stageLabel: label })
     case "synopsis_discuss":
-      return `继续：仍在${label}阶段。针对已入库梗概讨论完善；在细纲入库前不要写入细纲或草稿。`
+      return renderRuntimePrompt("discuss-messages", "stay-in-synopsis", { stageLabel: label })
     case "outline_discuss":
-      return `继续：仍在${label}阶段。针对已入库细纲讨论；在草稿入库前不要写入正文草稿。`
+      return renderRuntimePrompt("discuss-messages", "stay-in-outline", { stageLabel: label })
     case "draft_discuss":
-      return `继续：仍在${label}阶段。针对已入库草稿讨论修改；用户确认「草稿可以，发布正文」前不要发布。`
+      return renderRuntimePrompt("discuss-messages", "stay-in-draft", { stageLabel: label })
     case "body_discuss":
-      return `继续：仍在${label}阶段。请用户确认「草稿可以，发布正文」；确认前不要进入下一章。`
+      return renderRuntimePrompt("discuss-messages", "stay-in-body", { stageLabel: label })
   }
 }
 

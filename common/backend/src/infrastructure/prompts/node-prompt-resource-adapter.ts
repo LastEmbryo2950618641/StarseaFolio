@@ -14,6 +14,7 @@ import {
   SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE,
   USER_TO_SYNOPSIS_GUIDE_RESOURCE,
   WEBNOVEL_PROSE_LOGIC_RESOURCE,
+  WORLD_RULES_OVERVIEW_RESOURCE,
   PLATFORM_BASE_RULE_RESOURCES,
   SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES,
   defaultSkillIdsForPhase,
@@ -26,9 +27,14 @@ import {
 
 import type { LoadedSkillResource, PromptResource, PromptResourcePort } from "../../application/index.js"
 import { digest } from "../../core/index.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 export class NodePromptResourceAdapter implements PromptResourcePort {
   public constructor(private readonly promptPackageRoot: string) {}
+
+  public async loadWorldRulesOverview(): Promise<PromptResource> {
+    return this.load(WORLD_RULES_OVERVIEW_RESOURCE)
+  }
 
   public async loadBaseRules(): Promise<PromptResource> {
     return this.load(BASE_RULES_RESOURCE)
@@ -126,7 +132,7 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
   public async loadDefaultSkillPack(phase: AIPhase | "synopsis_discuss"): Promise<PromptResource> {
     const skillIds = defaultSkillIdsForPhase(phase)
     if (skillIds.length === 0) {
-      const empty = `${formatSkillEvidenceHeader("none", false)}\n（本阶段无默认 skill 包）\n`
+      const empty = `${formatSkillEvidenceHeader("none", false)}\n${renderRuntimePrompt("turn-context", "empty-skill-pack", {}, this.promptPackageRoot)}\n`
       return {
         ref: `${PROMPT_CONTRACT_VERSION}:skill-pack:${phase}:empty`,
         version: PROMPT_CONTRACT_VERSION,
@@ -142,7 +148,7 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
       skillIds,
     })
     const text = composePromptTexts([
-      `【skill-pack:${phase}】默认挂载（不含 references；可用 load_skill 加深）`,
+      renderRuntimePrompt("turn-context", "phase-skill-pack", { phase }, this.promptPackageRoot),
       envelope,
       ...loaded.map((part) => part.text),
     ])

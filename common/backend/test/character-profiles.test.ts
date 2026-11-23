@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, CHARACTER_GUIDE, PROTOCOL_VERSION, characterUpdateSchema, parseCharacterProfile, settingsProposalPayloadSchema } from "@starseafolio/contracts"
+import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, PROTOCOL_VERSION, characterUpdateSchema, parseCharacterProfile, settingsProposalPayloadSchema } from "@starseafolio/contracts"
 import { NodeWorkspaceAdapter } from "../src/infrastructure/filesystem/node-workspace-adapter.js"
 import { NodeWorkspaceSnapshotAdapter } from "../src/infrastructure/filesystem/node-workspace-snapshot-adapter.js"
 import { NodeWorkspaceCatalogAdapter } from "../src/infrastructure/filesystem/node-workspace-catalog-adapter.js"
@@ -12,9 +12,12 @@ import type { WorkspaceDefaultDocuments } from "../src/application/workspace/por
 import { executeSynopsisTool, synopsisToolCatalog } from "../src/application/chapters/synopsis-workflow-tools.js"
 import { openChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
+const characterGuide = new URL("../../packages/prompt-contracts/resources/v1/guides/character-profiles.md", import.meta.url)
+
 const temporaryRoots: string[] = []
 const path = `${CHARACTER_DIRECTORY}/林照.json`
 const defaults: WorkspaceDefaultDocuments = {
+  worldRulesOverview: "# 世界推演规则总览\n",
   baseRules: "# 基础规则\n", contentHandling: "# 内容\n", webnovelProseLogic: "# 正文\n", plotSynopsisGuide: "# 梗概\n", userToSynopsisGuide: "# user->synopsis\n", synopsisToOutlineGuide: "# synopsis->outline\n", outlineToDraftGuide: "# outline->draft\n",
   settingsQueryGuide: "# 查询\n", settingsRevisionGuide: "# 修订\n", discussCreationDeskWorkflow: "# 讨论\n",
   agentMemoryIndex: "# 记忆\n", settingsReadme: "# 设定\n", referencesReadme: "# 参考\n", descriptionRules: "# 描写\n",
@@ -39,7 +42,7 @@ describe("character documents", () => {
     await mkdir(join(f.root, CHARACTER_DIRECTORY))
     await writeFile(join(f.root, CHARACTER_DIRECTORY, "旧角色.md"), "# 旧人物：原文保留\n")
     await f.workspace.ensurePlatformDocuments(f.root, defaults)
-    expect(await f.workspace.readMarkdown(f.root, CHARACTER_RULE_PATH)).toBe(CHARACTER_GUIDE)
+    expect(await f.workspace.readMarkdown(f.root, CHARACTER_RULE_PATH)).toBe((await readFile(characterGuide, "utf8")).replaceAll("\r\n", "\n"))
     expect(await f.workspace.readMarkdown(f.root, `${CHARACTER_DIRECTORY}/旧角色.md`)).toContain("原文保留")
     expect((await f.workspace.validate(f.root)).issues).toEqual([])
     await expect(f.workspace.createUserDirectory(f.root, CHARACTER_DIRECTORY)).rejects.toThrow(/固定/u)
@@ -125,7 +128,7 @@ describe("character documents", () => {
     await snapshots.restore(f.root, snapshot)
     expect(await f.workspace.readMarkdown(f.root, path)).toBe(original)
     await snapshots.restore(f.root, { ...snapshot, files: snapshot.files.filter(file => file.relativePath !== CHARACTER_RULE_PATH) })
-    expect(await f.workspace.readMarkdown(f.root, CHARACTER_RULE_PATH)).toBe(CHARACTER_GUIDE)
+    expect(await f.workspace.readMarkdown(f.root, CHARACTER_RULE_PATH)).toBe((await readFile(characterGuide, "utf8")).replaceAll("\r\n", "\n"))
   })
 
   it("rolls back direct shell edits and preserves unrelated files", async () => {

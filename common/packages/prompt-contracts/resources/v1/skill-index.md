@@ -1,15 +1,15 @@
 # 平台 Skill 索引（按需加载）
 
-完整 skill 正文**不**常驻系统规则。需要时用工具 `load_skill`（先 describe 再 invoke），或由宿主按阶段默认挂载。
+宿主按阶段挂载默认 skill。当前工具列表提供 `load_skill` 时，可先 describe 再 invoke，按需查阅其他 skill。
 arguments 示例：`{"skillId":"webnovel-dialogue","includeReferences":false}`。
 
 | id | 名称 | 策略 | 何时用 |
 |----|------|------|--------|
 | `webnovel-deslop` | 去 AI 味（deslop） | default(draft,synopsis_discuss) | 改工整/排比/翻译腔/空洞抒情；写正文或润色时用。 |
-| `webnovel-dialogue` | 对话与台词 | default(draft,synopsis_discuss) | 口语化、潜台词、角色声音、禁对白乒乓；写对白或改书面腔时用。 |
+| `webnovel-dialogue` | 对话与台词 | default(draft,synopsis_discuss) | 人物声口、潜台词与对白节奏的参考，按作品和场面取用。 |
 | `webnovel-human` | 人味 / 失控感 | onDemand | 表面去味后仍像说明书时用：非理性、留白、私货。 |
 | `webnovel-emotion` | 情绪演出 | onDemand | 喊情绪不演、缺身体反应时用；查情绪→外显对照。 |
-| `starsea-writing` | 星海写作主 Skill | default(synopsis_discuss) | 宿主无关主流程：创作台→设定→图治理→正文；`.folio` ui-state；脚本落盘。 |
+| `starsea-writing` | 星海写作主 Skill | default(synopsis_discuss) | 写作阶段与宿主交付。创作台走结构化草稿和宿主发布，独立脚本宿主使用 `.folio`。 |
 | `book-cold-start` | 开书冷启动 | default(synopsis_discuss) | 一句话→绑笔风的风格备选（命名/对话硬字段）→8维落盘→卷大纲；未完成禁正文。 |
 | `style-bible` | 项目风格手册与声口 | onDemand | 旁白距离、角色声音矩阵、称呼与禁改平。 |
 | `naming-consistency` | 命名称谓一致性 | onDemand | 防撞名、称呼术语前后一致。 |

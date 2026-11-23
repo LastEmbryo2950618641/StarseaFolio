@@ -88,6 +88,7 @@ class RecordingFakeModel implements AIModelPort {
     turnId: string
     envelopeId: string
     contextKinds: readonly string[]
+    systemRules?: string
     contextTurnIds: readonly (string | undefined)[]
     delta: Record<string, unknown>
     evidenceOwnerIds: readonly string[]
@@ -129,6 +130,7 @@ class RecordingFakeModel implements AIModelPort {
       turnId: request.turnId,
       envelopeId: request.envelopeId,
       contextKinds: (options?.contextMessages ?? []).map((message) => message.kind),
+      systemRules: options?.contextMessages?.find((message) => message.kind === "system_rules")?.content,
       contextTurnIds: (options?.contextMessages ?? []).map((message) => message.turnId),
       delta,
       evidenceOwnerIds: evidence.flatMap((item) => (
@@ -479,7 +481,7 @@ describe("discuss session chain", () => {
     }
   }, 20_000)
 
-  it("reuses the session chain on the second send without conversationHistory or unchanged synopsis", async () => {
+  it("refreshes the fixed rules for an existing session and keeps its prior turns", async () => {
     const model = new RecordingFakeModel()
     const harness = await openChapterHarness("Discuss Second Send", { model })
     temporaryDirectories.push(harness.root)
@@ -494,6 +496,16 @@ describe("discuss session chain", () => {
         message: "这一章从雨夜站台开始",
       })
       const afterFirst = model.calls.length
+      const upgradeDatabase = await openProjectDatabase(join(
+        harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite",
+      ))
+      try {
+        await upgradeDatabase.updateTable("synopsis_discuss_context_messages")
+          .set({ content_text: "旧版讨论规则", content_digest: digest("旧版讨论规则") })
+          .where("kind", "=", "system_rules").execute()
+      } finally {
+        await upgradeDatabase.destroy()
+      }
       await invoke(harness, "synopsis.conversation.send", {
         projectId: harness.projectId,
         workspaceRootRef: harness.workspaceRootRef,
@@ -502,6 +514,7 @@ describe("discuss session chain", () => {
       const secondSend = model.calls.slice(afterFirst)
       expect(secondSend.length).toBeGreaterThan(0)
       expect(secondSend[0]?.contextKinds).toContain("phase_request")
+      expect(secondSend[0]?.systemRules).toContain("你负责虚构小说的创作与续写")
       expect(secondSend[0]?.conversationHistory).toBeUndefined()
       expect(secondSend[0]?.evidenceOwnerIds.some((ownerId) => ownerId.includes("描写规则"))).toBe(false)
 
@@ -518,7 +531,7 @@ describe("discuss session chain", () => {
         expect(session).toBeDefined()
         const stored = await new SqliteSynopsisConversationRepository(database)
           .listDiscussContextMessages(session?.sessionId as string)
-        expect(stored.some((message) => message.kind === "system_rules")).toBe(true)
+        expect(stored.filter((message) => message.kind === "system_rules")).toHaveLength(1)
         expect(stored.some((message) => message.kind === "phase_request")).toBe(true)
       } finally {
         await database.destroy()

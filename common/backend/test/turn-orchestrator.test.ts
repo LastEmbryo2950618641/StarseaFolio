@@ -3920,6 +3920,11 @@ describe("TurnOrchestrator", () => {
       userInput: "世界从一盏雨夜中的灯开始。",
       chapterSequence: 1,
     })
+    await fixture.database.updateTable("model_context_messages")
+      .set({ content_text: "旧版推演规则", content_digest: "old-rules" })
+      .where("kind", "=", "system_rules").execute()
+    await fixture.database.updateTable("model_context_chains")
+      .set({ system_rules_digest: "old-rules" }).execute()
     const second = await orchestrator.execute({
       ...baseInput,
       userInput: "第二天清晨，灯下的人推开了门。",
@@ -3938,6 +3943,7 @@ describe("TurnOrchestrator", () => {
     expect(firstRequest?.messages.find((message) => message.kind === "phase_instruction")?.content)
       .toContain('"protocol":"context-budget-v1"')
     expect(secondRequest?.messages.filter((message) => message.kind === "system_rules")).toHaveLength(1)
+    expect(secondRequest?.messages[0]?.content).toContain("你负责虚构小说的创作与续写")
     expect(secondRequest?.messages.find((message) => message.kind === "canonical_chapter")?.content)
       .toContain("第一章 世界种子")
     expect(storedMessages.filter((message) => message.kind === "system_rules")).toHaveLength(1)
@@ -4659,6 +4665,7 @@ async function createFixture() {
     displayName: "Turn test",
     workspaceRootRef: workspaceRoot,
     defaults: {
+      worldRulesOverview: "# 世界推演规则总览\n",
       baseRules: "# base\n",
       contentHandling: "# content handling\n",
       webnovelProseLogic: "# prose logic\n",

@@ -27,7 +27,7 @@ import {
 } from "../infrastructure/sqlite/index.js"
 import type { Kysely } from "kysely"
 import type { RegistryDatabase } from "../infrastructure/sqlite/database-types.js"
-import { AGENT_MEMORY_INDEX_DEFAULT } from "../application/chapters/agent-memory.js"
+import { readBundledPromptMarkdown } from "../core/runtime-prompt.js"
 import { ProjectRuntime } from "./project-runtime.js"
 import { SharedPresentationLibrary } from "../infrastructure/filesystem/shared-presentation-library.js"
 
@@ -214,6 +214,7 @@ export class BackendContainer {
     if (this.workspaceDefaults !== undefined) return this.workspaceDefaults
     const prompts = new NodePromptResourceAdapter(this.promptPackageRoot)
     const [
+      worldRulesOverview,
       baseRules,
       contentHandling,
       webnovelProseLogic,
@@ -225,6 +226,7 @@ export class BackendContainer {
       settingsRevisionGuide,
       discussCreationDeskWorkflow,
     ] = await Promise.all([
+      prompts.loadWorldRulesOverview(),
       prompts.loadBaseRules(),
       prompts.loadContentHandling(),
       prompts.loadWebnovelProseLogic(),
@@ -236,7 +238,32 @@ export class BackendContainer {
       prompts.loadSettingsRevisionGuide(),
       prompts.loadDiscussCreationDeskWorkflow(),
     ])
+    const readSeed = (name: string) => readBundledPromptMarkdown(`resources/v1/workspace/${name}.md`, this.promptPackageRoot)
+    const [
+      agentMemoryIndex,
+      settingsReadme,
+      referencesReadme,
+      descriptionRules,
+      proseStyleRules,
+      stagingReadme,
+      stagingNotes,
+      stagingCharacters,
+      stagingWorld,
+      stagingPromoteIndex,
+    ] = await Promise.all([
+      readSeed("agent-memory-index"),
+      readSeed("settings-index"),
+      readSeed("reference-index"),
+      readSeed("description-placeholder"),
+      readSeed("prose-placeholder"),
+      readSeed("staging-index"),
+      readSeed("staging-notes"),
+      readSeed("staging-characters"),
+      readSeed("staging-world"),
+      readSeed("staging-promotion"),
+    ])
     return {
+      worldRulesOverview: worldRulesOverview.text,
       baseRules: baseRules.text,
       contentHandling: contentHandling.text,
       webnovelProseLogic: webnovelProseLogic.text,
@@ -247,25 +274,16 @@ export class BackendContainer {
       settingsQueryGuide: settingsQueryGuide.text,
       settingsRevisionGuide: settingsRevisionGuide.text,
       discussCreationDeskWorkflow: discussCreationDeskWorkflow.text,
-      agentMemoryIndex: AGENT_MEMORY_INDEX_DEFAULT,
-      settingsReadme: "# 设定集索引\n\n请在这里说明设定文件的内容、路径与适用条件，供 AI 按需选择读取。\n",
-      referencesReadme: "# 参考文件索引\n\n请在这里说明参考资料的内容、路径与使用条件，供 AI 按需选择读取。\n",
-      descriptionRules: "# 默认描写规则\n\n由用户在表现输出目录中继续定义。\n",
-      proseStyleRules: "# 默认笔风规则\n\n由用户在表现输出目录中继续定义。\n",
-      stagingReadme: [
-        "# 暂存区",
-        "",
-        "创作台讨论中的**中间态**草稿。权威设定仍以 `设定集/` 为准。",
-        "",
-        "- 每轮讨论后 Agent 自动更新本目录固定文件",
-        "- 用户确认「落盘」后写入设定集；对应条目标记 `settled`，仍可检索",
-        "- 超字数上限时优先清理最旧的已落盘条目",
-        "",
-      ].join("\n"),
-      stagingNotes: "# 本章讨论笔记\n\n（尚无条目）\n",
-      stagingCharacters: "# 人物草稿\n\n（尚无条目）\n",
-      stagingWorld: "# 世界与规则草稿\n\n（尚无条目）\n",
-      stagingPromoteIndex: "# 待落盘清单\n\n（尚无条目）\n",
+      agentMemoryIndex,
+      settingsReadme,
+      referencesReadme,
+      descriptionRules,
+      proseStyleRules,
+      stagingReadme,
+      stagingNotes,
+      stagingCharacters,
+      stagingWorld,
+      stagingPromoteIndex,
     }
   }
 }

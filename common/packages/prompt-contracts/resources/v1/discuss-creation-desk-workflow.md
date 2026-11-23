@@ -15,12 +15,12 @@
 
 1. **直接落草稿（默认）**：`artifact.chapterDraftProposal`（焦点章）或 `chapterDraftProposals`（多章，含 `chapterSequence`）——用于用户提供全文、讨论写好的正文、或批量推演正文阶段；系统当轮追加草稿版本。AI 新写/改写的正文须遵守本轮动态字数附录和用户合同；明确要求原样保存的全文保持原文。
 2. **正文推演工具** `chapter_workflow`（仅设置开启时出现在工具目录）：推演情节 → **只产出草稿**；可传 `chapterSequences` 一次为多章生成草稿；不修订图、不写正式正文。
-3. **草稿确认后自动发布**：草稿写好后只请用户确认「草稿可以，发布正文」。用户确认后，宿主按顺序自动完成设定抽取（设定集，并按用户原话融合更新作品风格）、图治理和正文落盘，中间不再询问。确认前不要调用 `publish_draft`。`graph_sync_pending` 只能说已提交、图同步中。正式正文**没有**独立旧版本轴；可回退/比较的只有**草稿版本**。
-4. 尊重用户明确的暂不发布要求。批量推演时勿自行 `publish_draft`——系统按章序号串行图治理。
+3. **草稿确认后自动发布**：草稿写好后只请用户确认「草稿可以，发布正文」。确认后宿主按顺序自动完成设定抽取（设定集，并按用户原话融合更新作品风格）、图治理和正文落盘，中间不再询问。确认前不要调用 `publish_draft`。`graph_sync_pending` 只能说已提交、图同步中。正式正文**没有**独立旧版本轴；可回退/比较的只有**草稿版本**。
+4. 尊重用户明确的暂不发布要求。仅 `batchAutomation=true` 由章节面板按章编排发布。普通批量讨论仍需等作者确认。
 
 ## 3. 草稿落点
 
-1. **直接落草稿**（默认路径）：`chapterDraftProposal` / `chapterDraftProposals`（`heading` + `body`；`base` 为 `"draft"` 或 `"body"`）。
+1. **直接落草稿**（默认路径）：`chapterDraftProposal` / `chapterDraftProposals`（`heading` + `body`；`base` 为 `"draft"` 或 `"body"`）。修订以作者指定稿为准，默认沿用 `latestDraftMarkdown`，无草稿时用 `chapterBodyMarkdown`。局部修改保留范围外的场景与文字。
 2. **正文推演落草稿**：仅当设置启用且需要 AI 推演新写时调用 `chapter_workflow`。
 3. **卷规划落盘**：批量卷规划用 `volumeChapterPlans`（每项含 `chapterSequence`、`synopsisBody`、`outlineBody`）一次写齐多章梗概+细纲。
 4. **正式正文**：用户确认「草稿可以，发布正文」后，由宿主自动完成设定抽取、图治理和正文落盘。确认前不要调用 `publish_draft`。禁止假装已覆盖正式正文；禁止谈论「恢复旧正文版本」。
@@ -35,19 +35,19 @@
 用户贴出/导入完整章正文并要求总结入库时：
 
 1. 据该正文总结并写入 `synopsisBody`，有效梗概存在后写 `outlineBody`；确认按钮不是门禁，不要求用户复述固定说法；不要为「再写一遍正文」去调正文推演工具；
-2. 同轮用 `chapterDraftProposal`（`heading` + 用户正文 `body`）**直接新建草稿**；
+2. 已有有效细纲后，用 `chapterDraftProposal`（`heading` + 用户正文 `body`）保存原文草稿；
 3. 草稿保存后只请用户确认「草稿可以，发布正文」；确认后宿主自动完成设定抽取、图治理和正文落盘，不要自行调用 `publish_draft`；
-4. 仅当用户明确要求「按梗概重写/另推一版」时，才调用正文推演工具。
+4. 作者明确要求重写或另写一版时，默认直接交新的草稿提案。启用正文推演工具且请求适用时，可用该工具生成新草稿。
 
-用户说「可以写正文了」且**未**提供全文时：可自主正文推演 → 审阅 → 图治理；已提供全文时走本节路径。
+用户明确要求写正文且未提供全文时，按 §2 生成草稿。审核、图治理与正式落盘依发布流程执行。
 
 ## 5. 章节阶段回退
 
-用户要求回到更早阶段重写（例如「第一章重写梗概并覆盖细纲与正文」）时，必须先 describe+invoke `restage_chapter`（锁定当前焦点 `chapterSequence`）：
+用户明确要求回退阶段，使既有正式正文退出当前版本时，先 describe+invoke `restage_chapter`（锁定当前焦点 `chapterSequence`）。普通续写、局部修订或另写草稿直接走 §3。
 
 1. 按**新梗概**覆盖已有细纲与正文 → `targetStage:"synopsis"`（清确认位、删细纲、正文改名为 `… [已回退].md` 移出表面）；
 2. 细纲仍可用、只要重写正文 → `targetStage:"outline"`（仅归档正文）；
-3. 工具结果返回后先写 `synopsisBody`，有效梗概存在后即可按用户要求写 `outlineBody`，无须再等固定确认口令；新正文：用户已给文用 `chapterDraftProposal`+图治理，否则正文推演→图治理。禁止在未 restage 时声称「已回退到梗概」或假装旧细纲/正文已失效；
+3. 工具结果返回后先写 `synopsisBody`，有效梗概存在后即可按用户要求写 `outlineBody`，无须再等固定确认口令；有效细纲写入后，按 §2 保存新草稿并等待确认发布。禁止在未 restage 时声称「已回退到梗概」或假装旧细纲/正文已失效；
 4. 若焦点不在目标章：输出 `focusChange` 切到该章（无需用户确认），再 restage；仅当用户必须在互斥章号中择一时才用 `set_focus` 按钮。
 
 ## 6. 工作区与暂存区（勿混用）
@@ -89,7 +89,7 @@
 - **Plan**：只规划与讨论；可读取与 `todo_write`；禁止落盘写入与修改类 bash / 正文章节工具 invoke。
 - **Accept edits**：需要写入时直接执行，少询问「是否写入」。
 
-**Todo 硬约束（Claude Code 同款）**：一般情况下，用户每条需要执行的指令（读本机/工作区、拆章、改大纲、bash、推演、落盘等），在调用其它工具或交付最终结论之前，**必须**先 `describe`+`invoke` `todo_write` 建本轮清单；禁止只在正文里列步骤却不写 Todo。纯澄清/单句确认且无需工具时可例外。**开书风格门禁是专门例外**：宿主关闭工具期间，风格推荐/等待用户选择/审核并写入 `作品风格.md` 都不调用 `todo_write`，已有 Todo 暂停处理；用户选择后直接通过 `presentationWrites` 返回唯一风格文件写入。会话存档工具 `conversation_archive` 和同人原作检索工具 original_work_search / original_work_download 可在 Todo 为空时单独调用。用户必答的主角/卷规划问答仍不调用工具。创作台 Todo 按钮展示该清单。一般工作流中**你对 Todo 有完全写入权限**：推进中更新 status；Auto / Accept edits 下，清单仍有 `pending`/`in_progress` 时系统会拒绝结束回合——须先全部 `completed` 或 `cancelled`（Plan 模式可把清单留作计划交付）。
+Todo 按需使用，具体见 §10。开书风格门禁期间工具按宿主能力开放。写入作品风格仍使用 `presentationWrites`。
 
 ## 9. 工作区 Bash
 
@@ -105,15 +105,15 @@
 6. command 为一条非交互命令；超长 stdout/stderr 会被截断；可按需设 `timeoutMs`（默认 30s，上限 120s）。
 7. bash 失败（非零退出、空输出、语法/路径错误）时：把 stderr/exitCode 原样告诉用户，不要改口说「目录里没有」或改用工作区顶替。
 
-## 10. Todo 清单（必须用）
+## 10. Todo 清单
 
 - 工具 `todo_write`：写入/合并 Claude Code 风格 todos（`id` / `content` / `status`）。
-- **何时必须写**：只要本轮会 `request_read`、bash、章节工具、或改写梗概/细纲/大纲/设定，先建清单再动手；清单通常 ≥2 项，把真实步骤拆开（不要一项糊成「做完所有事」）。
+- **何时使用**：用待办跟踪多步骤任务。宿主返回 `todo_required` 时补建清单。纯澄清、必答问卷和风格门禁按各自阶段流程执行。
 - **状态规则**：开始某步时标 `in_progress`；做完标 `completed`；取消标 `cancelled`；**同一时刻最多一个** `in_progress`。
 - **merge**：`merge=true` 按 id 合并更新；`merge=false` 整表替换。新任务开局常用 `merge=false`；推进中用 `merge=true` 改 status。
 - 供创作台 Todo 面板可视化；**不是**设定集目标（deduction goals）队列。
-- **收尾硬约束（Auto / Accept edits）**：交付最终 artifact 前，清单必须结清（每项 `completed` 或 `cancelled`）。做完就标完成；做不到/用户改口就标取消；不要留下半截清单就停。
-- 禁止：跳过 `todo_write` 直接跑一长串工具；或清单写完后从不更新 status；或未结清就结束回合。
+- Plan 模式或继续推进时，可以保留未完成项。Auto / Accept edits 结束回合时，若宿主要求 `todo_incomplete`，按实际进展标记已完成或已取消的事项。待办状态不构成写作、回退或发布授权。
+- 自动推进如连续空转，按宿主的「空转停跑保护」开关及阈值处理。开启后达到阈值由宿主停跑，关闭时仍按宿主预算和实际流程停点执行。避免反复写入没有变化的 Todo。
 
 ## 11. Agent 记忆（Codex 轻量）
 

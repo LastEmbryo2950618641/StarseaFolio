@@ -11,6 +11,7 @@ import type {
   PromptResourcePort,
 } from "../../../application/index.js"
 import type { PhaseRequestEnvelope } from "@starseafolio/contracts"
+import { renderRuntimePrompt } from "../../../core/runtime-prompt.js"
 
 import {
   DeepSeekAiModelAdapter,
@@ -180,13 +181,13 @@ function toAnthropicMessages(
   }
 
   if (conversation.length === 0) {
-    conversation.push({ role: "user", content: "Continue." })
+    conversation.push({ role: "user", content: renderRuntimePrompt("provider-auxiliary", "anthropic-empty-conversation") })
   } else if (conversation[0]?.role === "assistant") {
-    conversation.unshift({ role: "user", content: "Continue from the prior assistant turn." })
+    conversation.unshift({ role: "user", content: renderRuntimePrompt("provider-auxiliary", "anthropic-assistant-first") })
   }
 
   if (jsonMode) {
-    systemParts.push("Return exactly one JSON object and no Markdown fences or commentary.")
+    systemParts.push(renderRuntimePrompt("provider-auxiliary", "anthropic-json"))
   }
 
   return {

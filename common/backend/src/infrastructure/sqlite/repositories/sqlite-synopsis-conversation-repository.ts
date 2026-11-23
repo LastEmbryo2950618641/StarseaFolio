@@ -493,6 +493,19 @@ export class SqliteSynopsisConversationRepository {
     return rows.map(mapDiscussContextMessage)
   }
 
+  public async refreshDiscussSystemRules(sessionId: string, content: string): Promise<void> {
+    const contentDigest = digest(content)
+    await this.database.updateTable("synopsis_discuss_context_messages").set({
+      content_text: content,
+      content_digest: contentDigest,
+      token_estimate: estimateDiscussContextTokens(content),
+    }).where("session_id", "=", sessionId)
+      .where("kind", "=", "system_rules")
+      .where("hidden_at", "is", null)
+      .where("content_digest", "!=", contentDigest)
+      .execute()
+  }
+
   public async loadDiscussContextInputTokens(projectId: ProjectId, sessionId: string): Promise<number | undefined> {
     const latest = await this.database.selectFrom("synopsis_discuss_context_messages")
       .select("session_id")

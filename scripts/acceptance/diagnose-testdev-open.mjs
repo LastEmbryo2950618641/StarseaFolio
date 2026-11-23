@@ -66,6 +66,7 @@ const lifecycle = new ProjectLifecycleService(
 let openResult = "pending"
 try {
   await lifecycle.openByWorkspace(workspaceRootRef, Date.now(), {
+    worldRulesOverview: "# 世界推演规则总览\n",
     baseRules: "",
     plotSynopsisGuide: "# plot\n",
     settingsQueryGuide: "# settings query\n",

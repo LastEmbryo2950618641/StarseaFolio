@@ -85,7 +85,12 @@ export function normalizeWorkspacePath(path: string): string {
 /** Platform-projected base rules: never user-editable. */
 export function isPlatformLockedPath(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
-  return normalized === CHARACTER_RULE_PATH || normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
+  return isFixedRulesDocument(normalized) || normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
+}
+
+function isFixedRulesDocument(path: string): boolean {
+  return fixedWorkspaceEntries.some((entry) => entry.relativePath === path
+    && entry.entryKind === "file" && (entry.role === "base_rules" || entry.relativePath === CHARACTER_RULE_PATH))
 }
 
 /** Fixed manifest entry whose path must not be deleted or renamed by the user. */

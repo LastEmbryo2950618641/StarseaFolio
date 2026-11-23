@@ -66,7 +66,7 @@ export class BackendProcess {
       promptPackageRoot: options.promptPackageRoot,
     })
     const child = utilityProcess.fork(join(import.meta.dirname, "backend-host.js"), [], {
-      env: { ...process.env },
+      env: { ...process.env, WORLDSEED_PROMPT_ROOT: options.promptPackageRoot },
       serviceName: "StarseaFolio Backend",
       stdio: "pipe",
     })

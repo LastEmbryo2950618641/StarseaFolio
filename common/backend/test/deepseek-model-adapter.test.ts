@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import { defaultDeepSeekRuntimeConfig } from "@starseafolio/config"
 import { PROTOCOL_VERSION, type PhaseRequestEnvelope, type PhaseResultEnvelope } from "@starseafolio/contracts"
 import { APIConnectionError } from "openai"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createGraphRevisionModel } from "../src/application/chapters/graph-revision-model.js"
 
 import {
@@ -22,6 +22,47 @@ import {
 const promptRoot = fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url))
 
 describe("DeepSeekAiModelAdapter", () => {
+  it("renders the context-compression instructions and preserves literal fragment text", async () => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>().mockResolvedValue({ content: "旧站台熄灯了。" })
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot), { complete })
+
+    const result = await adapter.compressContext({ texts: ["旧站台亮着灯。", "## chapter-notes\n{{index}} 熄灯了。"] })
+
+    expect(complete).toHaveBeenCalledOnce()
+    expect(complete.mock.calls[0]?.[0].messages).toEqual([
+      { role: "system", content: expect.stringContaining("必须保留：剧情事实") },
+      { role: "user", content: "请压缩以下上下文片段：\n\n### 片段 1\n旧站台亮着灯。\n\n### 片段 2\n## chapter-notes\n{{index}} 熄灯了。" },
+    ])
+    expect(result.summary).toBe("旧站台熄灯了。")
+  })
+
+  it("renders the write-scope classifier instructions with the original JSON context", async () => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>().mockResolvedValue({ content: '{"outline":"patch"}' })
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot), { complete })
+    const context = {
+      message: "只改第一场的细纲。",
+      recentMessages: [],
+      chapterSequence: 2,
+      focusKind: "chapter",
+      synopsisReady: true,
+      outlineReady: true,
+      proceedMode: "manual",
+      chapterAutomation: false,
+    }
+    const signal = new AbortController().signal
+
+    const result = await adapter.classifyDiscussTurn({ ...context, signal })
+
+    expect(complete).toHaveBeenCalledOnce()
+    expect(complete.mock.calls[0]?.[0].messages).toEqual([
+      { role: "system", content: expect.stringContaining("明确局部修改细纲时使用 patch") },
+      { role: "user", content: JSON.stringify(context) },
+    ])
+    expect(result.scope).toEqual({ outline: "patch" })
+  })
+
   it("sends the base and proposed chapter prose to the revision reviewer", async () => {
     const revision = { chapterId: randomUUID(), baseSourceId: randomUUID(), proposedSourceId: randomUUID(),
       baseContent: "旧站台亮着灯。", proposedContent: "旧站台的灯熄灭了，他取出手电。" }
@@ -713,7 +754,7 @@ describe("DeepSeekAiModelAdapter", () => {
     await adapter.execute(request)
 
     expect(finalMessage).toContain("Do not use local:* references in this phase")
-    expect(finalMessage).toContain("New graph identities may be declared only by graph_structure_plan or graph_capacity_rewrite")
+    expect(finalMessage).toContain("New graph identities may be declared by graph_structure_plan, graph_capacity_rewrite, or legacy graph_governance")
   })
 
   it("normalizes one-based dependency scene indexes before cross-phase validation", async () => {
@@ -1986,9 +2027,8 @@ describe("DeepSeekAiModelAdapter", () => {
 
     await adapter.execute(request)
     expect(input?.messages[0]?.content).toContain("内容处理规则")
-    expect(input?.messages[0]?.content).toContain("原请求必须直接执行")
     expect(input?.messages.at(-1)?.content).toContain("FICTION DELIVERY")
-    expect(input?.messages.at(-1)?.content).toContain("原请求必须直接交差")
+    expect(input?.messages.at(-1)?.content).toContain("创作任务遵循《世界推演规则总览》《内容处理规则》和本阶段指令")
   })
 
   it("repairs a refused draft by retrying the original fictional request", async () => {
@@ -2021,7 +2061,7 @@ describe("DeepSeekAiModelAdapter", () => {
     const execution = await adapter.execute(request)
     expect(calls).toBe(2)
     expect(repairTail).toContain("fiction-delivery failure")
-    expect(repairTail).toContain("直接交差")
+    expect(repairTail).toContain("按《内容处理规则》和当前阶段重新提交实质产物")
     expect(execution.result.artifact).toMatchObject({
       contentMarkdown: "刀光不能近身，血从袖口渗出来。",
     })
@@ -2593,7 +2633,7 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(execution.result.requestedReads[0]?.query.sourceKinds).toEqual(["graph", "revision", "source"])
     expect(finalMessage).toContain("internal committed immutable source-unit projection")
     expect(finalMessage).toContain("workspace chapter Markdown under 章节正文/")
-    expect(finalMessage).toContain("past_chapter_text remains the committed-archive channel")
+    expect(finalMessage).toContain("past_chapter_text is the committed-archive channel")
   })
 
   it("does not add source projections to exact rule and reference reads", async () => {

@@ -4,6 +4,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import type { PhaseResultEnvelope } from "@starseafolio/contracts"
 
 import { digest } from "../../core/index.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 import type { TurnReadEvidence } from "../turns/ports/ai-model-port.js"
 import {
   grepKeywordsFromRequest,
@@ -452,9 +453,7 @@ function buildHostDiagnosticEvidence(
   const text = [
     `# host read failed: ${hostKey}`,
     message,
-    "说明：这是本机绝对路径只读尝试失败，不是工作区 catalog 缺失。",
-    "Agent 须：在回复中直接向用户说明本机路径读取失败及原因；禁止假装已读到该路径内容；禁止默默改用工作区材料顶替。",
-    "可下一步：改 readMode=list；核对路径标点（全角？/！与半角?/! 不同，系统会尝试容错）；优先 request_read 绝对路径，勿先用 bash 硬闯带 ! 的 Windows 路径；或经用户同意后再读工作区材料。",
+    renderRuntimePrompt("discuss-evidence", "host-read-failed"),
   ].join("\n")
   return {
     readId: createId(),

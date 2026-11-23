@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+export const WORLD_RULES_OVERVIEW_PATH = "世界推演规则/总览.md"
+
 import { idSchema } from "./ids.js"
 
 export const workspaceOperationStatusValues = ["queued", "running", "completed", "failed"] as const

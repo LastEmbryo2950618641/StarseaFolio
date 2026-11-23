@@ -3,6 +3,7 @@ import { aiPhaseValues, type AIPhase } from "@starseafolio/contracts"
 import { SKILL_INDEX_RESOURCE } from "./skill-registry.js"
 
 export const PROMPT_CONTRACT_VERSION = "v1" as const
+export const WORLD_RULES_OVERVIEW_RESOURCE = "resources/v1/world-rules-overview.md" as const
 export const BASE_RULES_RESOURCE = "resources/v1/base-rules.md" as const
 export const CONTENT_HANDLING_RESOURCE = "resources/v1/content-handling.md" as const
 export const WEBNOVEL_PROSE_LOGIC_RESOURCE = "resources/v1/webnovel-prose-logic.md" as const
@@ -43,6 +44,7 @@ export const WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES = Object.freeze([
  * Full vendor / discuss guides load via default skill pack or load_skill.
  */
 export const PLATFORM_BASE_RULE_RESOURCES = Object.freeze([
+  WORLD_RULES_OVERVIEW_RESOURCE,
   BASE_RULES_RESOURCE,
   CONTENT_HANDLING_RESOURCE,
   WEBNOVEL_PROSE_LOGIC_RESOURCE,

@@ -5,13 +5,13 @@ import type {
   PhaseModelExecution,
 } from "../turns/ports/ai-model-port.js"
 import { estimateModelMessageTokens } from "./context-window-manager.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 export const CONTEXT_FOLD_SUMMARY_PROTOCOL = "context-fold-summary-v1"
 export const CONTEXT_BUDGET_PROTOCOL = "context-budget-v1"
 
 const COMPRESS_PROMPT_RESERVE_TOKENS = 2_500
 const COMPRESS_OUTPUT_RESERVE_TOKENS = 4_500
-const FOLD_NOTICE = "以下区间已压缩。细节以工作区正文/设定为准，可按需 request_read；勿仅因压缩而反复回读旧章。"
 
 export type ContextFoldMessageDraft = Readonly<{
   role: "user"
@@ -302,7 +302,7 @@ export function buildFoldSummaryContent(input: {
 }): string {
   return JSON.stringify({
     protocol: CONTEXT_FOLD_SUMMARY_PROTOCOL,
-    notice: input.notice ?? FOLD_NOTICE,
+    notice: input.notice ?? renderRuntimePrompt("turn-context", "fold-notice"),
     foldedMessageCount: input.foldedMessageCount,
     foldedMessageIds: input.foldedMessageIds,
     summary: input.summary,
@@ -323,13 +323,15 @@ export function buildContextBudgetContent(input: {
     triggerRatio: input.triggerRatio,
     targetRatio: input.targetRatio,
     foldsApplied: input.foldsApplied,
-    guidance: [
-      `当前上下文约 ${String(input.contextTokens)} / ${String(input.contextWindowTokens)} tokens。`,
-      `达到窗口 ${String(Math.round(input.triggerRatio * 100))}% 会触发分段折叠，目标压到约 ${String(Math.round(input.targetRatio * 100))}%。`,
-      input.foldsApplied > 0
-        ? `已应用 ${String(input.foldsApplied)} 次折叠；不确定时可 request_read 工作区正文，但勿仅因折叠反复回读旧章。`
-        : "不确定时可 request_read 工作区正文；勿仅为预防压缩而提前回读大段正文。",
-    ].join(" "),
+    guidance: renderRuntimePrompt("turn-context", "budget", {
+      tokens: input.contextTokens,
+      window: input.contextWindowTokens,
+      trigger: Math.round(input.triggerRatio * 100),
+      target: Math.round(input.targetRatio * 100),
+      reading: input.foldsApplied > 0
+        ? renderRuntimePrompt("turn-context", "budget-folded", { count: input.foldsApplied })
+        : renderRuntimePrompt("turn-context", "budget-unfolded"),
+    }),
   })
 }
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, CHARACTER_GUIDE, isCharacterProfilePath, characterUpdateSchema, emptyCharacterProfile, parseCharacterProfile, formatCharacterProfile, applyCharacterFieldOperations, type CharacterUpdate } from "@starseafolio/contracts"
+import { WORLD_RULES_OVERVIEW_PATH } from "@starseafolio/contracts"
+import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, isCharacterProfilePath, characterUpdateSchema, emptyCharacterProfile, parseCharacterProfile, formatCharacterProfile, applyCharacterFieldOperations, type CharacterUpdate } from "@starseafolio/contracts"
 import { constants } from "node:fs"
 import {
   copyFile,
@@ -30,7 +31,6 @@ import {
   DEAI_DESCRIPTION_RULE_MARKDOWN,
   DEAI_DESCRIPTION_RULE_PATH,
   WORK_STYLE_RULE_PATH,
-  WORK_STYLE_SEED_MARKDOWN,
   digest,
   deriveVolumeDirectoryPath,
   fixedWorkspaceEntries,
@@ -48,14 +48,17 @@ import {
   type WorkspaceInventoryEntry,
   type WorkspaceValidationIssue,
 } from "../../core/index.js"
-import { BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT } from "../../core/workspace/batch-volume-deduction-plan-default.js"
-import { VOLUME_FIRST_WRITE_GATE_DEFAULT } from "../../core/workspace/volume-first-write-gate-default.js"
+import { readBundledPromptMarkdown } from "../../core/runtime-prompt.js"
 import { withCharacterWriteLock } from "./character-file-protection.js"
 import type {
   WorkspaceDefaultDocuments,
   WorkspacePort,
   WorkspaceValidationReport,
 } from "../../application/index.js"
+
+const BATCH_VOLUME_GUIDE_RESOURCE = "resources/v1/guides/batch-volume-deduction-plan.md"
+const CHARACTER_GUIDE_RESOURCE = "resources/v1/guides/character-profiles.md"
+const WORK_STYLE_SEED_RESOURCE = "resources/v1/workspace/work-style-seed.md"
 
 export class NodeWorkspaceAdapter implements WorkspacePort {
   public constructor(private readonly sharedPresentationRoot?: string) {}
@@ -86,6 +89,10 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
         await mkdir(path, { recursive: true })
       }
     }
+    await writeFile(resolveInside(root, WORLD_RULES_OVERVIEW_PATH), defaults.worldRulesOverview, {
+      encoding: "utf8",
+      flag: "wx",
+    })
     await writeFile(resolveInside(root, "世界推演规则/基础规则/base-rules.md"), defaults.baseRules, {
       encoding: "utf8",
       flag: "wx",
@@ -129,14 +136,14 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     )
     await writeFile(
       resolveInside(root, "世界推演规则/基础规则/batch-volume-deduction-plan.md"),
-      `${BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT}${VOLUME_FIRST_WRITE_GATE_DEFAULT}`,
+      await readBundledPromptMarkdown(BATCH_VOLUME_GUIDE_RESOURCE),
       { encoding: "utf8", flag: "wx" },
     )
     await writeFile(resolveInside(root, "世界推演规则/Agent记忆/MEMORY.md"), defaults.agentMemoryIndex, {
       encoding: "utf8",
       flag: "wx",
     })
-    await writeFile(resolveInside(root, CHARACTER_RULE_PATH), CHARACTER_GUIDE, { encoding: "utf8", flag: "wx" })
+    await writeFile(resolveInside(root, CHARACTER_RULE_PATH), await readBundledPromptMarkdown(CHARACTER_GUIDE_RESOURCE), { encoding: "utf8", flag: "wx" })
     await writeFile(resolveInside(root, "设定集/readme.md"), defaults.settingsReadme, {
       encoding: "utf8",
       flag: "wx",
@@ -201,49 +208,26 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     const root = await realpath(resolve(workspaceRootRef))
     await assertParentChainContainsNoLinks(root, resolveInside(root, `${CHARACTER_DIRECTORY}/placeholder.json`))
     await mkdir(resolveInside(root, CHARACTER_DIRECTORY), { recursive: true })
-    await writeFileIfMissing(resolveInside(root, CHARACTER_RULE_PATH), CHARACTER_GUIDE)
     await writeFileIfMissing(resolveInside(root, "设定集/作品简介.md"), "# 作品简介\n")
+    await assertParentChainContainsNoLinks(root, resolveInside(root, "世界推演规则/基础规则/base-rules.md"))
     await mkdir(resolveInside(root, "世界推演规则/基础规则"), { recursive: true })
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/content-handling.md"),
-      defaults.contentHandling,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/webnovel-prose-logic.md"),
-      defaults.webnovelProseLogic,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/plot-synopsis-guide.md"),
-      defaults.plotSynopsisGuide,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/user-to-synopsis-guide.md"),
-      defaults.userToSynopsisGuide,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/synopsis-to-outline-guide.md"),
-      defaults.synopsisToOutlineGuide,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/outline-to-draft-guide.md"),
-      defaults.outlineToDraftGuide,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/settings-query-guide.md"),
-      defaults.settingsQueryGuide,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/settings-revision-guide.md"),
-      defaults.settingsRevisionGuide,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/discuss-creation-desk-workflow.md"),
-      defaults.discussCreationDeskWorkflow,
-    )
-    await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/基础规则/batch-volume-deduction-plan.md"),
-      `${BATCH_VOLUME_DEDUCTION_PLAN_DEFAULT}${VOLUME_FIRST_WRITE_GATE_DEFAULT}`,
-    )
+    const platformRules: ReadonlyArray<readonly [string, string]> = [
+      [CHARACTER_RULE_PATH, await readBundledPromptMarkdown(CHARACTER_GUIDE_RESOURCE)],
+      [WORLD_RULES_OVERVIEW_PATH, defaults.worldRulesOverview],
+      ["世界推演规则/基础规则/content-handling.md", defaults.contentHandling],
+      ["世界推演规则/基础规则/webnovel-prose-logic.md", defaults.webnovelProseLogic],
+      ["世界推演规则/基础规则/plot-synopsis-guide.md", defaults.plotSynopsisGuide],
+      ["世界推演规则/基础规则/user-to-synopsis-guide.md", defaults.userToSynopsisGuide],
+      ["世界推演规则/基础规则/synopsis-to-outline-guide.md", defaults.synopsisToOutlineGuide],
+      ["世界推演规则/基础规则/outline-to-draft-guide.md", defaults.outlineToDraftGuide],
+      ["世界推演规则/基础规则/settings-query-guide.md", defaults.settingsQueryGuide],
+      ["世界推演规则/基础规则/settings-revision-guide.md", defaults.settingsRevisionGuide],
+      ["世界推演规则/基础规则/discuss-creation-desk-workflow.md", defaults.discussCreationDeskWorkflow],
+      ["世界推演规则/基础规则/batch-volume-deduction-plan.md", await readBundledPromptMarkdown(BATCH_VOLUME_GUIDE_RESOURCE)],
+    ]
+    for (const [relativePath, markdown] of platformRules) {
+      await refreshPlatformRule(root, relativePath, markdown)
+    }
     await mkdir(resolveInside(root, "世界推演规则/Agent记忆"), { recursive: true })
     await writeFileIfMissing(
       resolveInside(root, "世界推演规则/Agent记忆/MEMORY.md"),
@@ -251,7 +235,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     )
     await mkdir(resolveInside(root, "大纲"), { recursive: true })
     await mkdir(resolveInside(root, "表现输出/本作品描写"), { recursive: true })
-    await writeFileIfMissing(resolveInside(root, WORK_STYLE_RULE_PATH), WORK_STYLE_SEED_MARKDOWN)
+    await writeFileIfMissing(resolveInside(root, WORK_STYLE_RULE_PATH), await readBundledPromptMarkdown(WORK_STYLE_SEED_RESOURCE))
     if (this.sharedPresentationRoot === undefined) {
       await mkdir(resolveInside(root, "表现输出/描写规则"), { recursive: true })
       await mkdir(resolveInside(root, "表现输出/笔风规则"), { recursive: true })
@@ -727,6 +711,26 @@ async function writeFileIfMissing(path: string, content: string): Promise<void> 
     await writeFile(path, content, { encoding: "utf8", flag: "wx" })
   } catch (error) {
     if (!isAlreadyExistsError(error)) throw error
+  }
+}
+
+async function refreshPlatformRule(root: string, relativePath: string, markdown: string): Promise<void> {
+  const path = resolveInside(root, relativePath)
+  await assertParentChainContainsNoLinks(root, path)
+  try {
+    const current = await lstat(path)
+    if (!current.isFile() || current.isSymbolicLink()) throw new Error("Platform rules must use regular files")
+    const original = await readFile(path, "utf8")
+    if (original.replaceAll("\r\n", "\n") === markdown.replaceAll("\r\n", "\n")) return
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error
+  }
+  const pendingPath = `${path}.${randomUUID()}.tmp`
+  await writeFile(pendingPath, markdown, { encoding: "utf8", flag: "wx" })
+  try {
+    await rename(pendingPath, path)
+  } finally {
+    await rm(pendingPath, { force: true })
   }
 }
 

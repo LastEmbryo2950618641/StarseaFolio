@@ -1,6 +1,7 @@
 import type { TurnHandoffBrief, TurnMonitorPhaseSnapshot } from "@starseafolio/contracts"
 
 import type { StoredPhaseRun } from "../turns/ports/index.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 const MONITOR_SUMMARY_MAX = 280
 
@@ -19,20 +20,14 @@ export function formatTurnHandoffSystemMessage(brief: TurnHandoffBrief): string 
   const notes = brief.outlineNotes.length === 0
     ? "（无额外大纲备注）"
     : brief.outlineNotes.map((note) => `- ${note}`).join("\n")
-  return [
-    `【推演完成交接】第 ${String(brief.chapterSequence)} 章已正式发布。`,
-    `标题：${brief.chapterHeading}`,
-    `路径：${brief.chapterPath}`,
-    `任务：${brief.taskId}`,
-    "",
-    "正文摘要：",
-    brief.bodyDigest,
-    "",
-    "相对开推前要点：",
+  return renderRuntimePrompt("turn-context", "published-handoff", {
+    sequence: brief.chapterSequence,
+    heading: brief.chapterHeading,
+    path: brief.chapterPath,
+    taskId: brief.taskId,
+    body: brief.bodyDigest,
     notes,
-    "",
-    "请据此更新弧大纲/暂存，并建议下一章；不要自动开始正式推演。",
-  ].join("\n")
+  })
 }
 
 export function truncateChapterBodyDigest(content: string, maxChars = 1_200): string {

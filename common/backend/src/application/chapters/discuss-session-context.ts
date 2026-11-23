@@ -7,12 +7,13 @@ import type {
 import { MODEL_CONTEXT_DELTA_HEADER } from "../context/model-context-appender.js"
 import { CONTEXT_FOLD_SUMMARY_PROTOCOL } from "../context/context-compacting-execution.js"
 import { digest, resolveDescriptionRulePaths, listWorkDescriptionRuleFiles } from "../../core/index.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 import type { TurnReadEvidence } from "../turns/ports/ai-model-port.js"
 import { isPresentationRuleMarkdownPath, listUserRuleMarkdownPaths } from "./synopsis-workspace-reads.js"
 
 export const DISCUSS_HISTORY_SUMMARY_PROTOCOL = "discuss-history-summary-v1"
 export const DISCUSS_ARCHIVE_NOTICE_PROTOCOL = "discuss-archive-notice-v1"
-export const DISCUSS_ARCHIVE_NOTICE = "部分会话上下文已压缩。遇到继续、重写或引用旧要求而现有上下文不全时，可用 conversation_archive 按需查阅本会话的原始消息。以用户当前要求为准。工作区正文和设定可用 request_read 查阅。"
+export const DISCUSS_ARCHIVE_NOTICE = renderRuntimePrompt("discuss-session", "archive-notice")
 const DISCUSS_HISTORY_COMPACT_AFTER_TURNS = 12
 const DISCUSS_HISTORY_KEEP_RECENT_TURNS = 8
 export const DISCUSS_PROGRESS_PROTOCOL = "discuss-progress-v1"

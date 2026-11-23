@@ -72,7 +72,25 @@ export class SqliteTurnPersistence implements TurnPersistencePort {
     return this.database.transaction().execute(async (transaction) => {
       const existing = await transaction.selectFrom("model_context_chains").selectAll()
         .where("project_id", "=", input.projectId).executeTakeFirst()
-      if (existing !== undefined) return mapModelContextChain(existing)
+      if (existing !== undefined) {
+        if (existing.system_rules_digest === input.systemRulesDigest) return mapModelContextChain(existing)
+        const rules = await transaction.selectFrom("model_context_messages").select(["id", "token_estimate", "hidden_at"])
+          .where("chain_id", "=", existing.id).where("sequence_no", "=", 0).where("kind", "=", "system_rules")
+          .executeTakeFirstOrThrow()
+        const tokenEstimate = estimateTextTokens(input.systemRulesContent)
+        await transaction.updateTable("model_context_messages").set({
+          content_text: input.systemRulesContent,
+          content_digest: input.systemRulesDigest,
+          token_estimate: tokenEstimate,
+          hidden_at: null,
+        }).where("id", "=", rules.id).executeTakeFirstOrThrow()
+        const updated = await transaction.updateTable("model_context_chains").set({
+          system_rules_digest: input.systemRulesDigest,
+          token_estimate: existing.token_estimate - (rules.hidden_at === null ? rules.token_estimate : 0) + tokenEstimate,
+          updated_at: input.createdAtMs,
+        }).where("id", "=", existing.id).returningAll().executeTakeFirstOrThrow()
+        return mapModelContextChain(updated)
+      }
 
       const chainId = this.createId()
       const messageId = this.createId()

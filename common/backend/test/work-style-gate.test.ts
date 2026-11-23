@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -6,10 +7,14 @@ import {
 } from "../src/application/chapters/cold-start-style-gate.js"
 import {
   WORK_STYLE_REQUIRED_HEADINGS,
-  WORK_STYLE_SEED_MARKDOWN,
   assessWorkStyleMarkdown,
   isWorkStyleComplete,
 } from "../src/core/workspace/work-style-gate.js"
+
+const WORK_STYLE_SEED_MARKDOWN = readFileSync(
+  new URL("../../packages/prompt-contracts/resources/v1/workspace/work-style-seed.md", import.meta.url),
+  "utf8",
+).replaceAll("\r\n", "\n")
 
 function completeStyleMarkdown(): string {
   return [

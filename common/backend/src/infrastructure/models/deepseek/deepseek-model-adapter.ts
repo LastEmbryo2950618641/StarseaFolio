@@ -14,7 +14,6 @@ import type { DeepSeekRuntimeConfig } from "@starseafolio/config"
 import {
   discussTurnWriteScopeSchema,
   FictionDeliveryError,
-  fictionDeliveryReminder,
   internalDraftArtifactSchema,
   inspectPhaseFictionDelivery,
   isFictionDeliveryPhase,
@@ -31,6 +30,7 @@ import type {
   PromptResourcePort,
 } from "../../../application/index.js"
 import { ModelContextAppender } from "../../../application/index.js"
+import { renderRuntimePrompt } from "../../../core/runtime-prompt.js"
 import {
   assembleModelPhaseResult,
   phaseModelResultJsonSchema,
@@ -41,6 +41,8 @@ import { createModelReferenceView, type ModelReferenceView } from "./model-refer
 import { errorDetails, runtimeLog } from "../../diagnostics/index.js"
 
 const OPENAI_COMPATIBLE_USER_AGENT = "StarseaFolio/0.1"
+// The context store also uses this marker to recognize persisted output reminders.
+const OUTPUT_CONTRACT_PREFIX = "MANDATORY OUTPUT CONTRACT"
 
 export type SecretProvider = Readonly<{
   getSecret(reference: string): Promise<string>
@@ -116,20 +118,17 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
   public async compressContext(input: ContextCompressionInput): Promise<ContextCompressionResult> {
     input.signal?.throwIfAborted()
     const client = await this.clientPromise
-    const body = input.texts.map((text, index) => `### 片段 ${String(index + 1)}\n${text}`).join("\n\n")
+    const body = input.texts.map((text, index) => (
+      renderRuntimePrompt("provider-auxiliary", "compression-fragment", { index: index + 1, text })
+    )).join("\n\n")
     const messages: DeepSeekMessage[] = [
       {
         role: "system",
-        content: [
-          "你是小说创作上下文压缩器。将给定历史上下文折叠为更短的连续性摘要。",
-          "必须保留：剧情事实、人物关系、未决任务、用户硬约束、已确认设定要点。",
-          "丢弃：重复 schema、目录噪声、工具协议样板、可从工作区正文再读的大段原文。",
-          "只输出摘要正文，不要 Markdown 围栏，不要解释压缩过程。",
-        ].join("\n"),
+        content: renderRuntimePrompt("provider-auxiliary", "compression-system"),
       },
       {
         role: "user",
-        content: `请压缩以下上下文片段：\n\n${body}`,
+        content: renderRuntimePrompt("provider-auxiliary", "compression-request", { body }),
       },
     ]
     const startedAt = Date.now()
@@ -170,17 +169,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       messages: [
         {
           role: "system",
-          content: [
-            "按完整语义识别中文小说创作台本轮授权的写入范围。仅返回 JSON 对象，只包含本轮授权字段。",
-            '字段：synopsis="create"|"rewrite"（含补改梗概），outline="create"|"rewrite"|"patch"，draft="write"（写或改草稿），volume="whole_volume"（一次规划该卷多章梗概和细纲），volumeSynopsis=true，volumeOutline=true，volumeTargets=true（调整卷目标字数/章数）。',
-            "只授权当前请求要交付的内容；背景、旧材料、已经存在的前置文件和待办不授权写入。不把章节级与卷级文件混淆；普通问答、引用、举例、撤回或暂缓返回 {}。",
-            "写入已有有效规划使用 rewrite。新建缺失或占位规划使用 create。明确局部修改细纲时使用 patch。",
-            "最近对话仅用于理解指代和已明确接受的提议。单项修改就只返回该项；只有明确要求多项才同时返回。相同说法在不同上下文可能表达不同意图。",
-            "若用户把后续推进交给系统，才用 advance=true。用户明确要求仅改某项或本步就停时，不能附 advance；推进模式只决定已授权任务的停点。",
-            "明确要求切换章节焦点时用 focus=true；明确要求撤回现有正文回到推演时用 restage=true。",
-            "明确要求改章名或对齐标题用 chapterTitle=true，明确要求改卷名用 volumeTitle=true，明确要求通过命令执行工作区操作用 shell=true。",
-            "当前有可发布草稿，且用户明确批准将这份现有草稿入库时，才单独返回 {\"publish\":true}。否定、引用按钮文案、询问是否应发布、对旧版本的确认、要求先改写或等待都不能授权发布现有草稿。批量编排自行发布，不返回 publish。",
-          ].join("\n"),
+          content: renderRuntimePrompt("provider-auxiliary", "discuss-write-scope"),
         },
         { role: "user", content: JSON.stringify(context) },
       ],
@@ -222,12 +211,10 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         : Promise.resolve(options.phasePrompt),
       this.clientPromise,
     ])
-    const protocolMessage = [
-      `StarseaFolio protocol ${PROTOCOL_VERSION}.`,
-      `Current phase: ${request.phase}.`,
-      "Return exactly one JSON object and no Markdown fences or commentary.",
-      "The trailing user messages contain the mandatory output schema and current request-specific requirements.",
-    ].join("\n")
+    const protocolMessage = renderRuntimePrompt("provider-protocol", "phase-protocol", {
+      version: PROTOCOL_VERSION,
+      phase: request.phase,
+    })
     const modelRequest = this.contextAppender.createDelta(
       request,
       referenceView.request,
@@ -449,7 +436,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
             const { contentMarkdown } = internalDraftArtifactSchema.parse(result.artifact)
             const count = contentMarkdown.replace(/^\s*#\s+[^\n]+\n/u, "").replace(/\s+/gu, "").length
             if (count < minimum || count > maximum) {
-              throw new Error(`正文实际 ${String(count)} 字，要求 ${String(minimum)}–${String(maximum)} 字。请保留用户要求和既有笔风，调整并完整重交正文。`)
+              throw new Error(renderRuntimePrompt("provider-repair", "draft-word-count", { count, minimum, maximum }))
             }
           }
         }
@@ -525,20 +512,20 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         if (dedicatedGraphReferenceRepair) graphReferenceRepairUsed = true
         const validationText = formatValidationError(error)
         const modelValidationText = referenceView.toModelText(validationText)
-        const toolRequestExclusive = validationText.includes("toolRequest 不可与")
+        const repairReason = error instanceof FictionDeliveryError
+          ? "fiction-delivery-failure"
+          : error instanceof SyntaxError
+            ? "incomplete-response"
+            : validationText.includes("toolRequest 不可与")
+              ? "exclusive-tool-request"
+              : isGraphReferenceValidationError(error)
+                ? "invalid-graph-reference"
+                : "validation-failure"
         const repairMessage = {
           role: "user" as const,
           content: [
-            error instanceof FictionDeliveryError
-              ? "The previous response was a fiction-delivery failure. 上一份是失败输出：原请求必须直接交差。"
-              : error instanceof SyntaxError
-              ? "The previous response was truncated or syntactically incomplete. Regenerate the complete object from the original request; do not continue or echo the partial response."
-              : toolRequestExclusive
-              ? "上一轮非法：toolRequest 不能与章节写入/草稿/choices/focusChange 等同回。本轮二选一——只 toolRequest（另加 assistantMessage+finalSelfReview），或去掉 toolRequest 只交付产物。不要复述上一份无效 JSON。"
-              : isGraphReferenceValidationError(error)
-              ? "上一轮图引用非法：只能使用本轮已读到的 node_*/link_*（或已声明的 local:*），不能写章节名、人名或标题。请整份重生成合法 JSON。"
-              : "The previous response failed validation. Regenerate the complete object from the original request; do not echo the invalid response.",
-            `Validation error: ${modelValidationText}`,
+            renderRuntimePrompt("provider-repair", repairReason),
+            renderRuntimePrompt("provider-repair", "validation-error", { error: modelValidationText }),
             buildRepairReminder(request, error, modelValidationText, referenceView),
           ].join("\n"),
         }
@@ -742,7 +729,7 @@ function normalizeContextMessages(
     if (message.taskId === undefined || message.turnId === undefined || message.phase !== currentPhase) return true
     if (message.kind === "phase_protocol") return false
     if (message.kind === "phase_instruction" && message.content === currentPhaseInstruction) return false
-    return !(message.kind === "phase_request" && message.content.startsWith("MANDATORY OUTPUT CONTRACT"))
+    return !(message.kind === "phase_request" && message.content.startsWith(OUTPUT_CONTRACT_PREFIX))
   })
   return inherited.map((message, index) => {
     const role = message.role === "system" && index > 0 ? "user" as const : message.role
@@ -755,66 +742,43 @@ function mergeExecutionSignals(executionSignal: AbortSignal | undefined, timeout
 }
 
 function buildModelResultRules(request: PhaseRequestEnvelope, referenceView: ModelReferenceView): string {
-  const requestInput = asRecord(request.input)
-  const stageProjection = asRecord(requestInput.stageProjection)
+  const promptFile = "provider-protocol"
+  const stageProjection = asRecord(asRecord(request.input).stageProjection)
   const declaredLocalReferences = collectDeclaredLocalReferences(request)
   const mayDeclareLocalReferences = request.phase === "graph_governance"
     || request.phase === "graph_structure_plan"
     || request.phase === "graph_capacity_rewrite"
   const localReferenceRule = mayDeclareLocalReferences
-    ? "- For a new graph identity, use a local:* reference and reuse that same reference throughout this artifact; the backend resolves it once."
+    ? renderRuntimePrompt(promptFile, "declare-local-reference")
     : declaredLocalReferences.length > 0
-      ? `- This phase may reuse only local:* handles already declared by the staged graph structure (${declaredLocalReferences.join(", ")}); it must not declare or invent another local:* handle.`
-      : "- Do not use local:* references in this phase. New graph identities may be declared only by graph_structure_plan or graph_capacity_rewrite."
-  const graphGovernanceReferenceRule = request.phase === "graph_governance"
-    || request.phase === "graph_structure_plan"
-    || request.phase === "graph_capacity_rewrite"
+      ? renderRuntimePrompt(promptFile, "reuse-local-reference", { references: declaredLocalReferences.join(", ") })
+      : renderRuntimePrompt(promptFile, "no-local-references")
+  const graphReferenceRule = mayDeclareLocalReferences
     || request.phase === "graph_spacetime_settlement"
     || request.phase === "graph_retrieval_design"
     || request.phase === "graph_governance_review"
     ? [
-        request.phase === "graph_governance_review"
-          ? "- Review only the supplied stageProjection. Do not reproduce the complete graph_governance candidate in the result."
-          : "- The current graph stage result must finish below the provider's configured output limit. Keep every reason, explanation, selfReview, semanticText, content, and metadata value concise; do not repeat source prose across fields.",
-        "- In graph_governance, graph reference fields accept only node_*/link_* permanent IDs, legacy node-*/link-* aliases, or a local:* handle declared by a create mutation. Never put evidence_*/read-* in a graph reference field.",
-        "- predecessorRevisionReadRefs is the exception: it accepts only revision-bearing evidence_*/read-* references, never node or link identities.",
-        `- Revision-bearing evidence aliases available here: ${referenceView.revisionReadTokens.join(", ") || "none"}.`,
+        renderRuntimePrompt(promptFile, request.phase === "graph_governance_review"
+          ? "review-stage-projection"
+          : "graph-output-limit"),
+        renderRuntimePrompt(promptFile, "graph-reference-rules", {
+          revisionReadTokens: referenceView.revisionReadTokens.join(", ") || "none",
+        }),
       ].join("\n")
-    : "- evidence_*/read-* references identify evidence; node_*/link_* or legacy node-*/link-* references identify existing graph objects. Do not substitute one role for the other."
-  const crossPhaseChecklist = buildCrossPhaseChecklist(request)
+    : renderRuntimePrompt(promptFile, "evidence-and-graph-references")
   const stageProjectionRule = Object.keys(stageProjection).length === 0
-    ? "- This request has no stageProjection; use the declared phase artifacts and visible evidence."
-    : `- input.stageProjection (${String(stageProjection.kind)}) is the complete authoritative business input for this phase. Do not request or reconstruct a full graph_governance copy; inspect the projection directly and return only this phase's result.`
-  return [
-    "Model result rules:",
-    "- Treat the model-facing request as read-only input. Do not copy, restate, summarize, or serialize the request, read evidence, catalog, prior artifacts, or schemas into the result unless the phase schema explicitly requires that value.",
-    "- Completeness means one valid result for this phase, not a complete transcript of the input or a complete listing of the world. Each array item must represent one distinct required item; never repeat items to signal completeness.",
-    "- Keep all prose fields concise and specific. The only field intended for long-form narrative is draft.artifact.contentMarkdown; do not echo it into reason, selfReview, metadata, or other fields.",
-    "- Once the single top-level JSON object is complete and syntactically closed, stop generating immediately. Do not append a second object, explanation, or repeated continuation.",
-    `- This is phase ${request.phase}; do not return protocol, envelope, task, context, scope, request, dependency, or artifact-list IDs.`,
-    "- Return outcome, artifact, requestedReads, citedReadIds, unresolvedDependencies, reason, and selfReview.",
-    "- Use outcome=request_read if and only if requestedReads is non-empty. Every other outcome requires requestedReads=[].",
+    ? renderRuntimePrompt(promptFile, "no-stage-projection")
+    : renderRuntimePrompt(promptFile, "stage-projection", { kind: String(stageProjection.kind) })
+  return renderRuntimePrompt(promptFile, "model-result-rules", {
+    phase: request.phase,
     localReferenceRule,
-    graphGovernanceReferenceRule,
+    graphReferenceRule,
     stageProjectionRule,
-    crossPhaseChecklist,
-    "- Do not emit technical UUID fields. The backend creates technical IDs for chapters, sources, revisions, projections, settlements, decisions, and other records.",
-    "- For an existing graph identity, copy only the exact reference present in this request's readable evidence. Never invent an existing graph reference.",
-    `- Read-evidence to graph-owner alias map: ${referenceView.graphReferencePairs.join(", ") || "none"}.`,
-    "- Read requests contain semantic query intent only. Omit query fields that are not useful; infrastructure supplies bounded defaults.",
-    "- sourceKinds source covers the internal committed immutable source-unit projection, and on discuss also workspace chapter Markdown under 章节正文/ via request_read exactKeys. past_chapter_text remains the committed-archive channel (with workspace publish-path fallback when no archive exists).",
-    "- sourceKinds web runs sandboxed public-internet search/fetch. Put search phrases in semanticTexts (or non-URL exactKeys) and page URLs in exactKeys. Web evidence is external reference only and must not override committed graph state or invent in-world facts.",
-    "- For an exact quotation, title, or other exact persisted wording, provide exactKeys. When the same request searches graph or revision evidence, include source as well; summaries and semanticTexts must not impersonate exact source wording.",
-    "- Source evidence may expose relatedOwnerRefs with bounded graph projection summaries: these are the graph owners mechanically linked to that exact immutable source unit by settlement. Use those summaries first when reconstructing the source unit's time, place, state, or causal context; do not replace them with an unrelated graph candidate that merely has similar wording, and do not request every related owner again unless the summary is insufficient.",
-    "- input.resurfacedReadIds means your immediately preceding read request matched Evidence already visible in this context chain. The matching readEvidence entries are deliberately repeated in this delta; use them now and finish the current phase instead of requesting the same Evidence again.",
-    "- Source evidence exposes sourcePosition from immutable source order. isEnd=true identifies the last persisted unit of that source; isEnd=false means the unit must not be described as that source's ending. sequence and source boundaries are storage order, not story time.",
-    "- When continuation requires the end of an identified source and visible evidence is not isEnd=true, request sourceKinds=[source], copy its sourcePosition.sourceRef into sourceIds, and set sourceBoundary=end. Use sourceBoundary=start only when the beginning is required. Do not guess a source boundary from semantic similarity.",
-    "- For conflicting current graph evidence owned by different nodes or links, a larger committedSequence means a later committed world state and should be preferred over an older plan or local state. committedSequence is not story time; explicit story-time anchors and evolution relations still determine in-world chronology.",
-    `- citedReadIds may contain only model aliases in committedReadIds (${referenceView.committedReadTokens.join(", ") || "none"}) or visiblePendingIds (${referenceView.visiblePendingTokens.join(", ") || "none"}).`,
-    "- citedReadIds must include every visible evidence item that materially supports the returned artifact, reason, or selfReview. citedReadIds is an audit record only: omitting an already visible Evidence does not erase it from this turn or require it to be read again.",
-    "- input.retrievalGaps are notices that a bounded retrieval attempt found no readable evidence; they are not sources and must never be copied into citedReadIds.",
-    "- Unresolved dependencies contain description, requiredFor, and disposition only.",
-  ].join("\n")
+    crossPhaseChecklist: buildCrossPhaseChecklist(request),
+    graphReferencePairs: referenceView.graphReferencePairs.join(", ") || "none",
+    committedReadTokens: referenceView.committedReadTokens.join(", ") || "none",
+    visiblePendingTokens: referenceView.visiblePendingTokens.join(", ") || "none",
+  })
 }
 
 function collectDeclaredLocalReferences(request: PhaseRequestEnvelope): string[] {
@@ -840,18 +804,15 @@ function collectDeclaredLocalReferences(request: PhaseRequestEnvelope): string[]
 }
 
 function buildCrossPhaseChecklist(request: PhaseRequestEnvelope): string {
+  const promptFile = "provider-phase-checklists"
   const input = asRecord(request.input)
   if (request.phase === "synopsis_discuss") {
     const evidenceCount = Array.isArray(input.readEvidence) ? input.readEvidence.length : 0
-    return [
-      "- synopsis_discuss must either request_read OR return a complete artifact object; never omit artifact when outcome is continue.",
-      '- artifact must include assistantMessage (user-facing) and finalSelfReview; nest chapterTitle/synopsisBody/choices/goalProposals inside artifact when needed.',
-      "- Do not put '我先去读设定' style intentions into assistantMessage; use outcome=request_read instead.",
-      evidenceCount > 0
-        ? `- ${String(evidenceCount)} readEvidence item(s) are already visible. Prefer finishing with outcome=continue and a complete artifact; request_read only for missing files.`
-        : "- No readEvidence yet. If world/settings context is needed, start with outcome=request_read for 设定集/readme.md (sourceKinds reference).",
-      "- Prior published chapter bodies may be read with request_read (章节正文 exactKeys, sourceKinds source) and/or past_chapter_text; focus locks writes, not these reads.",
-    ].join("\n")
+    return renderRuntimePrompt(promptFile, "synopsis-discuss", {
+      evidenceRule: evidenceCount > 0
+        ? renderRuntimePrompt(promptFile, "synopsis-discuss-evidence", { evidenceCount })
+        : renderRuntimePrompt(promptFile, "synopsis-discuss-no-evidence"),
+    })
   }
   const artifacts = Object.keys(asRecord(input.validationArtifacts)).length === 0
     ? asRecord(input.artifacts)
@@ -859,16 +820,15 @@ function buildCrossPhaseChecklist(request: PhaseRequestEnvelope): string {
   if (request.phase === "dependency_audit") {
     const workflow = input.workflow === "evolution" ? "evolution" : input.workflow === "query" ? "query" : "turn"
     const sourceUnitIds = Array.isArray(input.sourceUnitIds) ? input.sourceUnitIds : []
-    return [
-      `- This dependency audit belongs to workflow=${workflow} and currently has ${String(sourceUnitIds.length)} persisted narrative source unit(s). Do not infer another workflow from the prose or prior artifacts.`,
-      sourceUnitIds.length > 0
-        ? `- The complete draft has narrative source unit indexes exactly: ${indexList(sourceUnitIds.length)}. sceneContinuity must not be empty and must describe every actual spacetime-distinct scene needed to cover that complete draft; graph_governance will bind all listed source units to these scenes.`
-        : workflow === "evolution"
-          ? "- This background evolution has no narrative source units. sceneContinuity may be empty only when the evolution artifact itself contains no spacetime-distinct scene that requires continuity auditing."
-          : "- No narrative source units are present. Do not invent draft scenes; include sceneContinuity entries only for actual phase content that requires spacetime continuity auditing.",
-      "- A newly inferred person, place, event, object, or other thing does not make a scene unsupported. Audit whether its time, place, prior evolution, and current state are continuous; do not omit the scene merely because some contents are newly created this turn.",
-      "- When the draft states a specific past action, continuing state, or existing result, supporting evidence must directly cover the same subject, action or state, and result. A nearby place, related entity, or similar theme is insufficient; request a bounded read when direct support is absent, and otherwise retain uncertainty without rejecting the whole turn.",
-    ].join("\n")
+    return renderRuntimePrompt(promptFile, "dependency-audit", {
+      workflow,
+      sourceUnitCount: sourceUnitIds.length,
+      sceneRule: sourceUnitIds.length > 0
+        ? renderRuntimePrompt(promptFile, "dependency-narrative-sources", { sourceIndexes: indexList(sourceUnitIds.length) })
+        : renderRuntimePrompt(promptFile, workflow === "evolution"
+          ? "dependency-background-evolution"
+          : "dependency-no-narrative-sources"),
+    })
   }
   if (request.phase === "rule_assembly") {
     const readableWorkspacePathCount = Array.isArray(input.readEvidence)
@@ -877,13 +837,7 @@ function buildCrossPhaseChecklist(request: PhaseRequestEnvelope): string {
           return typeof record.ownerKind === "string" && record.ownerKind.startsWith("workspace:")
         }).length
       : 0
-    return [
-      `- rule_assembly currently has ${String(readableWorkspacePathCount)} readable workspace path(s). Select only from those read-evidence paths and never enumerate workspaceCatalog as output.`,
-      "- selectedWorkspacePaths must contain unique paths. selectionReasons must have exactly the same path keys, with one short sentence per selected path.",
-      "- This phase has no long-text field. Never place file contents, rules, catalog entries, or repeated explanations inside any string field.",
-      "- Do not copy file contents, catalog entries, evidence payloads, prior artifacts, schemas, or the request into artifact fields. Return the smallest complete JSON result.",
-      '- If no additional workspace file is needed, return this compact artifact shape: {"selectedWorkspacePaths":[],"selectionReasons":{},"unresolvedRuleConflicts":[]}.',
-    ].join("\n")
+    return renderRuntimePrompt(promptFile, "rule-assembly", { readableWorkspacePathCount })
   }
   if (request.phase === "semantic_review") {
     const governance = asRecord(artifacts.graph_governance)
@@ -896,13 +850,12 @@ function buildCrossPhaseChecklist(request: PhaseRequestEnvelope): string {
           return typeof probeIndex === "number" ? [probeIndex] : []
         })
       : []
-    return [
-      "- semantic_review is advisory. Report only indexes and references for which you have an actual review conclusion; do not enumerate no-opinion items.",
-      `- affected frontiers available for review: ${frontiers.join(", ") || "none"}.`,
-      verificationProbeIndexes.length === 0
-        ? "- No application verification probes are available in this request."
-        : `- The application executed verification probes with indexes: ${verificationProbeIndexes.join(", ")}. Return exactly one verificationProbeAssessment for each of these indexes, preserve each executed descriptor unchanged, and do not add any other index.`,
-    ].join("\n")
+    return renderRuntimePrompt(promptFile, "semantic-review", {
+      frontiers: frontiers.join(", ") || "none",
+      probeRule: verificationProbeIndexes.length === 0
+        ? renderRuntimePrompt(promptFile, "semantic-review-no-probes")
+        : renderRuntimePrompt(promptFile, "semantic-review-probes", { probeIndexes: verificationProbeIndexes.join(", ") }),
+    })
   }
   if (request.phase === "graph_governance_review") {
     const verificationProbeExecutions = Array.isArray(input.verificationProbeExecutions)
@@ -911,19 +864,14 @@ function buildCrossPhaseChecklist(request: PhaseRequestEnvelope): string {
     const verificationProbeIndexes = verificationProbeExecutions.flatMap((execution) => (
       typeof execution.probeIndex === "number" ? [execution.probeIndex] : []
     ))
-    const temporalEvidenceRule = "- temporalClaimAssessments[].evidenceRefs accepts only evidence_*/read-* IDs present in this request's readEvidence. Never put node_*, link_*, proposal:* or local:* there; when a claim is supported only by current-turn artifacts or proposal-overlay results, leave evidenceRefs empty and explain that support in narrativeContext and reason."
+    const temporalEvidenceRule = renderRuntimePrompt(promptFile, "temporal-evidence-references")
     return verificationProbeIndexes.length === 0
-      ? [
-          "- No application verification probe has been executed yet. You must return outcome=request_read with at least one AI-defined requestedReads[].verificationProbe; do not finish the review and do not fabricate an assessment.",
+      ? renderRuntimePrompt(promptFile, "governance-review-no-probes", { temporalEvidenceRule })
+      : renderRuntimePrompt(promptFile, "governance-review-probes", {
+          probeIndexes: verificationProbeIndexes.join(", "),
+          probeRecords: verificationProbeExecutions.map(formatVerificationProbeExecution).join("\n"),
           temporalEvidenceRule,
-        ].join("\n")
-      : [
-          `- input.verificationProbeExecutions contains application-executed results for probe indexes: ${verificationProbeIndexes.join(", ")}. These are real execution records, not plans or model-generated claims.`,
-          ...verificationProbeExecutions.map(formatVerificationProbeExecution),
-          "- Assess each execution from verificationProbeExecutions together with the same request's readEvidence, returnedReadRefs, returnedGraphRefs, returnedProposalRefs, and resultDigest. Return exactly one verificationProbeAssessment for each listed probe index and no other index.",
-          "- Do not claim that probe execution results were not provided when these fields are present. A probe may still receive verdict=uncertain or verdict=fail when its actual returned evidence is insufficient.",
-          temporalEvidenceRule,
-        ].join("\n")
+        })
   }
   if (request.phase === "graph_spacetime_settlement") {
     const dependency = asRecord(artifacts.dependency_audit)
@@ -936,69 +884,59 @@ function buildCrossPhaseChecklist(request: PhaseRequestEnvelope): string {
       const sceneIndex = asRecord(value).sceneIndex
       return typeof sceneIndex === "number" ? [sceneIndex] : []
     })
-    return [
-      `- Required dependency-audit scene indexes are exactly: ${numberList(sceneIndexes)}. Return one sceneSpacetimeBinding for each listed index, with no missing, duplicate, or extra scene index.`,
-      `- Required narrative source unit indexes are exactly: ${indexList(sourceUnitIds.length)}. Their union across sceneSpacetimeBindings.sourceUnitIndexes must equal this list exactly once, with no missing, duplicate, negative, or extra index.`,
-      sourceUnitIds.length === 0
-        ? "- This is a background evolution with no narrative source units, so every sourceUnitIndexes array must be empty."
-        : "- Every dependency-audit scene in this turn is a narrative scene and must bind at least one source unit index.",
-      ...scenes.map((value, index) => {
+    return renderRuntimePrompt(promptFile, "graph-spacetime-settlement", {
+      sceneIndexes: numberList(sceneIndexes),
+      sourceIndexes: indexList(sourceUnitIds.length),
+      sourceRule: renderRuntimePrompt(promptFile, sourceUnitIds.length === 0
+        ? "background-scene-sources"
+        : "spacetime-narrative-scene-sources"),
+      sceneRequirements: scenes.map((value, index) => {
         const scene = asRecord(value)
         const sceneIndex = typeof scene.sceneIndex === "number" ? scene.sceneIndex : index
         const predecessorSceneIndexes = Array.isArray(scene.predecessorSceneIndexes)
           ? scene.predecessorSceneIndexes.filter((item): item is number => typeof item === "number")
           : []
         const requirements = [
-          `Scene ${String(sceneIndex)}: predecessorSceneIndexes must equal [${predecessorSceneIndexes.join(", ")}]`,
+          renderRuntimePrompt(promptFile, "spacetime-scene-predecessors", {
+            sceneIndex,
+            predecessorSceneIndexes: predecessorSceneIndexes.join(", "),
+          }),
         ]
         if (scene.predecessorRequired === true) {
-          if (predecessorSceneIndexes.length === 0) requirements.push("predecessorSceneAnchorRefs must be non-empty")
-          requirements.push("transitionPathRefs must be non-empty")
+          if (predecessorSceneIndexes.length === 0) requirements.push(renderRuntimePrompt(promptFile, "spacetime-scene-predecessor-anchors"))
+          requirements.push(renderRuntimePrompt(promptFile, "spacetime-scene-transition-path"))
         }
-        if (scene.correspondenceRequired === true) requirements.push("correspondenceRefs must be non-empty")
-        return `- ${requirements.join("; ")}.`
-      }),
-      `- proposalSettlements.proposalRefs must cover these proposal references exactly once: ${proposals.flatMap((value) => {
+        if (scene.correspondenceRequired === true) requirements.push(renderRuntimePrompt(promptFile, "spacetime-scene-correspondence"))
+        return renderRuntimePrompt(promptFile, "spacetime-scene-requirements", {
+          requirements: requirements.join("; "),
+        }) + "\n"
+      }).join(""),
+      proposalRefs: proposals.flatMap((value) => {
         const proposalRef = asRecord(value).proposalRef
         return typeof proposalRef === "string" ? [proposalRef] : []
-      }).join(", ") || "none"}.`,
-      `- temporalClaimSettlements must cover these temporal claims exactly once and preserve each claim's sceneIndex: ${temporalClaims.flatMap((value) => {
+      }).join(", ") || "none",
+      temporalClaims: temporalClaims.flatMap((value) => {
         const claim = asRecord(value)
         return typeof claim.claimRef === "string" && typeof claim.sceneIndex === "number"
           ? [`${claim.claimRef}->scene ${String(claim.sceneIndex)}`]
           : []
-      }).join(", ") || "none"}.`,
-      "- When predecessorRequired is true but predecessorSceneIndexes is empty, the predecessor is outside this turn. Bind it through predecessorSceneAnchorRefs and provide the actual transitionPathRefs that connect the prior state to this scene.",
-      "- A predecessorSceneRef may already be a graph or declared local reference; reuse it exactly when valid. When a predecessorSceneRef is evidence, convert it through the supplied evidence-to-graph-owner map before placing it in predecessorSceneAnchorRefs or transitionPathRefs. Never copy an evidence ID into a graph-owner field or invent a graph ID.",
-      "- historicalReturnRefs are graph paths only: use node_*/link_* permanent IDs, legacy node-*/link-* aliases, or declared local:* handles; never use evidence_*/read-*.",
-    ].join("\n")
+      }).join(", ") || "none",
+    })
   }
   if (request.phase === "graph_governance") {
     const dependency = asRecord(artifacts.dependency_audit)
     const scenes = Array.isArray(dependency.sceneContinuity) ? dependency.sceneContinuity : []
     const sourceUnitIds = Array.isArray(input.sourceUnitIds) ? input.sourceUnitIds : []
-    return [
-      "- Finalize mutations first, then make mutationSpacetimeSettlements cover every zero-based index in your returned mutations array exactly once. Do not use one-based numbering, omit the final index, or infer a fixed mutation count from the input.",
-      "- decisionRecords is advisory detail. Omit repetitive per-mutation decisions; uncovered mutations inherit this phase result's reason and selfReview.",
-      `- settlementRecords is an optional mechanical projection. Omit it when it would repeat the scene and mutation settlement data; the backend derives missing source-unit return entries. If you provide it, use zero-based sourceUnitIndex values and do not repeat indexes.`,
-      `- Required dependency-audit scene indexes are exactly: ${indexList(scenes.length)}. Return one sceneSpacetimeBinding for each listed index, with no missing, duplicate, or extra scene index.`,
-      `- Required narrative source unit indexes are exactly: ${indexList(sourceUnitIds.length)}. Their union across sceneSpacetimeBindings.sourceUnitIndexes must equal this list exactly once, with no missing, duplicate, negative, or extra index.`,
-      sourceUnitIds.length === 0
-        ? "- This is a background evolution with no narrative source units, so every sourceUnitIndexes array must be empty."
-        : "- Every dependency-audit scene in this turn is a narrative scene and must bind at least one source unit index, even when that scene has no new graph mutation. Never return an empty sourceUnitIndexes array for one of these scenes.",
-      "- For each sceneSpacetimeBinding, copy predecessorSceneIndexes exactly from dependency_audit. The first scene may therefore have an empty predecessorSceneIndexes array; never invent scene 0 or another current-turn index just to satisfy predecessorRequired.",
-      "- When predecessorRequired is true but predecessorSceneIndexes is empty, the predecessor is outside this turn. Bind it through predecessorSceneAnchorRefs using the exact existing graph-owner aliases mapped from the dependency evidence, and provide the actual transitionPathRefs that connect the prior state to this scene.",
-      "- dependency_audit predecessorSceneRefs are evidence references, not graph-owner fields. Convert them through the supplied evidence-to-graph-owner map before placing them in predecessorSceneAnchorRefs or transitionPathRefs; do not copy evidence IDs or invent graph IDs.",
-      "- historicalReturnRefs are graph paths only: use node_*/link_* permanent IDs, legacy node-*/link-* aliases, or local:*; never use evidence_*/read-*. Raw chapter/source return is already preserved by settlementRecords.",
-      "- edit_node.next must contain the complete latest current projection after applying this turn: preserve stable identity, descriptions, and retrieval information that remain true. Do not return only the changed fragment; revision history already preserves the previous projection.",
-    ].join("\n")
+    return renderRuntimePrompt(promptFile, "graph-governance", {
+      sceneIndexes: indexList(scenes.length),
+      sourceIndexes: indexList(sourceUnitIds.length),
+      sourceRule: renderRuntimePrompt(promptFile, sourceUnitIds.length === 0
+        ? "background-scene-sources"
+        : "governance-narrative-scene-sources"),
+    })
   }
   if (request.phase === "graph_structure_plan") {
-    return [
-      "- Return only structural proposals, affected frontiers, archive outlets, and their decision records. Do not emit scene bindings, retrieval projections, or spacetime settlements in this phase.",
-      "- Give every proposal one unique stable proposalRef and reuse it in decisionRecords; do not replace proposal references with mutation array indexes.",
-      "- edit_node.next must contain the complete latest current projection after applying this turn: preserve stable identity, descriptions, and retrieval information that remain true. Do not return only the changed fragment; revision history already preserves the previous projection.",
-    ].join("\n")
+    return renderRuntimePrompt(promptFile, "graph-structure-plan")
   }
   if (request.phase === "frontier_settlement") {
     const projection = asRecord(input.stageProjection)
@@ -1014,41 +952,41 @@ function buildCrossPhaseChecklist(request: PhaseRequestEnvelope): string {
     const priorFrontierStates = Array.isArray(projection.priorFrontierStates)
       ? projection.priorFrontierStates.map(asRecord)
       : []
-    return [
-      `- frontier_settlement must settle each approved frontier exactly once. Exact frontier list: ${approvedFrontiers.join(", ") || "none"}.`,
-      `- Approved frontier count: ${String(approvedFrontiers.length)}. ${approvedFrontiers.length === 0
-        ? "artifact.frontiers must be an empty array."
-        : `artifact.frontiers length must be exactly ${String(approvedFrontiers.length)} and must not be empty.`}`,
-      ...approvedFrontiers.map((reference, index) => (
-        `- artifact.frontiers[${String(index)}].frontierAnchorRef must be exactly ${JSON.stringify(reference)}.`
-      )),
-      "- A frontier is an independently resumable and discoverable local continuation boundary. It is not a mutation index and not a list of every node or link touched by graph governance; multiple mutations may belong to one frontier.",
-      "- Do not manufacture one frontier per mutation or copy the same spacetime anchors into many frontier records. If the approved list is empty, return an empty frontiers array.",
-      "- For every non-archived approved frontier, return that frontier's own last scene, time, and location anchors plus a non-empty revisitCondition. Use graph or local references already established in this request; do not invent technical IDs.",
-      approvedSceneBindings.length > 0
-        ? "- This turn has approved scene bindings. Choose scene, time, and location anchors only from their corresponding approved anchors; do not promote another readable object to an anchor in this final settlement phase."
-        : "- This background evolution has no approved scene binding. Reuse only each frontier's own prior anchors listed below; do not borrow another frontier's anchors or promote another readable object to an anchor.",
-      ...priorFrontierStates.map((state) => [
-        `- Prior anchors for frontier ${String(state.frontierAnchorRef)}:`,
-        `lastSceneAnchorRefs=${formatReferenceList(state.lastSceneAnchorRefs)}`,
-        `lastTimeAnchorRefs=${formatReferenceList(state.lastTimeAnchorRefs)}`,
-        `lastLocationAnchorRefs=${formatReferenceList(state.lastLocationAnchorRefs)}`,
-        `correspondenceRefs=${formatReferenceList(state.correspondenceRefs)}.`,
-      ].join("; ")),
-    ].join("\n")
+    return renderRuntimePrompt(promptFile, "frontier-settlement", {
+      approvedFrontiers: approvedFrontiers.join(", ") || "none",
+      approvedFrontierCount: approvedFrontiers.length,
+      lengthRule: approvedFrontiers.length === 0
+        ? renderRuntimePrompt(promptFile, "frontier-empty")
+        : renderRuntimePrompt(promptFile, "frontier-length", { approvedFrontierCount: approvedFrontiers.length }),
+      approvedFrontierRequirements: approvedFrontiers.map((reference, index) => (
+        renderRuntimePrompt(promptFile, "frontier-position", { index, reference: JSON.stringify(reference) }) + "\n"
+      )).join(""),
+      anchorRule: renderRuntimePrompt(promptFile, approvedSceneBindings.length > 0
+        ? "frontier-scene-anchors"
+        : "frontier-prior-anchors"),
+      priorFrontierStates: priorFrontierStates.map((state) => (
+        "\n" + renderRuntimePrompt(promptFile, "frontier-prior-state", {
+          frontierAnchorRef: String(state.frontierAnchorRef),
+          lastSceneAnchorRefs: formatReferenceList(state.lastSceneAnchorRefs),
+          lastTimeAnchorRefs: formatReferenceList(state.lastTimeAnchorRefs),
+          lastLocationAnchorRefs: formatReferenceList(state.lastLocationAnchorRefs),
+          correspondenceRefs: formatReferenceList(state.correspondenceRefs),
+        })
+      )).join(""),
+    })
   }
-  return "- Preserve every exact cross-phase checklist item supplied in the model-facing request."
+  return renderRuntimePrompt(promptFile, "default-checklist")
 }
 
 function formatVerificationProbeExecution(execution: Record<string, unknown>): string {
-  return [
-    `- Executed probe record: probeIndex=${String(execution.probeIndex)}`,
-    `status=${String(execution.status)}`,
-    `returnedReadRefs=${formatReferenceList(execution.returnedReadRefs)}`,
-    `returnedGraphRefs=${formatReferenceList(execution.returnedGraphRefs)}`,
-    `returnedProposalRefs=${formatReferenceList(execution.returnedProposalRefs)}`,
-    `resultDigest=${String(execution.resultDigest)}`,
-  ].join("; ")
+  return renderRuntimePrompt("provider-phase-checklists", "executed-probe", {
+    probeIndex: String(execution.probeIndex),
+    status: String(execution.status),
+    returnedReadRefs: formatReferenceList(execution.returnedReadRefs),
+    returnedGraphRefs: formatReferenceList(execution.returnedGraphRefs),
+    returnedProposalRefs: formatReferenceList(execution.returnedProposalRefs),
+    resultDigest: String(execution.resultDigest),
+  })
 }
 
 function formatReferenceList(value: unknown): string {
@@ -1064,27 +1002,20 @@ function numberList(values: readonly number[]): string {
 }
 
 function buildOutputContractPrefix(request: PhaseRequestEnvelope): string {
-  return [
-    "MANDATORY OUTPUT SCHEMA - stable instructions for the current phase:",
-    "The response must match this complete model-facing result schema:",
-    JSON.stringify(phaseModelResultJsonSchema(request.phase)),
-    "Only outcome, artifact, requestedReads, citedReadIds, unresolvedDependencies, reason, and selfReview may appear at the top level.",
-    "Use outcome=request_read if and only if requestedReads is non-empty; otherwise requestedReads must be an empty array.",
-    `All ${request.phase} phase fields defined by the schema must be nested inside artifact.`,
-    "Return one JSON object only. Do not add Markdown fences, commentary, or a custom outcome value.",
-    'Required top-level shape: {"outcome":"continue","artifact":{},"requestedReads":[],"citedReadIds":[],"unresolvedDependencies":[],"reason":"...","selfReview":"..."}',
-  ].join("\n")
+  return renderRuntimePrompt("provider-protocol", "output-schema", {
+    schema: JSON.stringify(phaseModelResultJsonSchema(request.phase)),
+    phase: request.phase,
+  })
 }
 
 function buildOutputReminder(request: PhaseRequestEnvelope, referenceView: ModelReferenceView): string {
-  const phaseRules = buildModelResultRules(request, referenceView)
   return [
-    "MANDATORY OUTPUT CONTRACT - follow the complete output schema in the preceding user message:",
-    "Citation aliases are local to the current request. Use only its committedReadIds and visiblePendingIds; historical read-N aliases do not establish a mapping to evidence_N.",
-    "FINAL OUTPUT DISCIPLINE: Treat all request data as read-only input; never echo or enumerate it. Return only the smallest valid phase result, with no duplicate array items or repeated prose. Close the one JSON object and stop immediately.",
-    `CURRENT REQUEST REQUIREMENTS FOR ${request.phase}:`,
-    phaseRules,
-    ...(isFictionDeliveryPhase(request.phase) ? [fictionDeliveryReminder()] : []),
+    renderRuntimePrompt("provider-protocol", "output-reminder", {
+      contractPrefix: OUTPUT_CONTRACT_PREFIX,
+      phase: request.phase,
+      rules: buildModelResultRules(request, referenceView),
+    }),
+    ...(isFictionDeliveryPhase(request.phase) ? [renderRuntimePrompt("provider-protocol", "fiction-delivery")] : []),
   ].join("\n")
 }
 
@@ -1094,45 +1025,37 @@ function buildRepairReminder(
   validationText: string,
   referenceView: ModelReferenceView,
 ): string {
+  const promptFile = "provider-repair"
   const input = asRecord(request.input)
   const sourceUnitCount = Array.isArray(input.sourceUnitIds) ? input.sourceUnitIds.length : 0
   const phase = request.phase
+  const lastSourceIndex = Math.max(0, sourceUnitCount - 1)
   const coverageHint = validationText.includes("Scene source coverage")
-    ? [
-        `- Repair scene source coverage completely: the union of all sceneSpacetimeBindings.sourceUnitIndexes must contain each zero-based index from 0 through ${String(Math.max(0, sourceUnitCount - 1))} exactly once.`,
-        "- Preserve the existing scene bindings and add every missing source unit to the scene that actually covers it; do not use an empty array for a narrative scene and do not move coverage to a later phase.",
-      ]
+    ? renderRuntimePrompt(promptFile, "scene-source-coverage", { lastSourceIndex })
     : validationText.includes("Source unit settlement records")
-      ? [
-          `- Repair source settlement coverage completely: settlementRecords.sourceUnitIndex must contain each zero-based index from 0 through ${String(Math.max(0, sourceUnitCount - 1))} exactly once, and every record must have at least one graph return path.`,
-        ]
-      : []
+      ? renderRuntimePrompt(promptFile, "source-settlement-coverage", { lastSourceIndex })
+      : undefined
   const errorHint = error instanceof FictionDeliveryError
-    ? ["- This was a fiction-delivery failure. Fulfill the original fictional request directly; do not refuse, apologize, warn, or substitute a safer plot. Narrative fields must start with story text."]
+    ? renderRuntimePrompt(promptFile, "fiction-delivery-hint")
     : error instanceof UnreadableCitationError
-      ? [
-          `- Current citation allowlist: ${JSON.stringify([...referenceView.committedReadTokens, ...referenceView.visiblePendingTokens])}.`,
-          "- Recheck each citation against readable evidence. Never infer alias mappings, reuse historical aliases, or remove a needed citation to pass validation; request the evidence again if it is missing.",
-        ]
+      ? renderRuntimePrompt(promptFile, "citation-hint", {
+          citationAllowlist: JSON.stringify([...referenceView.committedReadTokens, ...referenceView.visiblePendingTokens]),
+        })
       : isGraphReferenceValidationError(error)
-        ? [
-            "- Graph reference fields accept only owner IDs read in this turn (node_*/link_* permanent IDs, legacy node-*/link-* aliases, or a declared local:* handle). Never put chapter titles, character display names, scene labels, or other prose into a graph reference field.",
-            `- Read-evidence to graph-owner alias map: ${referenceView.graphReferencePairs.join(", ") || "none"}.`,
-            "- Replace every invalid reference listed in the validation error with one allowlisted owner ID from that map (or a declared local:*). Do not invent IDs and do not drop required bindings just to pass validation.",
-          ]
-      : error instanceof SyntaxError
-        ? ["- The prior result was incomplete or invalid JSON. Regenerate compact JSON with concise prose and close the complete object below the provider's configured output limit."]
-        : []
+        ? renderRuntimePrompt(promptFile, "graph-reference-hint", {
+            graphReferencePairs: referenceView.graphReferencePairs.join(", ") || "none",
+          })
+        : error instanceof SyntaxError
+          ? renderRuntimePrompt(promptFile, "syntax-hint")
+          : undefined
   return [
-    "REPAIR CONTRACT: the original mandatory output contract is already in the preceding request message.",
-    "Regenerate one complete result for the original phase. Return one JSON object with the same top-level shape and all required artifact fields; do not echo or patch only the invalid fragment.",
-    "Keep the existing gate and reference rules. Do not omit required coverage or weaken validation to make the response pass.",
-    ...errorHint,
-    ...coverageHint,
-    `Original phase: ${phase}.`,
-    ...(isFictionDeliveryPhase(phase) ? [fictionDeliveryReminder()] : []),
-    "Close the JSON object immediately after the required result.",
-  ].join("\n")
+    renderRuntimePrompt(promptFile, "repair-contract"),
+    errorHint,
+    coverageHint,
+    renderRuntimePrompt(promptFile, "original-phase", { phase }),
+    ...(isFictionDeliveryPhase(phase) ? [renderRuntimePrompt("provider-protocol", "fiction-delivery")] : []),
+    renderRuntimePrompt(promptFile, "close-result"),
+  ].filter((part) => part !== undefined).join("\n")
 }
 
 export function isGraphReferenceValidationError(error: unknown): boolean {

@@ -1,30 +1,14 @@
 import type { SynopsisConversationTodo } from "@starseafolio/contracts"
 
-export const DISCUSS_TODO_REQUIRED_HINT = [
-  "本轮尚未调用 todo_write，创作台 Todo 面板仍为空。",
-  "请先 describe+invoke todo_write（merge=false，至少 2 项真实步骤，将第一项标 in_progress），",
-  "再 request_read / bash / 章节工具或交付写入类 artifact。",
-  "禁止只在 assistantMessage 里列「脚本轮清单/步骤」却不写 Todo。",
-].join("")
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
-export const DISCUSS_TODO_INCOMPLETE_HINT = [
-  "本轮 Todo 仍有 pending/in_progress 项，不能结束回合。",
-  "你对 Todo 有完全写入权限：请先 outcome=continue + toolRequest 调用 todo_write（merge=true），",
-  "把已做完的标 completed，做不到/不再做的标 cancelled，下一项标 in_progress；",
-  "全部项均为 completed 或 cancelled 后，再交付最终 artifact。",
-  "禁止清单未结清就停下来只写 assistantMessage。",
-].join("")
+export const DISCUSS_TODO_REQUIRED_HINT = renderRuntimePrompt("discuss-repairs", "todo-required")
 
-export const DISCUSS_TODO_NO_PROGRESS_HINT = [
-  "todo_write 已连续多次重复或只调整任务清单，没有推进实际工作。",
-  "不要再次提交相同清单；请直接返回当前阶段的最终 artifact 和可执行 choices。",
-  "未完成项应保留 pending/in_progress 并说明阻塞原因，不得虚报 completed 或 cancelled。",
-].join("")
+export const DISCUSS_TODO_INCOMPLETE_HINT = renderRuntimePrompt("discuss-repairs", "todo-incomplete")
 
-export const DISCUSS_TOOL_EXCLUSIVE_GATE_HINT = [
-  "门禁：toolRequest 与写入类字段同回，系统只保留了工具调用。同回的写入、choices、focusChange 没有落盘。",
-  "不要声称这些字段已经保存。先完成当前工具，再重新交付被去掉的字段。",
-].join("")
+export const DISCUSS_TODO_NO_PROGRESS_HINT = renderRuntimePrompt("discuss-repairs", "todo-no-progress")
+
+export const DISCUSS_TOOL_EXCLUSIVE_GATE_HINT = renderRuntimePrompt("discuss-repairs", "tool-exclusive")
 
 /** Sequential chapter-index gate: cannot open draft N+2 before N is published. */
 export function discussChapterSequenceGateHint(
@@ -34,11 +18,7 @@ export function discussChapterSequenceGateHint(
   const deferred = deferredSequences.length === 0
     ? "跳号章"
     : deferredSequences.map((sequence) => `第${String(sequence)}章`).join("、")
-  return [
-    `门禁：正文新章草稿只能开到第${String(nextSequence)}章（chapter_index 下一序号）。`,
-    `${deferred} 的 chapterDraftProposal(s) 没有落盘。不要再跳号开草稿，也不要声称已经生成或保存。`,
-    `请更新 Todo：先完成第${String(nextSequence)}章草稿并走图修订发布为正文，再写下一章。`,
-  ].join("")
+  return renderRuntimePrompt("discuss-repairs", "chapter-sequence", { nextSequence, deferred })
 }
 
 export function isPrecedingChapterPublishGateError(error: unknown): boolean {

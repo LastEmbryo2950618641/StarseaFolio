@@ -8,6 +8,7 @@ import type {
 import type { ProjectRepository } from "../../projects/index.js"
 
 export type WorkspaceDefaultDocuments = Readonly<{
+  worldRulesOverview: string
   baseRules: string
   contentHandling: string
   webnovelProseLogic: string

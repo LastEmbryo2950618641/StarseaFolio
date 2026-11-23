@@ -1,4 +1,5 @@
 import type { PROTOCOL_VERSION, ProjectId } from "@starseafolio/contracts"
+import { WORLD_RULES_OVERVIEW_PATH } from "@starseafolio/contracts"
 
 export const PROJECT_MANIFEST_VERSION = 1 as const
 
@@ -40,6 +41,8 @@ export type ProjectManifest = Readonly<{
 }>
 
 export const fixedWorkspaceEntries: readonly FixedWorkspaceEntry[] = Object.freeze([
+  { key: "world-rules-overview", role: "base_rules", relativePath: WORLD_RULES_OVERVIEW_PATH, entryKind: "file",
+    immutablePath: true, allowedExtensions: [".md"], allowUserFolders: false, allowUserMarkdown: false },
   { key: "characters", role: "settings", relativePath: "设定集/人物", entryKind: "directory",
     immutablePath: true, allowedExtensions: [".json"], allowUserFolders: false, allowUserMarkdown: false },
   { key: "character-guide", role: "world_rules", relativePath: "世界推演规则/人物设定.md", entryKind: "file",

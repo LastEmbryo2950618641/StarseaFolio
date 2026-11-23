@@ -1,5 +1,5 @@
 /** UI-side lock classification — keep aligned with backend workspace-policy. */
-import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, isCharacterProfilePath } from "@starseafolio/contracts"
+import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, WORLD_RULES_OVERVIEW_PATH, isCharacterProfilePath } from "@starseafolio/contracts"
 
 import {
   isChapterPlanningMarkdownPath,
@@ -15,6 +15,7 @@ const BASE_RULES_PREFIX = "世界推演规则/基础规则"
 
 /** Fixed scaffold files: content editable, path not deletable. */
 const IMMUTABLE_FILE_PATHS = new Set([
+  WORLD_RULES_OVERVIEW_PATH,
   CHARACTER_RULE_PATH,
   "设定集/readme.md",
   "参考文件/readme.md",
@@ -59,7 +60,8 @@ export function normalizeWorkspacePath(path: string): string {
 
 export function isPlatformLockedPath(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
-  return normalized === CHARACTER_RULE_PATH || normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
+  return normalized === CHARACTER_RULE_PATH || normalized === WORLD_RULES_OVERVIEW_PATH
+    || normalized === BASE_RULES_PREFIX || normalized.startsWith(`${BASE_RULES_PREFIX}/`)
 }
 
 const VOLUME_FOLDER_PATTERN = /^第(?:\d+|[零一二三四五六七八九十百]+)卷\s+\S.*$/u
