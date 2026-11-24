@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises"
+import { realpath, rm } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { PROTOCOL_VERSION, type ProjectId } from "@starseafolio/contracts"
@@ -124,43 +124,49 @@ export class ProjectLifecycleService {
     nowMs: number,
     defaults: WorkspaceDefaultDocuments,
   ): Promise<CreatedProject> {
+    // Opening a project must not validate the editable sidebar inventory or
+    // platform prompt contents. Ensure missing platform scaffolding, then load.
     await this.workspace.ensurePlatformDocuments(workspaceRootRef, defaults)
-    const workspaceReport = await this.workspace.validate(workspaceRootRef)
-    assertWorkspaceReport(workspaceReport.issues)
-    const registered = await this.registry.findByWorkspaceRoot(workspaceReport.workspaceRootRef)
+    const canonicalRoot = await realpath(resolve(workspaceRootRef))
+    const registered = await this.registry.findByWorkspaceRoot(canonicalRoot)
     if (registered === undefined) {
       throw new ProjectLifecycleError("project_not_registered", "The workspace is not registered on this device")
     }
     const store = await this.internalStore.inspectProject(
       registered.projectId,
-      workspaceReport.workspaceRootRef,
+      canonicalRoot,
       registered.internalStoreRef,
     )
-    const session = await this.projectRepositories.open(store, workspaceReport.workspaceRootRef)
+    const session = await this.projectRepositories.open(store, canonicalRoot)
     try {
       const manifest = await session.repository.readManifest(registered.projectId)
       if (manifest === undefined) {
         throw new ProjectLifecycleError("manifest_mismatch", "The internal project manifest is missing")
       }
-      const digestInput = {
+      let baseRulesDigest = "missing"
+      try {
+        baseRulesDigest = digest(await this.workspace.readMarkdown(
+          canonicalRoot,
+          "世界推演规则/基础规则/base-rules.md",
+        ))
+      } catch {
+        // Missing base rules is not an open gate; the workspace can still load.
+      }
+      const expectedDigest = calculateManifestDigest({
         projectId: registered.projectId,
         displayName: manifest.displayName,
-        workspaceRootRef: workspaceReport.workspaceRootRef,
+        workspaceRootRef: canonicalRoot,
         internalStoreRef: store.internalStoreRef,
-        baseRulesDigest: workspaceReport.baseRulesDigest,
-      }
-      const expectedDigest = calculateManifestDigest(digestInput)
-      let resolvedManifest = manifest
-      if (manifest.manifestDigest !== expectedDigest) {
-        const legacyDigest = calculateManifestDigest(digestInput, manifest.fixedEntries)
-        if (legacyDigest !== manifest.manifestDigest) {
-          throw new ProjectLifecycleError("manifest_mismatch", "The workspace or platform base rules no longer match the project manifest")
-        }
-        resolvedManifest = {
-          ...manifest,
-          fixedEntries: fixedWorkspaceEntries,
-          manifestDigest: expectedDigest,
-        }
+        baseRulesDigest,
+      })
+      const resolvedManifest = manifest.manifestDigest === expectedDigest
+        ? manifest
+        : {
+            ...manifest,
+            fixedEntries: fixedWorkspaceEntries,
+            manifestDigest: expectedDigest,
+          }
+      if (resolvedManifest !== manifest) {
         await session.repository.reconcileManifest(resolvedManifest, nowMs)
       }
       await this.registry.touch(registered.projectId, nowMs)

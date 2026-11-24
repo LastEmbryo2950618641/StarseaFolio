@@ -24,7 +24,6 @@ import {
   SqliteProjectRegistryRepository,
   SqliteProjectRepositoryFactory,
 } from "../src/index.js"
-import type { ProjectLifecycleError } from "../src/index.js"
 
 const projectId = "00000000-0000-4000-8000-000000000001"
 const sourceId = "00000000-0000-4000-8000-000000000002"
@@ -229,7 +228,7 @@ describe("project lifecycle", () => {
     await registryDatabase.destroy()
   })
 
-  it("rejects base-rule drift and invalid workspaces on open", async () => {
+  it("loads existing projects without validating editable sidebar files", async () => {
     const root = temporaryDirectory()
     const workspaceRoot = join(root, "workspace")
     const appDataRoot = join(root, "app-data")
@@ -248,15 +247,13 @@ describe("project lifecycle", () => {
       nowMs: 100,
     })
 
+    // Platform base rules are editable/refreshable; a digest change must not
+    // strand an otherwise valid existing project.
     writeFileSync(join(workspaceRoot, "世界推演规则", "基础规则", "base-rules.md"), "modified", "utf8")
-    await expect(lifecycle.openByWorkspace(workspaceRoot, 200, defaults)).rejects.toMatchObject<Partial<ProjectLifecycleError>>({
-      code: "manifest_mismatch",
-    })
-    writeFileSync(join(workspaceRoot, "世界推演规则", "基础规则", "base-rules.md"), defaults.baseRules, "utf8")
+    await expect(lifecycle.openByWorkspace(workspaceRoot, 200, defaults)).resolves.toBeDefined()
     mkdirSync(join(workspaceRoot, "第六目录"))
-    await expect(lifecycle.openByWorkspace(workspaceRoot, 300, defaults)).rejects.toMatchObject<Partial<ProjectLifecycleError>>({
-      code: "workspace_invalid",
-    })
+    await expect(lifecycle.openByWorkspace(workspaceRoot, 300, defaults)).resolves.toBeDefined()
+    expect(existsSync(join(workspaceRoot, "第六目录"))).toBe(true)
     await registryDatabase.destroy()
   })
 
