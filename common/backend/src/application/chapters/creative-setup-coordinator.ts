@@ -1,4 +1,4 @@
-import { characterProfileSchema, type CharacterFieldValue, type ProjectId, type SynopsisConversationChoice, type SynopsisConversationMessage } from "@starseafolio/contracts"
+import { characterProfileSchema, countVolumeSubplots, VOLUME_SUBPLOT_LIMIT, type CharacterFieldValue, type ProjectId, type SynopsisConversationChoice, type SynopsisConversationMessage } from "@starseafolio/contracts"
 import { protagonistCreativeSetupFields } from "./creative-setup-state.js"
 import type { WorkspacePort } from "../workspace/index.js"
 import { digest } from "../../core/identity/digest.js"
@@ -90,6 +90,9 @@ export class CreativeSetupCoordinator {
       if (input.setupAnswerTo !== undefined && !answerConsumed) {
         if (state.status !== "collecting" || state.pendingQuestion?.id !== input.setupAnswerTo) {
           throw new Error("该问题已过期或与当前问题不匹配，请回答最新的问题")
+        }
+        if (state.pendingQuestion.field === "subplots" && countVolumeSubplots(input.message) > VOLUME_SUBPLOT_LIMIT) {
+          throw new Error(`本卷支线最多 ${String(VOLUME_SUBPLOT_LIMIT)} 条，请缩减后重新提交。`)
         }
         state = answerCreativeSetupQuestion(state, {
           questionId: input.setupAnswerTo, answer: input.message, now: this.dependencies.now(),

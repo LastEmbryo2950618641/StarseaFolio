@@ -27,21 +27,21 @@ describe("workspace tree labels", () => {
     expect(workspaceTreeLabel("世界推演规则/总览.md", "总览.md")).toBe("总览.md")
   })
 
-  it("renders Chinese labels in the tree and keeps the real name in the hover title", () => {
+  it("renders new prompt-document labels and keeps the real name in the hover title", () => {
     const html = renderToStaticMarkup(React.createElement(WorkspaceTree, {
       entries: [
-        { path: "世界推演规则", kind: "directory" },
-        { path: "世界推演规则/基础规则", kind: "directory" },
-        { path: "世界推演规则/基础规则/base-rules.md", kind: "file" },
+        { path: "提示词", kind: "directory" },
+        { path: "提示词/基础规则", kind: "directory" },
+        { path: "提示词/基础规则/系统提示词", kind: "directory" },
+        { path: "提示词/基础规则/系统提示词/01-世界与基础规则.md", kind: "file" },
       ],
-      selectedPath: "世界推演规则/基础规则/base-rules.md",
+      selectedPath: "提示词/基础规则/系统提示词/01-世界与基础规则.md",
       onSelect: () => {},
       onSelectLineage: () => {},
       onRefresh: () => {},
     }))
-    expect(html).toContain(">基础规则</span>")
-    expect(html).toContain('title="基础规则（base-rules.md）"')
-    expect(html).not.toContain(">base-rules.md</span>")
+    expect(html).toContain(">01-世界与基础规则.md</span>")
+    expect(html).toContain("写作基调.md（系统）".replace("写作基调.md", "01-世界与基础规则.md"))
   })
 
   it("resolves absolute paths for project files and shared presentation rules", () => {

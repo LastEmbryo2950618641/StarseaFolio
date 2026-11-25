@@ -6,7 +6,6 @@ import {
   windowCreationDeskMessages,
 } from "./creation-desk-render-budget.js"
 import {
-  resolveProceedAutonomy,
   type DiscussAgentMode,
   type DiscussCustomProceedGates,
   type DiscussFocusKind,
@@ -65,13 +64,17 @@ import {
   persistDiscussWritePermissionMode,
 } from "./discuss-write-permission.js"
 import {
-  DISCUSS_PROCEED_STAGE_ORDER,
+  displayGateAuto,
+  displayStageForProceedStage,
   loadCustomProceedGates,
   loadProceedMode,
   persistCustomProceedGates,
   persistProceedMode,
+  PROCEED_DISPLAY_STAGE_GROUPS,
+  PROCEED_DISPLAY_STAGE_LABELS,
+  PROCEED_DISPLAY_STAGE_ORDER,
   PROCEED_MODE_OPTIONS,
-  PROCEED_STAGE_LABELS,
+  type ProceedDisplayStage,
 } from "./proceed-mode.js"
 import {
   clampNoProgressGuardLimit,
@@ -643,7 +646,14 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   interactive={proceedMode === "custom"}
                   onToggleGate={(stage) => {
                     setCustomProceedGates((current) => {
-                      const next = { ...current, [stage]: !current[stage] }
+                      const gates = PROCEED_DISPLAY_STAGE_GROUPS[stage]
+                      const nextAuto = stage === "compose_discuss"
+                        ? !(current.synopsis_discuss && current.outline_discuss && current.draft_discuss)
+                        : !current[gates[0]!]
+                      const next = {
+                        ...current,
+                        ...Object.fromEntries(gates.map((gate) => [gate, nextAuto])),
+                      } as typeof current
                       persistCustomProceedGates(next)
                       return next
                     })
@@ -1792,11 +1802,12 @@ function ProceedStageBar(props: Readonly<{
   activeStage?: DiscussProceedStage
   activeStatus?: "waiting" | "running" | "done"
   interactive: boolean
-  onToggleGate(stage: DiscussProceedStage): void
+  onToggleGate(stage: ProceedDisplayStage): void
 }>): React.JSX.Element {
-  const activeIndex = props.activeStage === undefined
+  const activeDisplay = props.activeStage === undefined ? undefined : displayStageForProceedStage(props.activeStage)
+  const activeIndex = activeDisplay === undefined
     ? -1
-    : DISCUSS_PROCEED_STAGE_ORDER.indexOf(props.activeStage)
+    : PROCEED_DISPLAY_STAGE_ORDER.indexOf(activeDisplay)
   return (
     <ol
       className={`creation-desk-proceed-stages${props.interactive ? " interactive" : " readonly"}`}
@@ -1804,25 +1815,22 @@ function ProceedStageBar(props: Readonly<{
       data-mode={props.mode}
       aria-label={props.interactive ? "自定义推进节点" : "当前推进阶段"}
     >
-      {DISCUSS_PROCEED_STAGE_ORDER.map((stage, index) => {
-        const auto = resolveProceedAutonomy({
-          mode: props.mode,
+      {PROCEED_DISPLAY_STAGE_ORDER.map((stage, index) => {
+        const auto = displayGateAuto({
           stage,
+          mode: props.mode,
           customGates: props.gates,
           agentMode: props.agentMode,
         })
-        const isActive = props.activeStage === stage
-        const isDone = activeIndex >= 0 && (
-          index < activeIndex
-          || (isActive && props.activeStatus === "done")
-        )
+        const isActive = activeDisplay === stage
+        const isDone = activeIndex >= 0 && index < activeIndex
         const status = isActive ? (props.activeStatus ?? "running") : undefined
         const stateClass = isActive
           ? ` is-active status-${status ?? "running"}`
           : isDone
             ? " is-done"
             : " is-todo"
-        const label = PROCEED_STAGE_LABELS[stage]
+        const label = PROCEED_DISPLAY_STAGE_LABELS[stage]
         // Past materials show 完成; current shows 当前; future shows gate mode.
         const gateText = isActive ? "当前" : isDone ? "完成" : auto ? "自动" : "停等"
         const content = <>

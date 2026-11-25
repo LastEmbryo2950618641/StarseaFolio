@@ -57,6 +57,8 @@ export type ModelExecutionOptions = Readonly<{
   onSchemaRepair?: () => void
   /** Force DeepSeek thinking on for this call regardless of profile default. */
   forceThinking?: boolean
+  /** `text` bypasses JSON schema/artifact validation and returns raw text. */
+  outputMode?: "json" | "text"
 }>
 
 export type AIModelInfo = Readonly<{

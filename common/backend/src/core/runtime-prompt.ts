@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 
+import { extractPromptDocSection } from "@starseafolio/prompt-contracts"
+
 const require = createRequire(import.meta.url)
 const bundledPackageRoot = dirname(dirname(require.resolve("@starseafolio/prompt-contracts")))
 const runtimeDirectory = "resources/v1/runtime"
@@ -42,6 +44,25 @@ export async function readBundledPromptMarkdown(
   packageRoot: string = defaultPromptRoot(),
 ): Promise<string> {
   return (await readFile(resolveMarkdownPath(resourcePath, packageRoot), "utf8")).replaceAll("\r\n", "\n")
+}
+
+/** Read one marker-delimited section from a canonical prompt document. */
+export async function renderPromptDocSection(
+  resourcePath: string,
+  marker: string,
+  packageRoot: string = defaultPromptRoot(),
+): Promise<string> {
+  return extractPromptDocSection(await readBundledPromptMarkdown(resourcePath, packageRoot), marker)
+}
+
+/** Synchronous variant for sync review helpers. */
+export function renderPromptDocSectionSync(
+  resourcePath: string,
+  marker: string,
+  packageRoot: string = defaultPromptRoot(),
+): string {
+  const path = resolveMarkdownPath(resourcePath, packageRoot)
+  return extractPromptDocSection(readFileSync(path, "utf8").replaceAll("\r\n", "\n"), marker)
 }
 
 /** Resolve a named Markdown section and substitute the current request's values once. */

@@ -92,19 +92,13 @@ describe("prompt contracts", () => {
     }
   })
 
-  it("keeps platform composites thin (no vendor fulltext; skill index is discuss-only)", () => {
-    expect(PLATFORM_BASE_RULE_RESOURCES).toEqual([
-      WORLD_RULES_OVERVIEW_RESOURCE,
-      BASE_RULES_RESOURCE,
-      CONTENT_HANDLING_RESOURCE,
-      WEBNOVEL_PROSE_LOGIC_RESOURCE,
-      SETTINGS_QUERY_GUIDE_RESOURCE,
-    ])
-    expect(SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES).toContain(SKILL_INDEX_RESOURCE)
+  it("keeps platform system documents thin and skill index discuss-only", () => {
+    expect(PLATFORM_BASE_RULE_RESOURCES).toHaveLength(5)
+    expect(SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES).toContain("resources/v1/prompt-docs/system/06-discuss-skill-index.md")
     for (const vendor of WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES) {
       expect(PLATFORM_BASE_RULE_RESOURCES).not.toContain(vendor)
     }
-    expect(defaultSkillIdsForPhase("draft")).toEqual(["webnovel-deslop", "webnovel-dialogue", "outline-to-draft"])
+    expect(defaultSkillIdsForPhase("draft")).toEqual(["outline-to-draft"])
     // settings_extraction 需要《设定集修订规则》正式子集；settings-revision 随之由 onDemand 升为阶段默认。
     expect(defaultSkillIdsForPhase("settings_extraction")).toContain("settings-revision")
     // discuss 基础包只保留共同指南；阶段 skill 由 service 按本轮动作注入。
@@ -285,7 +279,7 @@ describe("prompt contracts", () => {
     expect(settingsExtractionPrompt).toContain("本阶段默认已挂载 `settings-revision`")
     expect(readResource(SETTINGS_REVISION_GUIDE_RESOURCE)).toContain("# 设定集修订规则")
     for (const skillId of ["webnovel-deslop", "webnovel-dialogue"]) {
-      expect(PLATFORM_SKILLS.find((skill) => skill.id === skillId)?.defaultPhases).toEqual(["draft"])
+      expect(PLATFORM_SKILLS.find((skill) => skill.id === skillId)?.defaultPhases).toEqual([])
     }
     expect(readResource(promptDefinitions.synopsis_discuss.resourcePath)).not.toContain("presentationWrites 给出完整 Markdown、`relativePath`（仅 `表现输出/描写规则/*.md`")
     expect(readResource(PLOT_SYNOPSIS_GUIDE_RESOURCE)).toContain("表现输出/本作品描写/")
@@ -295,7 +289,7 @@ describe("prompt contracts", () => {
     expect(readResource(OUTLINE_TO_DRAFT_GUIDE_RESOURCE)).toContain("再按本章需要选择段落、视点、句式、对白和描写")
     expect(readResource(OUTLINE_TO_DRAFT_GUIDE_RESOURCE)).toContain("已发布前文提供连续性事实、语感与声口")
     expect(readResource("resources/v1/outline-to-draft-guide.md")).toContain("含旧文件里由 AI 写成规则的表现偏好")
-    expect(readResource("resources/v1/outline-to-draft-guide.md")).toContain("核对用户合同动词")
+    expect(readResource("resources/v1/outline-to-draft-guide.md")).toContain("把本轮硬约束编译成可对文本判定的断言")
     expect(readResource("resources/v1/user-to-synopsis-guide.md")).toContain("合同动词可读")
     expect(readResource("resources/v1/synopsis-to-outline-guide.md")).toContain("把具体用笔留给正文")
     expect(readResource("resources/presentation/表现输出/描写规则/感官描写.md")).toContain("按场面、人物视点和作品语气决定")
@@ -398,7 +392,7 @@ describe("prompt contracts", () => {
     expect(synopsisToOutline).toContain("叙事尺度")
     expect(synopsisToOutline).toContain("不把一章一主峰作为固定结构")
     expect(synopsisToOutline).toContain("首次执行及相关方照办")
-    expect(outlineToDraft).toContain("不得用估算代替计数")
+    expect(outlineToDraft).toContain("自检报告实数，不用估算代替")
     expect(outlineToDraft).toContain("蒙太奇是否覆盖全部指定对象")
     expect(outlineToDraft).toContain("完整呈现用户指定的场面、结果、覆盖范围和场景数量")
     expect(outlineToDraft).toContain("阅读体验共同成立")

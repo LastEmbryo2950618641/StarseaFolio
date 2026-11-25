@@ -1,3 +1,4 @@
+import { buildVolumeLifecycle } from "@starseafolio/contracts"
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
@@ -128,12 +129,35 @@ describe("volume story planning", () => {
 
     expect(html).toContain("待用户确认")
     expect(html).toContain('data-testid="volume-planning-status"')
+    expect(html).toMatch(/data-testid="volume-planning-status".*data-testid="chapter-browse-volume-lifecycle".*data-testid="chapter-browse-volume-storyline".*data-testid="chapter-browse-volume-hooks"/s)
     expect(html).toContain('data-testid="volume-detail-tab-info"')
     expect(html).toContain('data-testid="volume-detail-tab-synopsis"')
     expect(html).toContain('data-testid="volume-detail-tab-outline"')
     expect(html).not.toContain('data-testid="chapter-browse-volume-synopsis"')
     expect(html).not.toContain('data-testid="chapter-browse-volume-outline"')
     expect(html).not.toContain("用户已确认")
+  })
+
+  it.each([
+    { activeVolume: "第一卷 风起", label: "待标记卷末", subplotCount: "3/6" },
+    { activeVolume: "第二卷 别卷", label: "待开始", subplotCount: "0/6" },
+    { activeVolume: undefined, label: "待开始", subplotCount: "0/6" },
+  ])("uses authoritative lifecycle only for the matching volume: %j", ({ activeVolume, label, subplotCount }) => {
+    const active = buildVolumeLifecycle({
+      started: true, styleReady: true, protagonistReady: true, conceptionReady: true,
+      ...storyline, subplots: "一；二；三", chapterCount: 8, chapterLimit: 8,
+    })
+    const html = renderToStaticMarkup(React.createElement(ChapterBrowseDetailRail, {
+      projectId: "project",
+      workspaceRootRef: "workspace",
+      chapter: undefined,
+      volume: { folderName: "第一卷 风起", chapters: [] },
+      activeVolumeLifecycle: { ...active, ...(activeVolume === undefined ? {} : { volumeFolderName: activeVolume }) },
+      onOpenBody: vi.fn(),
+    }))
+
+    expect(html).toContain(`已确认支线 ${subplotCount}`)
+    expect(html).toContain(`<span>卷末</span><span>${label}</span>`)
   })
 })
 
@@ -172,6 +196,7 @@ describe("volume info story display", () => {
 
     expect(html).toContain("2/8")
     expect(html).toContain("6,200 / 24,000")
+    expect(html).toContain("已确认支线 2/6")
     expect(html).toContain("首次写入")
     expect(html).toContain("写入3次")
     expect(html).toContain(storyline.opening)
@@ -202,8 +227,9 @@ describe("volume info story display", () => {
     expect(html).not.toContain("data-ready")
   })
 
-  it("keeps unconfirmed story text visible for review", () => {
+  it("keeps unconfirmed story text visible for review without counting it as confirmed", () => {
     const html = renderInfo({ storylineConfirmedAtMs: undefined })
+    expect(html).toContain("已确认支线 0/6")
     expect(html).toContain(storyline.opening)
     expect(html).toContain(storyline.climaxes)
     expect(html).toContain(storyline.ending)

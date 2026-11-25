@@ -15,6 +15,7 @@ import {
   type DiscussProceedProgress,
   type DiscussProceedStage,
   DISCUSS_PIPELINE_STAGE_LABELS,
+  buildVolumeLifecycle,
   resolveDiscussPipelineStage,
   resolveDiscussProceedMode,
   resolveProceedAutonomy,
@@ -121,6 +122,18 @@ import { ChapterTemporalSourceResolver } from "./chapter-temporal-source-resolve
 import type { SqliteSynopsisConversationRepository } from "../../infrastructure/sqlite/repositories/sqlite-synopsis-conversation-repository.js"
 import { runtimeLog } from "../../infrastructure/diagnostics/index.js"
 import { synopsisConversationStreamHub } from "./synopsis-conversation-stream-hub.js"
+import { ComposeProtocolError, composeArtifactFromText, composeSections, extractComposeIntentMarker, extractContinueTurnMarker, parseComposeFocusTag, parseComposeHostTags } from "./compose-artifact.js"
+import { isVolumeChapterCapReached, isVolumeStarted, nextVolumeFolderName, readVolumeLifecycleState, saveVolumeLifecycleState, transitionVolumeLifecycle, volumeLifecycleStatePath } from "./volume-lifecycle-state.js"
+import { parseComposeGoalProposals } from "./compose-goal-proposals.js"
+import { parseComposeToolRequest } from "./compose-tool-request.js"
+import { parseComposeStagingPromote } from "./compose-staging-promote.js"
+import { parseComposeOutlinePatch } from "./compose-outline-patch.js"
+import { composeVolumePlanArtifactFromText } from "./compose-volume-plan.js"
+import { parseComposeWritingSettings } from "./compose-writing-settings.js"
+import { buildComposeWorkStylePrompt, composeWorkStyleArtifactFromText } from "./compose-work-style.js"
+import { extractBlock, parseCreativeSetupOutput, parseDiscussChoices, parseWorkMetadataTags } from "./creative-setup-output.js"
+import { composeProgressForEvent } from "./compose-stage.js"
+import { ComposeStreamParser } from "@starseafolio/prompt-contracts"
 import { retainDiscussWrites, restoreDiscussWrites, type PendingDiscussWrites } from "./discuss-pending-artifact.js"
 import { describeDiscussWrites, formatDiscussBlockNote } from "./discuss-block-note.js"
 import {
@@ -243,6 +256,8 @@ import {
 
 export class SynopsisInvalidStateError extends Error {}
 
+class VolumeRolloverConflictError extends SynopsisInvalidStateError {}
+
 type ChapterDraftProposal = Readonly<{
   base: "body" | "draft"
   baseDraftVersionId?: string
@@ -262,6 +277,9 @@ type VolumeChapterPlan = Readonly<{
 }>
 
 type VolumePlanningContext = NonNullable<NonNullable<TurnPhaseInput["synopsisDiscuss"]>["volumePlanning"]>
+type VolumeBoundaryAction = "start" | "end" | "revise"
+const VOLUME_BOUNDARY_LABEL: Record<VolumeBoundaryAction, string> = { start: "卷始", end: "卷末", revise: "修订" }
+const volumeBoundaryMarker = (action: VolumeBoundaryAction): string => `<volume-${action}/>`
 
 export type SynopsisConversationServiceDependencies = SynopsisWorkflowToolCallbacks & Readonly<{
   chapters: ChapterResolveService
@@ -320,7 +338,7 @@ export class SynopsisConversationService {
       session: reconciled,
     })
     return {
-      session: reconciled,
+      session: await this.withVolumeLifecycle(input.workspaceRootRef, reconciled),
       messages: [...messages],
       ...(usage === undefined ? {} : { usage }),
       proceedProgress,
@@ -350,7 +368,7 @@ export class SynopsisConversationService {
         session: reconciled,
       })
       return {
-        session: reconciled,
+        session: await this.withVolumeLifecycle(input.workspaceRootRef, reconciled),
         messages: [...messages],
         ...(usage === undefined ? {} : { usage }),
         proceedProgress,
@@ -403,7 +421,7 @@ export class SynopsisConversationService {
       session,
     })
     return {
-      session,
+      session: await this.withVolumeLifecycle(input.workspaceRootRef, session),
       messages: [...messages],
       ...(usage === undefined ? {} : { usage }),
       proceedProgress,
@@ -416,12 +434,17 @@ export class SynopsisConversationService {
     chapterSequence?: number
     relativePath?: string
     focusKind?: DiscussFocusKind
+    enterVolumeRevision?: boolean
   }>): Promise<SynopsisConversationStartResult> {
     const chapterSequence = this.resolveFocusChapterSequence(input)
     if (chapterSequence > await this.dependencies.chapters.nextChapterSequence(input.projectId)) {
       throw new SynopsisInvalidStateError("当前章尚未经过图修订发布为正文，不能进入下一章")
     }
     const session = await this.ensureActiveSession(input.projectId, input.workspaceRootRef)
+    if (input.enterVolumeRevision && session.chapterSequence === chapterSequence) {
+      const folder = extractVolumeFolderNameFromPath(session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
+      await this.enterHistoricalVolumeRevision(input.workspaceRootRef, folder)
+    }
     const focusKind = input.focusKind
       ?? this.resolveFocusKindFromPath(input.relativePath)
       ?? session.focusKind
@@ -436,7 +459,7 @@ export class SynopsisConversationService {
         session: reconciled,
       })
       return {
-        session: reconciled,
+        session: await this.withVolumeLifecycle(input.workspaceRootRef, reconciled),
         messages: [...messages],
         ...(usage === undefined ? {} : { usage }),
         proceedProgress,
@@ -461,17 +484,41 @@ export class SynopsisConversationService {
         session: reconciled,
       })
       return {
-        session: reconciled,
+        session: await this.withVolumeLifecycle(input.workspaceRootRef, reconciled),
         messages: [...messages],
         ...(usage === undefined ? {} : { usage }),
         proceedProgress,
       }
     }
-    const claimed = await this.findExistingSynopsisForSequence(input.workspaceRootRef, chapterSequence)
+    let claimed = await this.findExistingSynopsisForSequence(input.workspaceRootRef, chapterSequence)
     const existingVolumes = await this.dependencies.workspace.listVolumeFolderNames(input.workspaceRootRef)
-    const preferredVolume = extractVolumeFolderNameFromPath(claimed?.path ?? session.synopsisPath)
-      ?? pickPreferredVolumeFolderName(existingVolumes)
-      ?? DEFAULT_VOLUME_FOLDER_NAME
+    const currentVolume = await this.readFocusedVolume(input.workspaceRootRef, session)
+    const indexed = await this.dependencies.chapterIndex.findBySequence(input.projectId, chapterSequence)
+    const claimedVolume = extractVolumeFolderNameFromPath(indexed?.currentPublishPath ?? claimed?.path ?? "")
+    const forward = chapterSequence > session.chapterSequence
+    const editingPublishedVolume = input.enterVolumeRevision === true && indexed !== undefined
+      && claimedVolume !== undefined && claimedVolume !== currentVolume.folder
+    const crossesCap = forward && !editingPublishedVolume && isVolumeChapterCapReached(currentVolume.plan, chapterSequence)
+      && (claimedVolume === undefined || claimedVolume === currentVolume.folder || currentVolume.state?.endedAtMs === undefined)
+    if (crossesCap && currentVolume.state?.endedAtMs === undefined) {
+      throw new SynopsisInvalidStateError("本卷已达章节上限。AI 必须先提交 <volume-end/> 标记卷末，才能进入下一章。")
+    }
+    const nextVolume = crossesCap ? nextVolumeFolderName(currentVolume.folder, existingVolumes) : undefined
+    if (nextVolume !== undefined && claimedVolume !== undefined && claimedVolume !== nextVolume) {
+      const placeholder = claimed !== undefined && indexed === undefined && !claimed.title?.trim()
+        && isSynopsisPlaceholderDocument(await this.readSynopsisFile(input.workspaceRootRef, claimed.path))
+      if (!placeholder || claimed === undefined) {
+        throw new VolumeRolloverConflictError(`第 ${String(chapterSequence)} 章已有卷归属，请先处理归属再切至「${nextVolume}」。`)
+      }
+      const outline = siblingPlanningMarkdownPath(claimed.path, "outline")
+      if (outline !== undefined && (await this.readSynopsisFile(input.workspaceRootRef, outline)).trim()) {
+        throw new VolumeRolloverConflictError(`第 ${String(chapterSequence)} 章已有细纲，请先处理卷归属，再切至「${nextVolume}」。`)
+      }
+      await this.dependencies.workspace.removeSynopsisMarkdown(input.workspaceRootRef, claimed.path)
+      claimed = undefined
+    }
+    const preferredVolume = nextVolume ?? claimedVolume ?? currentVolume.folder
+    if (input.enterVolumeRevision) await this.enterHistoricalVolumeRevision(input.workspaceRootRef, preferredVolume)
     const title = claimed?.title?.trim()
       || ""
     const synopsisPath = claimed?.path
@@ -529,7 +576,7 @@ export class SynopsisConversationService {
       session: reconciled,
     })
     return {
-      session: reconciled,
+      session: await this.withVolumeLifecycle(input.workspaceRootRef, reconciled),
       messages: [...messages],
       ...(usage === undefined ? {} : { usage }),
       proceedProgress,
@@ -703,6 +750,14 @@ export class SynopsisConversationService {
     }
     const session = await this.ensureActiveSession(input.projectId, input.workspaceRootRef)
     clearSynopsisSendCancellation(input.projectId)
+    const volume = await this.readFocusedVolume(input.workspaceRootRef, session)
+    const boundaryAction = !volume.started ? "start"
+      : volume.atCap && volume.state?.endedAtMs === undefined ? "end"
+      : volume.state?.endedAtMs !== undefined && volume.state.revisionStartedAtMs === undefined ? "revise"
+      : undefined
+    if (boundaryAction !== undefined) {
+      return this.runVolumeBoundary(input, session, volume, boundaryAction)
+    }
     await this.hydrateDiscussUsage(input.projectId)
     const priorMessages = await this.dependencies.conversation.listMessages(session.sessionId)
     let styleMarkdown: string | undefined
@@ -823,6 +878,7 @@ export class SynopsisConversationService {
               ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
               ...(input.signal === undefined ? {} : { signal: input.signal }),
               maxModelCalls: Math.min(input.maxModelCalls ?? 3, 3),
+
               ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
               ...(input.noProgressGuardEnabled === undefined
                 ? {}
@@ -849,7 +905,7 @@ export class SynopsisConversationService {
           const usage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
           synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), { content: gateReply.content })
           synopsisConversationStreamHub.clear(input.projectId)
-          return { session, messages: [...await this.dependencies.conversation.listMessagesForProject(input.projectId)],
+          return { session: await this.withVolumeLifecycle(input.workspaceRootRef, session), messages: [...await this.dependencies.conversation.listMessagesForProject(input.projectId)],
             awaitingSetupInput: { questionId: gateReply.questionId, scope: gateReply.scope, field: gateReply.field },
             ...setupMetadata,
             ...(usage === undefined ? {} : { usage }) }
@@ -871,7 +927,7 @@ export class SynopsisConversationService {
       const initialVolume = extractVolumeFolderNameFromPath(session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
       const initialVolumePlanningState = await this.readVolumePlanningState(input.workspaceRootRef, initialVolume)
       const initialVolumePlanningContext = await this.readVolumePlanningContext(input.workspaceRootRef, initialVolume, initialVolumePlanningState)
-      const volumePlanningGateWasReady = initialVolumePlanningContext.ready
+      const volumePlanningGateWasReady = initialVolumePlanningContext.ready && volume.wordsReady
       if (workStyleGateReadyAtStart && volumePlanningGateWasReady && input.setupAnswerTo === undefined
         && automationStep === undefined && input.model.classifyDiscussTurn !== undefined) {
         const candidate = canPublish ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence) : undefined
@@ -1058,6 +1114,10 @@ export class SynopsisConversationService {
         chapterProgress,
         hookScheduleAudit,
         model: input.model,
+        composeText: workStyleGateReadyAtStart && volumePlanningGateWasReady
+          && (scopedComposeIntent(writeScope) !== undefined || isOutlinePatchScope(writeScope)
+            || isVolumeComposeScope(writeScope) || isFocusOnlyScope(writeScope)
+            || (writeScope !== undefined && Object.keys(writeScope).length === 0)),
         ...(writeScope === undefined ? {} : { writeScope }),
         allowWorkflowTools: workStyleGateReadyAtStart,
         allowChapterWorkflowTools: workStyleGateReadyAtStart && volumePlanningGateWasReady,
@@ -1930,6 +1990,7 @@ export class SynopsisConversationService {
                 workspaceRootRef: input.workspaceRootRef,
                 chapterSequence: targetSequence,
                 focusKind: draftAssist.focusChange.focusKind ?? "plot_synopsis",
+                 enterVolumeRevision: isCurrentUserFocusChange(draftAssist.focusChange, input.message) && draftAssist.continueTurn === true,
               })
               appliedFocusSequence = targetSequence
               writeNotices.push(`已将讨论焦点调整到第 ${String(targetSequence)} 章（无需确认）。`)
@@ -1943,7 +2004,10 @@ export class SynopsisConversationService {
       }
       const gateDeferred = !focusLocked && (focusGateDeferred || deferredDraftSequences.length > 0)
       const workflowChoices = filterDiscussChoices(
-        draftAssist.choices?.filter((choice) => choice.action !== "promote_draft_to_body"),
+        (draftAssist.choices ?? (wroteSynopsisBody && !hasOutlineOnDisk && writeScope?.outline === undefined
+          && scopedComposeIntent(writeScope) !== undefined
+          ? [{ label: "用这份梗概写细纲", action: "confirm_synopsis" as const }]
+          : undefined))?.filter((choice) => choice.action !== "promote_draft_to_body"),
         {
           focusLocked,
           synopsisReady: synopsisReadyForOutline,
@@ -2151,8 +2215,8 @@ export class SynopsisConversationService {
       const savedDraft = draftApply.appended
       const savedDraftPublished = savedDraft !== undefined && this.dependencies.revisions !== undefined
         && (await this.dependencies.revisions.readRevision(savedDraft.revisionTaskId)).status === "completed"
-      const synopsisProgressCompleted = autonomousSynopsis && wroteSynopsisBody && synopsisReadyForOutline
-      const outlineProgressCompleted = autonomousOutline && wroteOutlineThisTurn && hasOutlineOnDisk
+      const synopsisProgressCompleted = wroteSynopsisBody && synopsisReadyForOutline
+      const outlineProgressCompleted = wroteOutlineThisTurn && hasOutlineOnDisk
       // Restage clears session draft pointers; do not keep turn-start draftReady which would
       // pin the bar on 草稿 after a synopsis/outline rewrite.
       const draftReadyAfterTurn = savedDraft !== undefined
@@ -2181,7 +2245,14 @@ export class SynopsisConversationService {
           stageAuto(pipelineStageAfterTurn) ? "running" : "waiting",
         )
       }
-      const currentStageAutonomous = stageAuto(pipelineStageAfterTurn)
+      // 构思 is atomic: once synopsis/outline are being written in this turn, the
+      // host must continue to the draft even in precise/custom-stop modes. The
+      // group gate only decides whether to continue after the draft is saved.
+      const composeFlowActive = wroteSynopsisBody || wroteOutlineThisTurn || savedDraft !== undefined
+      const composeFlowAuto = composeFlowActive
+        && (pipelineStageAfterTurn === "synopsis_discuss" || pipelineStageAfterTurn === "outline_discuss")
+      const currentStageAutonomous = stageAuto(pipelineStageAfterTurn) || composeFlowAuto
+      const autoContinuePipelineActive = pipelineAuto || composeFlowAuto
       const materialIngestThisTurn = wroteSynopsisBody || wroteOutlineThisTurn || savedDraft !== undefined
         || savedDraftPublished
         || styleSelectionCompleted
@@ -2200,7 +2271,7 @@ export class SynopsisConversationService {
           || volumeStoryNeedsUser
           || continueRequestedFocusTask
           || (gateDeferred && !userRequestedFocusTransition)
-           || (pipelineAuto && materialIngestThisTurn && (
+           || (autoContinuePipelineActive && materialIngestThisTurn && (
             styleSelectionCompleted
             || volumePlanningCompletedThisTurn
              || ((writeScope === undefined || writeScope.advance === true)
@@ -2209,7 +2280,7 @@ export class SynopsisConversationService {
           // In-stage auto-continue only while todos remain open — not on bare
           // continueTurn / choice-capable stages (those felt like forced 推进).
            || ((writeScope === undefined || writeScope.advance === true)
-             && pipelineAuto && currentStageAutonomous && !waitingOnUser && todosStillOpen)
+             && autoContinuePipelineActive && currentStageAutonomous && !waitingOnUser && todosStillOpen)
         )
       const stayInStageContinueMessage = buildStayInStageContinueMessage(pipelineStageAfterTurn)
       const autoContinueMessage = !shouldAutoContinue || (savedDraftPublished && !nextChapterAuto)
@@ -2466,7 +2537,7 @@ export class SynopsisConversationService {
       }
       const budgetAdvisory = assist.budgetAdvisory ?? peekSynopsisModelBudgetAdvisory(input.projectId)
       return {
-        session: updatedSession,
+        session: await this.withVolumeLifecycle(input.workspaceRootRef, updatedSession),
         messages: [...messages],
         ...(volumePlanningNeedsFirstWrite && workStyleGateReadyAtStart ? { volumePlanningStage: true } : {}),
         ...(pendingProposals.length === 0 ? {} : { pendingProposals: [...pendingProposals] }),
@@ -2663,6 +2734,7 @@ export class SynopsisConversationService {
       workspaceRootRef: input.workspaceRootRef,
       sessionId: session.sessionId,
       userMessage: refreshPrompt,
+      refreshChoicesOnly: true,
       ...(creativeSetup === undefined ? {} : { creativeSetup }),
       heading: session.title,
       chapterSequence: session.chapterSequence,
@@ -2720,7 +2792,7 @@ export class SynopsisConversationService {
       })
     }
     return {
-      session: updatedSession,
+      session: await this.withVolumeLifecycle(input.workspaceRootRef, updatedSession),
       messages: [...messages],
       ...(usage === undefined ? {} : { usage }),
     }
@@ -2996,8 +3068,12 @@ export class SynopsisConversationService {
     signal?: AbortSignal
     maxModelCalls?: number
     deadlineMs?: number
+    composeText?: boolean
+    refreshChoicesOnly?: boolean
+    volumeBoundary?: VolumeBoundaryAction
   }>): Promise<Readonly<{
     content: string
+    volumeBoundaryAccepted?: boolean
     protagonistSupplementMarkdown?: string
     protagonistSupplementFields?: Record<string, CharacterFieldValue>
     reasoningContent?: string
@@ -3080,7 +3156,9 @@ export class SynopsisConversationService {
         ].join("\n\n")
     const intentAppendix = chapterNarrativeIntentPhaseAppendix(input.chapterIntent, "synopsis_discuss")
     const presentationAppendix = chapterPresentationPhaseAppendix(input.presentation, "synopsis_discuss")
-    const workStyleGateAppendix = buildWorkStyleGatePromptAppendix(input.workStyleGate)
+    const workStyleGateAppendix = input.workStyleGate === undefined
+      ? undefined
+      : buildComposeWorkStylePrompt(input.workStyleGate)
     const { discussAgentModePromptAppendix } = await import("./discuss-agent-mode.js")
     const { discussWritePermissionPromptAppendix } = await import("./discuss-write-permission.js")
     const modeAppendix = discussAgentModePromptAppendix(input.agentMode ?? "auto", {
@@ -3116,6 +3194,9 @@ export class SynopsisConversationService {
       ? undefined
       : await this.dependencies.readTurnMonitor()
     const discussTrigger = input.discussTrigger ?? "user"
+    const creativeSetupText = input.creativeSetup !== undefined
+    const firstVolumeText = input.volumePlanning?.ready === false && input.workStyleGate === undefined
+    const workStyleText = input.workStyleGate !== undefined
     const settings = this.dependencies.readProjectSettings === undefined
       ? undefined
       : await this.dependencies.readProjectSettings()
@@ -3337,6 +3418,7 @@ export class SynopsisConversationService {
     let consecutiveTodoWrites = 0
     let todoNoProgressStreak = 0
     let todoLoopRepairIssued = false
+    let todoIncompleteRepairs = 0
     let todoRequiredRepairs = 0
     let autoContinueBlocked = false
     // UI「空转停跑保护」统管：内容指纹空转、Todo/工具空转、步骤连续失败硬停。默认关闭。
@@ -3390,12 +3472,12 @@ export class SynopsisConversationService {
     let accumulatedReasoning = ""
     let attempt = 0
     let missingArtifactRetries = 0
+    let textProtocolRetries = 0
     let missingSynopsisArtifactRetries = 0
     let missingOutlineArtifactRetries = 0
     let missingDraftProposalRetries = 0
     let missingVolumePlanRetries = 0
     let missingCreationDeskSettingsRetries = 0
-    let missingChoicesRetries = 0
     let writeScopeRetries = 0
     let draftLengthRetries = 0
     let pendingUserFocusSequence: number | undefined
@@ -3819,6 +3901,11 @@ export class SynopsisConversationService {
       let compactedEstimate: number | undefined
       let execution
       try {
+        const composeIntent = scopedComposeIntent(input.writeScope)
+          ?? (input.writeScope !== undefined && Object.keys(input.writeScope).length === 0 ? {} : undefined)
+        const composeParser = input.composeText
+          ? new ComposeStreamParser(composeIntent === undefined ? undefined : composeSections(composeIntent))
+          : undefined
         execution = await executeWithContextCompaction({
           model: input.model,
           request,
@@ -3840,16 +3927,20 @@ export class SynopsisConversationService {
             archiveResults = archiveResults.filter((message) => !hiddenIds.has(message.messageId))
             await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, event.hiddenMessageIds, this.dependencies.now())
             if (event.foldMessages.length > 0) {
-              await this.dependencies.conversation.appendDiscussContextMessages({
-                sessionId: input.sessionId,
-                projectId: input.projectId,
-                createdAtMs: this.dependencies.now(),
-                messages: event.foldMessages.map((message) => ({
-                  role: message.role,
-                  kind: message.kind,
-                  content: message.content,
-                })),
-              })
+              // Compaction may fold an empty shell message; the context schema rejects empty content.
+              const foldMessages = event.foldMessages.filter((message) => message.content.trim().length > 0)
+              if (foldMessages.length > 0) {
+                await this.dependencies.conversation.appendDiscussContextMessages({
+                  sessionId: input.sessionId,
+                  projectId: input.projectId,
+                  createdAtMs: this.dependencies.now(),
+                  messages: foldMessages.map((message) => ({
+                    role: message.role,
+                    kind: message.kind,
+                    content: message.content,
+                  })),
+                })
+              }
             }
             storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
             if (event.estimatedInputTokens !== undefined) {
@@ -3872,15 +3963,71 @@ export class SynopsisConversationService {
           },
           createMessageId: () => this.dependencies.createId(),
           options: {
-            phasePrompt,
+            phasePrompt: (() => {
+               if (input.volumeBoundary !== undefined) {
+                 const action = input.volumeBoundary
+                 const instruction = action === "start" ? "开始当前卷，下一轮进入创作设定。"
+                   : action === "end" ? "本卷已写满，请主动标记卷末以开启下一卷。"
+                   : "根据本轮用户请求判断是否要修订已结卷内容，确实要修改时才标记。"
+                 const text = `【${VOLUME_BOUNDARY_LABEL[action]}门禁】${instruction} 独立一行输出 ${volumeBoundaryMarker(action)}。本轮不能修改文件或调用工具。`
+                 return { ...phasePrompt, text, digest: digest(text) }
+               }
+              if (input.refreshChoicesOnly) {
+                const text = `${input.userMessage}\n\n提供至少两个互不重复的新选项，用 <creative-choices> 和 </creative-choices> 包住，每项单独一行，以 - 开头。可在块外简短说明，只刷新选项。`
+                return { ...phasePrompt, text, digest: digest(text) }
+              }
+              if (creativeSetupText) {
+                const text = `【创作设定访谈输出格式】\ncollecting 状态先用一两句自然语言说明当前要确认的问题、推荐理由或选项差异，空一行后再用 <creative-choices> 和 </creative-choices> 包住两个或以上互不重复的选项，每项单独一行且以 - 开头。\n主角 awaiting_write 状态可以补充人物字段，只把字段名与值的 JSON 放在 <creative-character-json> 和 </creative-character-json> 之间；字段名任意但必须符合人物字段 schema。\n卷 awaiting_write 状态用普通文本简短确认。若需要更新作品名或简介，在选项和人物块之外分别使用 <work-title>...</work-title> 或 <work-description>...</work-description>。不要输出 JSON 响应封套或三段构思标签。\n\n${phasePrompt.text.replace(/^输出 JSON：顶层含[^\n]*\n?/mu, "").trimEnd()}`
+                return { ...phasePrompt, text, digest: digest(text) }
+              }
+              if (workStyleText) {
+                const text = phasePrompt.text.replace(/^输出 JSON：顶层含[^\n]*\n?/mu, "").trimEnd()
+                return { ...phasePrompt, text, digest: digest(text) }
+              }
+              if (input.discussTrigger === "turn_handoff") {
+                const text = `${input.userMessage}\n\n用普通文本给出交接分析。可用 <handoff-outline> 和 </handoff-outline> 提交卷大纲 Markdown。需要更新作品名或简介时，分别使用 <work-title> 或 <work-description> 闭合标签。不要返回 JSON 封套。`
+                return { ...phasePrompt, text, digest: digest(text) }
+              }
+              if (firstVolumeText) {
+                  const guidance = phasePrompt.text.replace(/^输出 JSON：顶层含[^\n]*\n?/mu, "")
+                  const text = `${guidance}\n\n卷级首次写入使用纯文本。按顺序输出 <compose-volume-synopsis>、<compose-volume-outline>、<compose-volume-meta>，每个开闭标签独占一行。前两块写完整 Markdown，最后一块依次填写 targetChapterCount: 正整数 和 targetWordCount: 正整数。写作设置 creationDeskSettings 用 <writing-settings> 独立块，每行一个键值（key: value），只允许以下键名，禁止自造或改写字段名：novelMajorCategoryRulePath、novelSubcategoryRulePath、descriptionRulePath、proseStyleRulePath、minimumWordCount、maximumWordCount、boundaryPace、causalityFocus。三条规则路径必须逐字引用本轮已提供的真实候选路径；字数须同时给最小值和最大值；boundaryPace 取 advance_allowed 或 hold_without_resolution；causalityFocus 取 auto、buildup、action 或 payoff。只补写作设置时可单独提交写作设置块。如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。需要 Todo 等非读取工具时另起一个 <tool-request> 块（name、action，invoke 时加一行 arguments 单行 JSON）；读取资料用原生读取工具；不输出 JSON 封套。`
+                  return { ...phasePrompt, text, digest: digest(text) }
+                }
+              if (isFocusOnlyScope(input.writeScope)) {
+                 const text = "用普通文本回复。用户要求切换焦点，或修改其他卷／章时，提交 <chapter-focus> 块。第一行为目标章的绝对章序号；修改整卷时选择目标卷的首章。之后逐字引用本轮用户要求切换或修改的原话，然后闭合 </chapter-focus>。若切换后需要修改，另起一行输出 <continue-turn/>。本轮不能修改文件。"
+                 return { ...phasePrompt, text, digest: digest(text) }
+               }
+               if (isOutlinePatchScope(input.writeScope)) {
+                 const text = "只提交一个 <compose-outline-patch> 块，内含 1–20 对 <search>...</search> 和 <replace>...</replace>。每个开闭标签独占一行。逐字复制当前细纲中唯一匹配的原文并保留空白。删除时留空替换块。块外只允许空白。"
+                 return { ...phasePrompt, text, digest: digest(text) }
+               }
+               if (input.writeScope !== undefined && isVolumeComposeScope(input.writeScope)) {
+                 const blocks = [
+                   ...(input.writeScope.volumeSynopsis === true ? ["<compose-volume-synopsis>\n卷梗概 Markdown\n</compose-volume-synopsis>"] : []),
+                   ...(input.writeScope.volumeOutline === true ? ["<compose-volume-outline>\n卷大纲 Markdown\n</compose-volume-outline>"] : []),
+                   ...(input.writeScope.volumeTargets === true ? ["<compose-volume-meta>\ntargetChapterCount: 正整数\ntargetWordCount: 正整数\n</compose-volume-meta>"] : []),
+                   ...(input.writeScope.volume === "whole_volume" ? ['逐章使用 <compose-volume-chapter index="N">，N 为绝对章序号。块内依次使用可选的 <compose-volume-chapter-title>、必填的 <compose-volume-chapter-synopsis> 和 <compose-volume-chapter-outline>。闭合每个标签，包括外层 </compose-volume-chapter>。'] : []),
+                   "如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。需要 Todo 等非读取工具时另起一个 <tool-request> 块（name、action，invoke 时加一行 arguments 单行 JSON）；读取资料用原生读取工具。",
+                 ]
+                 const text = ["按顺序输出以下获准的卷规划标签。每个开闭标签独占一行。可在所有块之前提供说明。", ...blocks].join("\n\n")
+                 return { ...phasePrompt, text, digest: digest(text) }
+               }
+              const sections = composeIntent === undefined ? [] : composeSections(composeIntent)
+              const headings = { synopsis: "梗概", outline: "细纲", draft: "草稿" } as const
+              const protocol = sections.length === 0
+                ? "用普通文本回复讨论。需要资料时调用原生读取工具；需要 Todo、正文推演等工具时，只输出 <tool-request> 文本块（name、action，invoke 时再加一行 arguments 单行 JSON），不要自造其他标签。"
+                : [sections.length === 3 ? "本轮已获准连写。" : "本轮仅可交付下列获准产物。",
+                    "需要资料时先调用原生读取工具；需要 Todo 等非读取工具时，另起一个 <tool-request> 块（name、action，invoke 时加一行 arguments 单行 JSON），工具请求不能与下列构思写入同回。资料齐全后，在同一回复中按下列顺序交付完整 Markdown。",
+                    ...sections.map((section) => `<compose-${section}>\n${headings[section]}\n</compose-${section}>`),
+                  ].join("\n")
+              const phaseGuidance = phasePrompt.text.replace(/^输出 JSON：顶层含[^\n]*\n?/mu, "").trimEnd()
+              const text = `【本轮讨论输出协议】\n${protocol}\n如需根据用户要求更新作品名或简介，在构思段外分别使用 <work-title>...</work-title> 或 <work-description>...</work-description>。如需提供备选方向，可在构思段外用 <creative-choices> 和 </creative-choices> 包住至少两个选项，每行以 - 开头。如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。不要输出 JSON 响应封套。下文的旧输出字段名只说明篇章内容或工作流程，以本段输出格式为准。\n\n${phaseGuidance}`
+              return { ...phasePrompt, text, digest: digest(text) }
+            })(),
+            outputMode: "text",
             forceThinking: true,
             ...(input.signal === undefined ? {} : { signal: input.signal }),
             contextChainId: input.sessionId,
-            onSchemaRepair: () => {
-              if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
-              streamedContent = ""
-              synopsisConversationStreamHub.beginSchemaRepair(input.projectId, this.dependencies.now())
-            },
             onPartial: (partial) => {
               const stamp = this.dependencies.now()
               if (partial.reasoningDelta !== undefined) {
@@ -3897,7 +4044,19 @@ export class SynopsisConversationService {
               }
               if (partial.contentDelta !== undefined) {
                 streamedContent += partial.contentDelta
-                synopsisConversationStreamHub.appendContent(input.projectId, partial.contentDelta, stamp)
+                if (composeParser !== undefined) {
+                  for (const event of composeParser.push(partial.contentDelta)) {
+                    if (event.type === "section_delta" || event.type === "text") {
+                      synopsisConversationStreamHub.appendContent(input.projectId, event.text, stamp)
+                    }
+                    const progress = composeProgressForEvent(event)
+                    if (progress !== undefined) {
+                      synopsisConversationStreamHub.setProceedProgress(input.projectId, progress, stamp)
+                    }
+                  }
+                } else {
+                  synopsisConversationStreamHub.appendContent(input.projectId, partial.contentDelta, stamp)
+                }
                 if (streamedReasoning.length === 0 || streamedReasoning.trimStart().startsWith("{")) {
                   const display = normalizeThinkingDisplayText(streamedReasoning)
                     ?? normalizeThinkingDisplayText(streamedContent)
@@ -3910,70 +4069,205 @@ export class SynopsisConversationService {
             contextMessages,
           },
         })
+        const artifact = execution.result.artifact
+        if (input.volumeBoundary !== undefined) {
+          const marker = volumeBoundaryMarker(input.volumeBoundary)
+          const accepted = execution.result.outcome === "continue" && execution.result.requestedReads.length === 0
+            && typeof artifact === "object" && artifact !== null && "assistantMessage" in artifact
+            && typeof artifact.assistantMessage === "string" && artifact.assistantMessage.trim() === marker
+          const stamp = this.dependencies.now()
+          synopsisConversationStreamHub.addUsage(input.projectId, execution.usage, stamp)
+          const usage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
+          if (usage !== undefined) await this.dependencies.conversation.saveDiscussUsage({ projectId: input.projectId, usage, updatedAtMs: stamp })
+          return {
+            content: accepted ? `已确认${VOLUME_BOUNDARY_LABEL[input.volumeBoundary]}。`
+              : `当前停在「${VOLUME_BOUNDARY_LABEL[input.volumeBoundary]}」。AI 需要单独提交 ${marker}，本轮未写入。`,
+            volumeBoundaryAccepted: accepted,
+          }
+        }
+        if (execution.result.requestedReads.length === 0) {
+          if (typeof artifact !== "object" || artifact === null || !("assistantMessage" in artifact)
+            || typeof artifact.assistantMessage !== "string" || !artifact.assistantMessage.trim()) {
+            throw new SynopsisInvalidStateError("模型未返回有效的讨论文本，本次响应不会写入。")
+          }
+          const { text: rawText, continueTurn } = extractContinueTurnMarker(artifact.assistantMessage)
+          const toolRequestParsed = parseComposeToolRequest(rawText)
+          if (toolRequestParsed.toolRequest !== undefined) {
+            const visible = toolRequestParsed.text.trim()
+            if (/<\/?compose-(?:synopsis|outline|draft|outline-patch|volume)/u.test(visible)) {
+              throw new ComposeProtocolError("工具请求不能与梗概、细纲或草稿写入同回。")
+            }
+            execution = {
+              ...execution,
+              result: {
+                ...execution.result,
+                artifact: {
+                  assistantMessage: visible || "正在调用工具。",
+                  finalSelfReview: "已解析纯文本工具请求。",
+                  toolRequest: toolRequestParsed.toolRequest,
+                },
+              },
+            }
+          } else if (input.refreshChoicesOnly) {
+            const parsed = parseDiscussChoices(rawText)
+            execution = { ...execution, result: { ...execution.result, artifact: { ...parsed, finalSelfReview: "已解析刷新选项。" } } }
+          } else if (input.discussTrigger === "turn_handoff") {
+            const { prose, ...metadata } = parseWorkMetadataTags(rawText)
+            const start = "<handoff-outline>"
+            const end = "</handoff-outline>"
+            const outline = prose.includes(start) || prose.includes(end) ? extractBlock(prose, start, end) : undefined
+            const assistantMessage = (outline === undefined ? prose : `${outline.before}\n${outline.after}`).trim()
+            execution = { ...execution, result: { ...execution.result, artifact: {
+              ...metadata,
+              assistantMessage: assistantMessage || "已完成章节交接分析。",
+              finalSelfReview: "已解析章节交接文本。",
+              ...(continueTurn ? { continueTurn: true } : {}),
+              ...(outline?.content ? { arcPlan: { markdown: outline.content } } : {}),
+            } } }
+          } else if (workStyleText && !creativeSetupText && !("toolRequest" in artifact)) {
+            const parsed = composeWorkStyleArtifactFromText(rawText, {
+              ...input.workStyleGate!,
+              availableProseStylePaths,
+              availableNovelMajorCategoryRulePaths,
+              availableNovelSubcategoryRulePaths,
+              hasExistingWorkStyle: currentWorkStyleEvidence.length > 0,
+            })
+            execution = { ...execution, result: { ...execution.result, artifact: { ...parsed, ...(continueTurn ? { continueTurn: true } : {}) } } }
+          } else if (firstVolumeText && !creativeSetupText && !("toolRequest" in artifact)) {
+            const { prose, ...settings } = parseComposeWritingSettings(rawText)
+            const parsedChoices = prose.includes("<creative-choices>") ? parseDiscussChoices(prose) : undefined
+            const proseWithoutChoices = parsedChoices?.assistantMessage ?? prose
+            const volumeTags = {
+              ...(proseWithoutChoices.includes("<compose-volume-synopsis>") ? { volumeSynopsis: true as const } : {}),
+              ...(proseWithoutChoices.includes("<compose-volume-outline>") ? { volumeOutline: true as const } : {}),
+              ...(proseWithoutChoices.includes("<compose-volume-meta>") ? { volumeTargets: true as const } : {}),
+            }
+            // The model may wrap the required blocks with a short preamble and/or a closing note.
+            // Parse the block region only, then merge the surrounding prose back for display.
+            const blockStart = proseWithoutChoices.search(/<compose-volume-[a-z-]+\b/u)
+            const lastClose = [...proseWithoutChoices.matchAll(/<\/compose-volume-[a-z-]+>/gu)].at(-1)
+            const blockEnd = lastClose === undefined ? -1 : (lastClose.index ?? 0) + lastClose[0].length
+            const hasBlocks = blockStart >= 0 && blockEnd > blockStart
+            const blockDocument = hasBlocks ? proseWithoutChoices.slice(blockStart, blockEnd) : proseWithoutChoices
+            const stripCodeFences = (value: string): string => value.replace(/^\s*```[a-zA-Z]*\s*$/gmu, "").trim()
+            const preamble = hasBlocks ? stripCodeFences(proseWithoutChoices.slice(0, blockStart)) : ""
+            const trailing = hasBlocks ? stripCodeFences(proseWithoutChoices.slice(blockEnd)) : ""
+            const parsed = Object.values(volumeTags).some(Boolean)
+              ? composeVolumePlanArtifactFromText(blockDocument, volumeTags)
+              : { assistantMessage: proseWithoutChoices.trim() || "已整理写作设置。", finalSelfReview: "已解析卷规划讨论文本。" }
+            const visibleText = [preamble, trailing].filter((part) => part.length > 0).join("\n\n").trim()
+            execution = {
+              ...execution,
+              result: {
+                ...execution.result,
+                artifact: {
+                  ...parsed,
+                  ...settings,
+                  ...(parsedChoices?.choices === undefined ? {} : { choices: parsedChoices.choices }),
+                  ...(visibleText.length === 0 ? {} : { assistantMessage: visibleText }),
+                  ...(continueTurn ? { continueTurn: true } : {}),
+                },
+              },
+            }
+          } else if (!creativeSetupText && !("toolRequest" in artifact)) {
+            const { text: withoutFocus, focusChange } = parseComposeFocusTag(rawText)
+            const { text: withoutStaging, stagingPromote } = parseComposeStagingPromote(withoutFocus)
+            const { text: withoutGoals, goalProposals } = parseComposeGoalProposals(withoutStaging)
+            const patchStart = withoutGoals.indexOf("<compose-outline-patch>")
+            const patchText = patchStart < 0 ? withoutGoals : withoutGoals.slice(patchStart)
+            const patchProse = patchStart > 0 ? withoutGoals.slice(0, patchStart).trim() : ""
+            const parsed = isOutlinePatchScope(input.writeScope)
+              || (input.writeScope === undefined && patchStart >= 0)
+              ? {
+                  assistantMessage: patchProse || "已整理细纲局部修改。",
+                  finalSelfReview: "已解析细纲补丁。",
+                  bodyEdits: {
+                    baseDigest: digest(input.outlineMarkdown),
+                    ...parseComposeOutlinePatch(patchText, { outline: "patch" }),
+                  },
+                  planningWriteIntent: { outline: "patch" as const },
+                }
+              : isVolumeComposeScope(input.writeScope)
+                ? composeVolumePlanArtifactFromText(withoutGoals, input.writeScope)
+                : (() => {
+                    const { text: withoutTitle, chapterTitle, volumeFolderName } = parseComposeHostTags(withoutGoals)
+                    const { text: withoutIntent, intent } = extractComposeIntentMarker(withoutTitle)
+                    const { prose, ...metadata } = parseWorkMetadataTags(withoutIntent)
+                    const markerIntent = intent === undefined ? undefined : {
+                      ...(intent.synopsis === undefined ? {} : { synopsis: intent.synopsis }),
+                      ...(intent.outline === "create" || intent.outline === "rewrite" ? { outline: intent.outline } : {}),
+                      ...(intent.draft === undefined ? {} : { draft: intent.draft }),
+                    }
+                    const parsedText = composeArtifactFromText(prose, composeIntent)
+                    return {
+                      ...parsedText,
+                      ...(markerIntent === undefined ? {} : {
+                        planningWriteIntent: { ...(parsedText.planningWriteIntent ?? {}), ...markerIntent },
+                      }),
+                      ...metadata,
+                      ...(chapterTitle === undefined ? {} : { chapterTitle }),
+                      ...(volumeFolderName === undefined ? {} : { volumeFolderName }),
+                    }
+                  })()
+            const choices = parsed.assistantMessage.includes("<creative-choices>") || parsed.assistantMessage.includes("</creative-choices>")
+              ? parseDiscussChoices(parsed.assistantMessage)
+              : undefined
+            execution = {
+              ...execution,
+              result: {
+                ...execution.result,
+                artifact: {
+                  ...parsed,
+                  ...choices,
+                  ...(goalProposals === undefined ? {} : { goalProposals }),
+                  ...(focusChange === undefined ? {} : { focusChange }),
+                  ...(stagingPromote === undefined ? {} : { stagingPromote }),
+                  ...(continueTurn ? { continueTurn: true } : {}),
+                },
+              },
+            }
+          }
+        }
       } catch (error) {
-        if (isMissingSynopsisArtifactError(error) || isRecoverableDiscussPhaseContractError(error)) {
-          await recordStepOutcome("model_contract", error instanceof Error ? error.message : String(error))
-        }
-        if (isMissingSynopsisArtifactError(error) && missingArtifactRetries < 2 && remainingCalls > 1) {
-          missingArtifactRetries += 1
-          remainingCalls -= 1
-          await noteDiscussBlock(
-            "missing_artifact",
-            renderRuntimePrompt("discuss-repairs", "artifact-missing"),
-          )
-          runtimeLog("warn", "synopsis-conversation", "missing_artifact.retry", {
-            projectId: input.projectId,
-            sessionId: input.sessionId,
-            attempt,
-            missingArtifactRetries,
-          })
-          attempt += 1
-          continue
-        }
-        if (isMissingSynopsisArtifactError(error)) {
-          const message = "模型未返回完整讨论结果（缺少 artifact）。请重试发送；若反复失败，可先简化指令或检查模型是否支持 JSON 模式。"
-          await noteDiscussBlock("missing_artifact", message)
-          throw new SynopsisInvalidStateError(message)
-        }
-        // Only tool-exclusivity violations may change the tool/write Todo gate.
-        if (isRecoverableDiscussPhaseContractError(error) && remainingCalls > 1) {
-          missingArtifactRetries += 1
-          remainingCalls -= 1
-          if (isDiscussToolExclusiveContractError(error)) {
-            this.applyToolExclusiveTodoGate(input.projectId, input.sessionId, [
-              "choices", "focusChange", "synopsisBody", "outlineBody", "chapterDraftProposal",
-            ])
+          const message = error instanceof Error ? error.message : String(error)
+          if (error instanceof SynopsisInvalidStateError && message.includes("模型未返回有效的讨论文本")
+            && missingArtifactRetries < 2 && remainingCalls > 1) {
+            missingArtifactRetries += 1
+            remainingCalls -= 1
+            await noteDiscussBlock("missing_artifact", "请直接输出纯文本讨论回复。")
+            attempt += 1
+            continue
           }
-          await noteDiscussBlock("phase_contract", discussPhaseContractRepairHint(error))
-          runtimeLog("warn", "synopsis-conversation", "phase_contract.gate_retry", {
-            projectId: input.projectId,
-            sessionId: input.sessionId,
-            attempt,
-            missingArtifactRetries,
-            error: error instanceof Error ? error.message : String(error),
-          })
-          attempt += 1
-          continue
-        }
-        if (isRecoverableDiscussPhaseContractError(error)) {
-          if (isDiscussToolExclusiveContractError(error)) {
-            this.applyToolExclusiveTodoGate(input.projectId, input.sessionId, [
-              "choices", "focusChange", "synopsisBody", "outlineBody", "chapterDraftProposal",
-            ])
+          if (isRecoverableDiscussPhaseContractError(error)) {
+            await recordStepOutcome("model_contract", message)
+            if (missingArtifactRetries < 2 && remainingCalls > 1) {
+              missingArtifactRetries += 1
+              remainingCalls -= 1
+              await noteDiscussBlock("phase_contract", discussPhaseContractRepairHint(error))
+              attempt += 1
+              continue
+            }
           }
-          runtimeLog("warn", "synopsis-conversation", "phase_contract.call_limit_reached", {
-            projectId: input.projectId,
-            sessionId: input.sessionId,
-            attempt,
-            error: error instanceof Error ? error.message : String(error),
-          })
-          return await stopDiscussLoop(`本次显式设置的模型调用预算已耗尽，已暂停自动推进。已保存的结果与未完成任务均已保留。最后校验原因：${error instanceof Error ? error.message : String(error)}`)
-        }
-        await noteDiscussBlock(
-          "model_result_rejected",
-          renderRuntimePrompt("discuss-repairs", "model-result-rejected", { reason: (error instanceof Error ? error.message : String(error)).slice(0, 800) }),
-        )
-        throw error
+          const intent = scopedComposeIntent(input.writeScope)
+          if (input.composeText && error instanceof ComposeProtocolError && intent !== undefined
+            && composeSections(intent).length < 3 && missingArtifactRetries === 0 && remainingCalls > 1) {
+            missingArtifactRetries += 1
+            remainingCalls -= 1
+            await noteDiscussBlock("model_result_rejected", `${message} 请只用本轮授权的标签重新提交。`)
+            attempt += 1
+            continue
+          }
+          if (error instanceof ComposeProtocolError && !message.includes("未授权")
+            && textProtocolRetries < 1 && remainingCalls > 1) {
+            textProtocolRetries += 1
+            remainingCalls -= 1
+            await noteDiscussBlock("text_protocol", `${message} 请严格按本轮纯文本标签格式重新提交，未知字段不要输出。`)
+            attempt += 1
+            continue
+          }
+          await noteDiscussBlock("model_result_rejected", message)
+          throw error
+
       }
       const measuredContextTokens = contextTokensAfterProviderUsage(
         compactedEstimate ?? sendCompactedEstimate,
@@ -3997,7 +4291,7 @@ export class SynopsisConversationService {
         const exchangeMessages = filterNovelContextExchangeMessages(storedContext, [
           ...execution.contextExchange.requestMessages,
           execution.contextExchange.responseMessage,
-        ])
+        ]).filter((message) => (message.content ?? "").trim().length > 0)
         if (exchangeMessages.length > 0) {
           await this.dependencies.conversation.appendDiscussContextMessages({
             sessionId: input.sessionId,
@@ -4084,6 +4378,20 @@ export class SynopsisConversationService {
         synopsisConversationStreamHub.setThinking(input.projectId, accumulatedReasoning, this.dependencies.now())
       }
       const requestedReads = parsedResult.requestedReads
+      if (input.refreshChoicesOnly && parsedResult.outcome !== "request_read") {
+        const artifact = synopsisDiscussArtifactSchema.parse(parsedResult.artifact)
+        synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), { content: artifact.assistantMessage })
+        return { content: artifact.assistantMessage, ...(artifact.choices === undefined ? {} : { choices: artifact.choices }) }
+      }
+      const creativeOutput = creativeSetupText && input.creativeSetup !== undefined
+        && parsedResult.outcome !== "request_read"
+        && typeof parsedResult.artifact === "object" && parsedResult.artifact !== null
+        && "assistantMessage" in parsedResult.artifact && typeof parsedResult.artifact.assistantMessage === "string"
+        ? (() => {
+            try { return parseCreativeSetupOutput(parsedResult.artifact.assistantMessage as string, input.creativeSetup!) }
+            catch { return undefined }
+          })()
+        : undefined
       const toolArtifact = synopsisDiscussArtifactSchema.safeParse(parsedResult.artifact)
       const manualFocusChange = input.batchProceed !== true && input.batchAutomation !== true
         && input.focusLocked !== true && (input.agentMode ?? "auto") !== "plan"
@@ -4121,7 +4429,9 @@ export class SynopsisConversationService {
           pendingUserFocusSequence = proposedFocusSequence
           await noteDiscussBlock(
             "focus_change_quote",
-            renderRuntimePrompt("discuss-repairs", "focus-change-quote", { focusSequence: String(proposedFocusSequence) }),
+            isFocusOnlyScope(input.writeScope)
+              ? `请重新提交 <chapter-focus> 块。第一行填写 ${String(proposedFocusSequence)}，随后逐字引用本轮用户要求换章的原话，再闭合标签。`
+              : renderRuntimePrompt("discuss-repairs", "focus-change-quote", { focusSequence: String(proposedFocusSequence) }),
             { source: toolArtifact.success ? toolArtifact.data : undefined },
           )
           runtimeLog("warn", "synopsis-conversation", "focus_change.quote_repair", {
@@ -4133,34 +4443,23 @@ export class SynopsisConversationService {
         }
         return await stopDiscussLoop("换章请求未通过核验：模型补正后仍未提供有效的本轮指令引用，或撤回了换章动作。章节焦点保持原位，没有写入草稿版本，也未应用该回复的章节改动。请检查本轮请求后重试。")
       }
-      const interviewChoices = toolArtifact.success ? [...new Map((toolArtifact.data.choices ?? [])
-        .filter(choice => !/^(?:你的想法|我有自己的想法)$/u.test(choice.label.trim()))
-        .map(choice => [choice.label.trim(), choice])).values()] : []
       if (input.creativeSetup !== undefined && parsedResult.outcome !== "request_read") {
-        if (!toolArtifact.success || toolArtifact.data.toolRequest !== undefined
-          || (input.creativeSetup.status === "collecting" && interviewChoices.length < 2)
+        if (creativeOutput === undefined || (input.creativeSetup.status === "collecting" && (creativeOutput.choices?.length ?? 0) < 2)
           || (input.creativeSetup.status === "awaiting_write" && input.creativeSetup.scope === "protagonist"
-            && toolArtifact.data.protagonistSupplementFields === undefined)) {
+            && creativeOutput.protagonistSupplementFields === undefined)) {
           if (remainingCalls > 0 && attempt < 2) {
-            await noteDiscussBlock("creative_setup", renderRuntimePrompt("discuss-repairs", "creative-setup"), { source: toolArtifact.success ? toolArtifact.data : undefined })
+            await noteDiscussBlock("creative_setup", "请严格使用创作设定专用标签格式：给出至少两个选项时用 <creative-choices>，主角补充时用 <creative-character-json> 包住符合人物字段 schema 的 JSON。")
             attempt += 1
             continue
           }
-          throw new SynopsisInvalidStateError("主角/卷规划问答未获得有效选项或补充信息，已停止；用户确认和已有内容均保留")
+          throw new SynopsisInvalidStateError("主角/卷规划问答未获得有效标签选项或人物字段，已停止；用户确认和已有内容均保留")
         }
-        // Project only interview fields: model-written artifacts cannot cross the human gate.
-        return {
-          content: toolArtifact.data.assistantMessage,
-          ...(toolArtifact.data.workDisplayName === undefined ? {} : { workDisplayName: toolArtifact.data.workDisplayName }),
-          ...(toolArtifact.data.workDescription === undefined ? {} : { workDescription: toolArtifact.data.workDescription }),
-          ...(toolArtifact.data.choices === undefined ? {} : { choices: interviewChoices.map(choice => ({
-            label: choice.label, action: "continue_discuss" as const,
-          })) }),
-          ...(toolArtifact.data.protagonistSupplementMarkdown === undefined
-            ? {} : { protagonistSupplementMarkdown: toolArtifact.data.protagonistSupplementMarkdown }),
-          ...(toolArtifact.data.protagonistSupplementFields === undefined
-            ? {} : { protagonistSupplementFields: toolArtifact.data.protagonistSupplementFields }),
-        }
+        return { content: creativeOutput.assistantMessage,
+          ...(creativeOutput.workDisplayName === undefined ? {} : { workDisplayName: creativeOutput.workDisplayName }),
+          ...(creativeOutput.workDescription === undefined ? {} : { workDescription: creativeOutput.workDescription }),
+          ...(creativeOutput.choices === undefined ? {} : { choices: [...creativeOutput.choices] }),
+          ...(creativeOutput.protagonistSupplementMarkdown === undefined ? {} : { protagonistSupplementMarkdown: creativeOutput.protagonistSupplementMarkdown }),
+          ...(creativeOutput.protagonistSupplementFields === undefined ? {} : { protagonistSupplementFields: creativeOutput.protagonistSupplementFields }) }
       }
       const originalWorkStage = readOriginalWorkEvidenceStage(storedContext)
       const originalWorkHasEvidence = hasOriginalWorkEvidence(readEvidence)
@@ -4486,7 +4785,7 @@ export class SynopsisConversationService {
       if (parsedResult.outcome !== "request_read" || requestedReads.length === 0) {
         const artifact = synopsisDiscussArtifactSchema.safeParse(parsedResult.artifact)
         if (!artifact.success) {
-          if (missingArtifactRetries < 2 && remainingCalls > 0) {
+          if (!input.composeText && missingArtifactRetries < 2 && remainingCalls > 0) {
             missingArtifactRetries += 1
             const zodHint = artifact.error.issues
               .slice(0, 3)
@@ -4582,7 +4881,9 @@ export class SynopsisConversationService {
           if (!completeVolumePlan && missingVolumePlanRetries < 1 && remainingCalls > 0) {
             await noteDiscussBlock(
               "volume_plan_required",
-              renderRuntimePrompt("discuss-repairs", "volume-plan-required"),
+              firstVolumeText
+                ? "请补齐卷规划的三个文本块：<compose-volume-synopsis>、<compose-volume-outline>、<compose-volume-meta>。"
+                : renderRuntimePrompt("discuss-repairs", "volume-plan-required"),
               { source: artifact.data },
             )
             missingVolumePlanRetries += 1
@@ -4613,7 +4914,9 @@ export class SynopsisConversationService {
               pendingWrites = retainDiscussWrites(artifact.data)
               await noteDiscussBlock(
                 "creation_desk_settings",
-                renderRuntimePrompt("discuss-repairs", "creation-desk-settings-required"),
+                firstVolumeText
+                  ? "已保留卷规划。请补齐 <writing-settings> 文本块，使用本轮指定的键值格式和真实规则路径。"
+                  : renderRuntimePrompt("discuss-repairs", "creation-desk-settings-required"),
                 { source: artifact.data, held: true },
               )
               attempt += 1
@@ -4690,6 +4993,10 @@ export class SynopsisConversationService {
           && !discussTodosAreSettled(turnTodos)
           && !todoLoopRepairIssued
         ) {
+          if (!hasExplicitCallLimit && todoIncompleteRepairs >= 8) {
+            return await stopDiscussLoop("任务清单连续未结清且模型未再更新，已暂停自动推进。已保存结果与未完成任务均已保留，请检查阻塞原因后重试。")
+          }
+          todoIncompleteRepairs += 1
           await recordStepOutcome("todo_incomplete", DISCUSS_TODO_INCOMPLETE_HINT)
           pendingWrites = retainDiscussWrites(artifact.data)
           await noteDiscussBlock("todo_incomplete", DISCUSS_TODO_INCOMPLETE_HINT, { source: artifact.data, held: true })
@@ -4853,30 +5160,7 @@ export class SynopsisConversationService {
             deferredDraftNotice = `系统状态：本轮只收到${deferredLabels}的草稿提案，顺序门禁已拒绝，当前焦点第${String(input.chapterSequence)}章没有生成或保存正文草稿。`
           }
         }
-        if (
-          (artifact.data.choices?.length ?? 0) === 0
-          && !(switchingAtUserRequest && artifact.data.continueTurn === true)
-          && !(input.batchProceed === true && artifact.data.continueTurn === true && (input.agentMode ?? "auto") !== "plan")
-          && !(input.batchProceed === true && input.workStyleGate?.status === "style_selected")
-          && !(input.batchProceed === true && (
-            hasPlanningContent(artifact.data.synopsisBody ?? "", true)
-            || hasPlanningContent(artifact.data.outlineBody ?? "", false)
-            || artifact.data.chapterDraftProposal !== undefined
-            || (artifact.data.chapterDraftProposals?.length ?? 0) > 0
-          ))
-          && missingChoicesRetries < 1
-          && remainingCalls > 0
-        ) {
-          missingChoicesRetries += 1
-          pendingWrites = retainDiscussWrites(artifact.data)
-          await noteDiscussBlock(
-            "choices_required",
-            renderRuntimePrompt("discuss-repairs", "choices-required"),
-            { source: artifact.data, held: true },
-          )
-          attempt += 1
-          continue
-        }
+
         const finalAssistantMessage = missingSynopsisNotice !== undefined
           ? missingSynopsisNotice
           : [originalWorkFallbackNotice, artifact.data.assistantMessage, deferredDraftNotice, missingDraftNotice]
@@ -5042,22 +5326,7 @@ export class SynopsisConversationService {
           const gateNotice = hasDraftIntent && deferredDraftSequences.length > 0 && !hasAllowedDraft
             ? `系统状态：草稿提案${[...new Set(deferredDraftSequences)].sort((a, b) => a - b).map((sequence) => `第${String(sequence)}章`).join("、")}未通过章节顺序门禁，当前焦点第${String(input.chapterSequence)}章没有生成或保存正文草稿。`
             : undefined
-        if (
-          (artifact.data.choices?.length ?? 0) === 0
-          && !(switchingAtUserRequest && artifact.data.continueTurn === true)
-          && !(input.batchProceed === true && input.workStyleGate?.status === "style_selected")
-          && missingChoicesRetries < 1
-          && remainingCalls > 0
-        ) {
-          missingChoicesRetries += 1
-          await noteDiscussBlock(
-            "choices_required",
-            renderRuntimePrompt("discuss-repairs", "choices-required-before-write"),
-            { source: artifact.data },
-          )
-          attempt += 1
-          continue
-        }
+
         const finalAssistantMessage = missingSynopsisNotice !== undefined
             ? missingSynopsisNotice
           : missingOutlineNotice !== undefined
@@ -5645,6 +5914,8 @@ export class SynopsisConversationService {
       content: formatTurnHandoffSystemMessage(input.brief),
       createdAtMs: nowMs,
     })
+    const volume = await this.readFocusedVolume(input.workspaceRootRef, session)
+    if (!volume.started || (volume.atCap && volume.state?.endedAtMs === undefined)) return
     if (input.runAutoAnalysis === false) {
       await this.setFocus({
         projectId: input.projectId,
@@ -5811,6 +6082,7 @@ export class SynopsisConversationService {
     }
 
     if (fromValidated.sequence === toValidated.sequence) {
+      const lifecycle = await readVolumeLifecycleState(this.dependencies.workspace, input.workspaceRootRef, fromValidated.folderName)
       await this.dependencies.workspace.renameVolumeDirectory(
         input.workspaceRootRef,
         fromValidated.folderName,
@@ -5831,6 +6103,10 @@ export class SynopsisConversationService {
         await this.dependencies.workspace.saveUserMarkdown(input.workspaceRootRef, newPath,
           plan === undefined ? markdown : serializeVolumePlanningState({ ...plan, volumeFolderName: toValidated.folderName }))
         await this.dependencies.workspace.removeUserMarkdown(input.workspaceRootRef, oldPath)
+      }
+      if (lifecycle !== undefined) {
+        await saveVolumeLifecycleState(this.dependencies.workspace, input.workspaceRootRef, { ...lifecycle, volumeFolderName: toValidated.folderName })
+        await this.dependencies.workspace.removeUserMarkdown(input.workspaceRootRef, volumeLifecycleStatePath(fromValidated.folderName))
       }
       if (setup !== undefined) await this.dependencies.creativeSetup.save(input.projectId, {
         ...setup, scope: `volume:${toValidated.folderName}`,
@@ -5929,6 +6205,131 @@ export class SynopsisConversationService {
     }
   }
 
+  private async readFocusedVolume(workspaceRootRef: string, session: SynopsisConversationSession) {
+    const folder = extractVolumeFolderNameFromPath(session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
+    const [state, plan, style, protagonist, setup, index] = await Promise.all([
+      readVolumeLifecycleState(this.dependencies.workspace, workspaceRootRef, folder),
+      this.readVolumePlanningState(workspaceRootRef, folder),
+      this.dependencies.conversation.findWorkStyleGateState(session.projectId),
+      this.dependencies.creativeSetup.find(session.projectId, "protagonist"),
+      this.dependencies.creativeSetup.find(session.projectId, `volume:${folder}`),
+      this.dependencies.chapterIndex.list(session.projectId),
+    ])
+    const chapters = index.filter(chapter => extractVolumeFolderNameFromPath(chapter.currentPublishPath) === folder)
+    const planning = await this.readVolumePlanningContext(workspaceRootRef, folder, plan)
+    const styleReady = canProceedPastWorkStyleGate(style)
+    const protagonistReady = protagonist?.status === "ready"
+    const started = isVolumeStarted(state, {
+      setupReady: styleReady && protagonistReady && (setup?.status === "ready" || chapters.length > 0),
+      planningReady: planning.ready || plan?.storylineConfirmedAtMs !== undefined,
+      hasExistingChapters: chapters.length > 0,
+    })
+    const published = new Set(chapters.map(chapter => chapter.sequence))
+    let consecutive = published.size
+    if (plan !== undefined && plan.targetChapterCount > 0) {
+      consecutive = 0
+      while (consecutive < plan.targetChapterCount && published.has(plan.startSequence + consecutive)) consecutive += 1
+    }
+    const atCap = plan !== undefined && isVolumeChapterCapReached(plan, plan.startSequence + consecutive)
+    const story = { ...setup?.answers, ...plan?.storyline }
+    const wordCounts = await Promise.all(chapters.map(async chapter => {
+      const markdown = await this.dependencies.workspace.readMarkdown(workspaceRootRef, chapter.currentPublishPath).catch(() => undefined)
+      return markdown === undefined ? undefined : markdown.replace(/^#\s+[^\r\n]*\r?\n/u, "").replace(/\s+/gu, "").length
+    }))
+    const wordsReady = wordCounts.every(count => count !== undefined && count > 0)
+    const wordCount = wordCounts.reduce<number>((total, count) => total + (count ?? 0), 0)
+    return { folder, state, plan, started, atCap, wordsReady, lifecycle: buildVolumeLifecycle({
+      started, styleReady, protagonistReady, ...story, conceptionReady: planning.ready && wordsReady,
+      chapterCount: consecutive, chapterLimit: plan?.targetChapterCount ?? 0, wordCount,
+      targetWordCount: plan?.targetWordCount ?? 0, endedAtMs: state?.endedAtMs,
+      revision: state?.revisionStartedAtMs !== undefined,
+    }) }
+  }
+
+  private async enterHistoricalVolumeRevision(workspaceRootRef: string, volumeFolderName: string): Promise<void> {
+    const state = await readVolumeLifecycleState(this.dependencies.workspace, workspaceRootRef, volumeFolderName)
+    if (state?.endedAtMs === undefined || state.revisionStartedAtMs !== undefined) return
+    const revision = transitionVolumeLifecycle(state, { volumeFolderName, action: "revise", atMs: this.dependencies.now() })
+    if (revision !== undefined) await saveVolumeLifecycleState(this.dependencies.workspace, workspaceRootRef, revision)
+  }
+
+  private async withVolumeLifecycle(workspaceRootRef: string, session: SynopsisConversationSession): Promise<SynopsisConversationSession> {
+    const volume = await this.readFocusedVolume(workspaceRootRef, session)
+    return { ...session, volumeLifecycle: { ...volume.lifecycle, volumeFolderName: volume.folder } }
+  }
+
+  private async runVolumeBoundary(
+    input: Parameters<SynopsisConversationService["send"]>[0],
+    session: SynopsisConversationSession,
+    volume: Awaited<ReturnType<SynopsisConversationService["readFocusedVolume"]>>,
+    action: VolumeBoundaryAction,
+  ): Promise<SynopsisConversationSendResult> {
+    const now = this.dependencies.now()
+    await this.hydrateDiscussUsage(input.projectId)
+    synopsisConversationStreamHub.begin(input.projectId, session.sessionId, now)
+    let focused = session
+    let accepted = false
+    let content = `当前停在「${VOLUME_BOUNDARY_LABEL[action]}」。`
+    try {
+      if (input.agentMode !== "plan") {
+        const result = await this.runSynopsisDiscuss({
+          projectId: input.projectId, workspaceRootRef: input.workspaceRootRef, sessionId: session.sessionId,
+          userMessage: input.message, heading: session.title, chapterSequence: session.chapterSequence,
+          synopsisMarkdown: "", outlineMarkdown: "", userEditedSinceAgent: false, userEditedOutlineSinceAgent: false,
+          activeGoals: [], chapterProgress: [], hookScheduleAudit: {
+            requireCompleteHookSchedules: true, incompleteHooks: [], completeCount: 0, incompleteCount: 0,
+          },
+          model: input.model, allowWorkflowTools: false, allowChapterWorkflowTools: false, volumeBoundary: action,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
+          maxModelCalls: input.maxModelCalls ?? 2,
+        })
+        content = result.content
+        if (isSynopsisSendCancelled(input.projectId) || input.signal?.aborted) throw new SynopsisSendCancelledError()
+        if (result.volumeBoundaryAccepted) {
+          const latest = await this.readFocusedVolume(input.workspaceRootRef, session)
+          const next = transitionVolumeLifecycle(latest.state, {
+            volumeFolderName: volume.folder, action, atMs: this.dependencies.now(), legacyStarted: latest.started,
+          })
+          if (next === undefined || (action === "end" && !latest.atCap)) {
+            throw new SynopsisInvalidStateError("卷状态已变化，本轮没有写入，请重试。")
+          }
+          await saveVolumeLifecycleState(this.dependencies.workspace, input.workspaceRootRef, next)
+          accepted = true
+          if (action === "end") {
+            try {
+              const result = await this.setFocus({
+                projectId: input.projectId, workspaceRootRef: input.workspaceRootRef,
+                chapterSequence: await this.dependencies.chapters.nextChapterSequence(input.projectId), focusKind: "plot_synopsis",
+              })
+              focused = result.session
+              content += ` 已切至「${focused.volumeLifecycle?.volumeFolderName ?? "下一卷"}」。`
+            } catch (error) {
+              if (!(error instanceof VolumeRolloverConflictError)) throw error
+              content += ` ${error.message}`
+            }
+          }
+        }
+      }
+      await this.dependencies.conversation.appendMessage({
+        messageId: this.dependencies.createId(), projectId: input.projectId, sessionId: session.sessionId,
+        role: "user", content: input.message, createdAtMs: now,
+      })
+      await this.dependencies.conversation.appendMessage({
+        messageId: this.dependencies.createId(), projectId: input.projectId, sessionId: session.sessionId,
+        role: "assistant", content, createdAtMs: this.dependencies.now() + 1,
+      })
+      synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), { content })
+      return {
+        session: await this.withVolumeLifecycle(input.workspaceRootRef, focused),
+        messages: [...await this.dependencies.conversation.listMessagesForProject(input.projectId)],
+        ...(accepted && action !== "end" ? { autoContinue: { message: input.message } } : {}),
+      }
+    } finally {
+      synopsisConversationStreamHub.clear(input.projectId)
+    }
+  }
+
   private async readVolumePlanningContext(
     workspaceRootRef: string,
     volumeFolderName: string,
@@ -6016,7 +6417,10 @@ export class SynopsisConversationService {
           this.dependencies.now(),
         )
       }
-      if (done && input.autoContinueNextChapter) {
+      const volume = done ? await this.readFocusedVolume(input.workspaceRootRef, input.session) : undefined
+      if (volume?.atCap && volume.state?.endedAtMs === undefined) {
+        autoContinue = { message: "本卷计划章节已全部发布，请标记卷末并开启下一卷。" }
+      } else if (done && input.autoContinueNextChapter) {
         autoContinue = { message: publishedChapterAutoContinueMessage(input.session.chapterSequence) }
       } else if (!done) {
         choices = withDraftConfirmationChoice(undefined, draft)
@@ -6043,7 +6447,7 @@ export class SynopsisConversationService {
     const session = await this.dependencies.conversation.findSession(input.session.sessionId)
     if (session === undefined) throw new SynopsisInvalidStateError("讨论会话不存在")
     return {
-      session,
+      session: await this.withVolumeLifecycle(input.workspaceRootRef, session),
       messages: [...await this.dependencies.conversation.listMessagesForProject(input.projectId)],
       ...(usage === undefined ? {} : { usage }),
       ...(autoContinue === undefined ? {} : { autoContinue }),
@@ -6577,14 +6981,6 @@ function truncateToolRunSummary(text: string): string {
   return `${normalized.slice(0, 1_199)}…`
 }
 
-function isMissingSynopsisArtifactError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return message.includes("expected object, received undefined")
-    || message.includes("Invalid input: expected object")
-    || (message.includes("assistantMessage") && message.includes("invalid_type"))
-    || message.includes("synopsisDiscussArtifact")
-}
-
 /** Schema / phase-contract failures that the discuss loop can still recover from. */
 export function isRecoverableDiscussPhaseContractError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
@@ -6728,26 +7124,6 @@ function mapSynopsisPresentationWrites(
     markdown: write.markdown,
     mode: write.mode,
   }))
-}
-
-function buildWorkStyleGatePromptAppendix(input: Readonly<{
-  status: "awaiting_choice" | "style_selected"
-  selectedProseStylePath?: string
-  novelMajorCategoryRulePath?: string
-  novelSubcategoryRulePath?: string
-}> | undefined): string | undefined {
-  if (input === undefined) return undefined
-  const sharedRules = renderRuntimePrompt("discuss-appendices", "work-style-gate")
-  if (input.status === "awaiting_choice") {
-    return renderRuntimePrompt("discuss-appendices", "work-style-awaiting-choice", { sharedRules })
-  }
-  return renderRuntimePrompt("discuss-appendices", "work-style-selected", {
-    sharedRules,
-    majorCategoryPath: input.novelMajorCategoryRulePath ?? "（缺失）",
-    subcategoryPath: input.novelSubcategoryRulePath ?? "（缺失）",
-    proseStylePath: input.selectedProseStylePath ?? "（缺失）",
-    workStylePath: WORK_STYLE_RULE_PATH,
-  })
 }
 
 function buildVolumeFirstWriteGateReply(
@@ -7333,6 +7709,29 @@ function countDiscussDraftCharacters(heading: string, body: string): number {
   return stripHeadingFromDraftBody(heading, body).replace(/\s+/gu, "").length
 }
 
+function isFocusOnlyScope(scope: DiscussTurnWriteScope | undefined): boolean {
+  return scope?.focus === true && Object.keys(scope).every((key) => key === "focus")
+}
+
+function isOutlinePatchScope(scope: DiscussTurnWriteScope | undefined): scope is DiscussTurnWriteScope & { outline: "patch" } {
+  return scope?.outline === "patch" && Object.keys(scope).every((key) => key === "outline")
+}
+
+function isVolumeComposeScope(scope: DiscussTurnWriteScope | undefined): boolean {
+  return scope !== undefined && Object.keys(scope).length > 0
+    && Object.keys(scope).every((key) => ["volume", "volumeSynopsis", "volumeOutline", "volumeTargets"].includes(key))
+}
+
+function scopedComposeIntent(scope: DiscussTurnWriteScope | undefined): Parameters<typeof composeArtifactFromText>[1] {
+  if (scope === undefined || Object.keys(scope).length === 0 || scope.outline === "patch"
+    || Object.keys(scope).some((key) => key !== "synopsis" && key !== "outline" && key !== "draft")) return undefined
+  return {
+    ...(scope.synopsis === undefined ? {} : { synopsis: scope.synopsis }),
+    ...(scope.outline === undefined ? {} : { outline: scope.outline }),
+    ...(scope.draft === undefined ? {} : { draft: scope.draft }),
+  }
+}
+
 function assessDiscussWriteScope(
   scope: DiscussTurnWriteScope,
   artifact: SynopsisDiscussArtifact,
@@ -7434,7 +7833,6 @@ function resolveDiscussStageSkillIds(input: Readonly<{
   if (input.writeScope?.outline !== undefined || (materialsTrustworthy && synopsisReady && !outlineReady)) {
     ids.push("synopsis-to-outline")
   }
-  if (input.draftAction) ids.push("webnovel-deslop", "webnovel-dialogue")
   return ids
 }
 

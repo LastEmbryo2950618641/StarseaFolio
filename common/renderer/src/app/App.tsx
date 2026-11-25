@@ -235,6 +235,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
   const [, setHistoryLoading] = useState(false)
   const [modelProfiles, setModelProfiles] = useState<readonly ModelProfile[]>([])
   const [activeModelProfileId, setActiveModelProfileId] = useState("")
+  const modelProfilesSaved = useRef(false)
   const monitoredChapterRevisionIds = useRef(new Set<string>())
   const activeModelProfile = modelProfiles.find((profile) => profile.id === activeModelProfileId)
   const parsedMinimumWordCount = parseWordCount(minimumWordCount)
@@ -902,12 +903,16 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
   }, [project])
 
   useEffect(() => {
+    let cancelled = false
     void readModelProfiles().then((saved) => {
+      if (cancelled || modelProfilesSaved.current) return
       setModelProfiles(saved.profiles)
       setActiveModelProfileId(saved.activeProfileId)
     }).catch((cause: unknown) => {
+      if (cancelled || modelProfilesSaved.current) return
       setError(cause instanceof Error ? cause.message : String(cause))
     })
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
@@ -1445,6 +1450,9 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
               relativePath: targetPath,
               content: targetContent,
             })
+            if (targetPath.startsWith("大纲/") || targetPath.startsWith("章节正文/")) {
+              void refreshSynopsisConversation().catch(() => undefined)
+            }
           }
           if (documentProjectRef.current !== project.projectId) return
           replaceOpenedDocuments(saveEditorDocument(openedDocumentsRef.current, targetPath, targetContent))
@@ -1949,7 +1957,12 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       void refreshWorkspace().catch(() => undefined)
       // Process gate (e.g. previous chapter still publishing): keep going without asking the user.
       // Runaway guard only; a multi-chapter Auto run legitimately needs dozens of continuations.
-      const willAutoContinue = sent.awaitingSetupInput === undefined
+      const batchBoundaryContinues = options?.automation !== undefined && sent.autoContinue !== undefined
+      if (batchBoundaryContinues && sent.autoContinue !== undefined && synopsisAutoContinueCountRef.current < 40) {
+        synopsisAutoContinueCountRef.current += 1
+        return await sendSynopsisMessageRef.current?.(sent.autoContinue.message, { ...options, autoContinued: true }) ?? false
+      }
+      const willAutoContinue = options?.automation === undefined && sent.awaitingSetupInput === undefined
         && sent.autoContinue !== undefined && synopsisAutoContinueCountRef.current < 40
       setAgentAutoChainActive(willAutoContinue)
       if (willAutoContinue && sent.autoContinue !== undefined) {
@@ -2818,6 +2831,17 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
             pauseBatch(incomplete?.sequence ?? lastSequence, "卷目标章节尚未全部完成章节入库")
             return
           }
+          const marked = await sendSynopsisMessage("本卷章节均已发布。请标记卷末并切到下一卷。", {
+            automation: "batch_chapter",
+          })
+          const afterEnd = await invokeBackend<SynopsisConversationListResult>("synopsis.conversation.list", {
+            projectId: project.projectId,
+            workspaceRootRef: project.workspaceRootRef,
+          })
+          if (!marked || afterEnd.session?.volumeLifecycle?.volumeFolderName === activeVolumePlan.volumeFolderName) {
+            pauseBatch(lastSequence, "正在等待 AI 标记卷末")
+            return
+          }
           updateBatchStatus("stopped", lastSequence)
           return
         }
@@ -3143,6 +3167,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       profiles,
       activeProfileId,
     })
+    modelProfilesSaved.current = true
     setModelProfiles(saved.profiles)
     setActiveModelProfileId(saved.activeProfileId)
     useWorkbenchStore.getState().closeModelDialog()
@@ -3156,6 +3181,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       profiles,
       activeProfileId,
     })
+    modelProfilesSaved.current = true
     setModelProfiles(saved.profiles)
     setActiveModelProfileId(saved.activeProfileId)
   }
@@ -3752,6 +3778,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
                       projectId={project.projectId}
                       workspaceRootRef={project.workspaceRootRef}
                       chapter={browseChapter}
+                      activeVolumeLifecycle={synopsisConversation.session?.volumeLifecycle}
                       unpublishedDrafts={unpublishedDrafts}
                       {...(discussDraftPromotion?.draftVersionId === undefined ? {} : { draftCandidateVersionId: discussDraftPromotion.draftVersionId })}
                       onSelectDraftCandidate={selectDiscussDraftCandidate}

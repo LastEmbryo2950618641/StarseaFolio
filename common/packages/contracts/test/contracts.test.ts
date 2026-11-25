@@ -5,6 +5,7 @@ import {
   graphMutationSchema,
   kvCacheUsageSchema,
   modelPhaseResultSchema,
+  modelSelectionSchema,
   projectSettingsSchema,
   phaseResultEnvelopeSchema,
   evidenceSchema,
@@ -26,6 +27,11 @@ const ids = {
 }
 
 describe("shared contracts", () => {
+  it("accepts a 3M context window in the model sent with a turn", () => {
+    const model = { baseUrl: "https://example.test/v1", model: "manual-model", credentialRef: "model-profile:custom" }
+    expect(modelSelectionSchema.parse({ ...model, contextWindowTokens: 3_000_000 }).contextWindowTokens).toBe(3_000_000)
+    expect(modelSelectionSchema.safeParse({ ...model, contextWindowTokens: 0 }).success).toBe(false)
+  })
   it("preserves rejected AI writing-rule paths in synopsis send results", () => {
     const schema = synopsisConversationSendResultSchema.pick({ rejectedCreationDeskRulePaths: true })
     expect(schema.parse({

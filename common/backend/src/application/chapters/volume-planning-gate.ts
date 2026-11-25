@@ -60,6 +60,8 @@ export function parseVolumePlanningState(markdown: string | undefined): VolumePl
       ...(validStoryline(record.storyline) ? { storyline: record.storyline } : {}),
       ...(typeof record.storylineConfirmedAtMs === "number" && Number.isFinite(record.storylineConfirmedAtMs)
         && record.storylineConfirmedAtMs >= 0 ? { storylineConfirmedAtMs: record.storylineConfirmedAtMs } : {}),
+      ...(typeof record.endedAtMs === "number" && Number.isFinite(record.endedAtMs)
+        && record.endedAtMs >= 0 ? { endedAtMs: record.endedAtMs } : {}),
       ...(typeof record.notes === "string" ? { notes: record.notes } : {}),
     }
   } catch {

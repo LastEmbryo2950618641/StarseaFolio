@@ -90,6 +90,7 @@ import type { Kysely } from "kysely"
 import type { ProjectDatabase } from "../infrastructure/sqlite/database-types.js"
 import { SqliteCreativeSetupRepository } from "../infrastructure/sqlite/repositories/sqlite-creative-setup-repository.js"
 import { volumePlanningMarkdownHasContent } from "../application/chapters/volume-planning-gate.js"
+import { isVolumeChapterCapReached, readVolumeLifecycleState } from "../application/chapters/volume-lifecycle-state.js"
 import { protagonistCreativeSetupMarkdownHasContent } from "../application/chapters/creative-setup-state.js"
 import { runtimeLog } from "../infrastructure/diagnostics/index.js"
 import { graphRevisionProgress } from "../application/chapters/graph-revision-progress.js"
@@ -208,6 +209,15 @@ export class ProjectRuntime {
       ))
     } catch {
       state = undefined
+    }
+    const lifecycle = await readVolumeLifecycleState(this.workspace, this.workspaceRootRef, volumeFolderName)
+    if (isVolumeChapterCapReached(state, chapterSequence)) {
+      throw new Error(lifecycle?.endedAtMs === undefined
+        ? `「${volumeFolderName}」已达章节上限。AI 必须先提交 <volume-end/> 标记卷末。`
+        : `「${volumeFolderName}」已结卷，请切到下一卷写新章。`)
+    }
+    if (lifecycle?.endedAtMs !== undefined && lifecycle.revisionStartedAtMs === undefined) {
+      throw new Error(`「${volumeFolderName}」已结卷。请先由讨论 AI 进入修订。`)
     }
     if (!volumePlanningGateReady(state)) {
       throw new Error(`卷级首次写入门禁未通过（${volumeFolderName}）：需要先规划目标章节数与预计总字数，并首次写入卷梗概和卷大纲`)
@@ -1129,6 +1139,7 @@ export class ProjectRuntime {
   }
 
   public async saveMarkdown(relativePath: string, content: string): Promise<void> {
+    assertVolumeLifecycleDocumentReadOnly(relativePath)
     const promptTarget = this.promptLibrary.resolveWorkspacePath(relativePath)
     if (promptTarget !== undefined) {
       const saveMirror = this.workspace.savePromptMirror
@@ -1141,16 +1152,30 @@ export class ProjectRuntime {
     }
     const normalizedPromptPath = relativePath.replaceAll("\\", "/").replace(/^\.\//u, "")
     if (normalizedPromptPath === "提示词" || normalizedPromptPath.startsWith("提示词/")) {
-      throw new Error("提示词库只允许编辑已登记的平台提示词；新增文件不会进入生成链路")
+      await this.workspace.saveUserMarkdown(this.workspaceRootRef, relativePath, content)
+      return
     }
     const chapterWrite = resolveChapterWriteContext(relativePath)
+    const planningArtifact = resolveVolumePlanningArtifact(relativePath)
+    const batchPlanVolume = relativePath.replaceAll("\\", "/").match(/^大纲\/([^/]+)\.批量计划\.md$/u)?.[1]
+    const planningVolume = planningArtifact?.volumeFolderName ?? batchPlanVolume
+    if (planningVolume !== undefined) await this.assertCreativeSetupReady(planningVolume)
+    const targetVolume = chapterWrite?.volumeFolderName ?? planningVolume
+    if (targetVolume !== undefined) {
+      const lifecycle = await readVolumeLifecycleState(this.workspace, this.workspaceRootRef, targetVolume)
+      if (lifecycle?.endedAtMs !== undefined) {
+        const plan = parseVolumePlanningState(await this.readMarkdown(`大纲/${targetVolume}.批量计划.md`))
+        const sequence = chapterWrite?.chapterSequence ?? plan?.startSequence
+        if (sequence !== undefined && !isVolumeChapterCapReached(plan, sequence)) {
+          await this.createSynopsisConversationService().setFocus({
+            projectId: this.projectId, workspaceRootRef: this.workspaceRootRef, chapterSequence: sequence, enterVolumeRevision: true,
+          })
+        }
+      }
+    }
     if (chapterWrite !== undefined) {
       await this.assertVolumePlanningGateReady(chapterWrite.chapterSequence, chapterWrite.volumeFolderName)
     }
-    const planningArtifact = resolveVolumePlanningArtifact(relativePath)
-    const batchPlanVolume = relativePath.replaceAll("\\", "/").match(/^大纲\/(.+)\.批量计划\.md$/u)?.[1]
-    const planningVolume = planningArtifact?.volumeFolderName ?? batchPlanVolume
-    if (planningVolume !== undefined) await this.assertCreativeSetupReady(planningVolume)
     const previous = planningArtifact === undefined ? undefined : await this.readMarkdown(relativePath).catch(() => "")
     await this.workspace.saveUserMarkdown(this.workspaceRootRef, relativePath, content)
     if (planningArtifact !== undefined && previous !== content) {
@@ -1175,6 +1200,7 @@ export class ProjectRuntime {
   }
 
   public async deleteMarkdown(relativePath: string): Promise<void> {
+    assertVolumeLifecycleDocumentReadOnly(relativePath)
     await this.workspace.removeUserMarkdown(this.workspaceRootRef, relativePath)
     await this.createChapterSynopsisService().recordPlanningArtifactDeleted({
       projectId: this.projectId,
@@ -1803,6 +1829,12 @@ export class ProjectRuntime {
         indexedCount: sourceUnits.length,
       })
     }
+  }
+}
+
+function assertVolumeLifecycleDocumentReadOnly(path: string): void {
+  if (/^大纲\/[^/]+\.卷状态\.md$/iu.test(path.replaceAll("\\", "/").replace(/^\.\//u, ""))) {
+    throw new Error("卷状态由讨论流程维护，不能直接编辑或删除。")
   }
 }
 

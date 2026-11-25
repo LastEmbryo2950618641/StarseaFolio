@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { Server as HttpServer } from "node:http"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
+import { buildVolumeLifecycle } from "@starseafolio/contracts"
 import { chromium, type Browser, type Page } from "playwright-core"
 import { createServer, type ViteDevServer } from "vite"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
@@ -15,6 +16,11 @@ const executable = [
 const folder = "第一卷 石屑与油墨"
 const synopsisPath = `大纲/${folder}.梗概.md`
 const outlinePath = `大纲/${folder}.md`
+const lifecyclePath = `大纲/${folder}.卷状态.md`
+
+function lifecycleMarkdown(overrides: Record<string, unknown> = {}): string {
+  return `# 卷状态\r\n\r\n\`\`\`json\r\n${JSON.stringify({ volumeFolderName: folder, startedAtMs: 0, ...overrides })}\r\n\`\`\`\r\n`
+}
 
 describe.skipIf(executable === undefined)("volume detail DOM refresh", () => {
   let server: ViteDevServer | undefined
@@ -154,6 +160,79 @@ describe.skipIf(executable === undefined)("volume detail DOM refresh", () => {
     const readCount = await page.evaluate(() => window.volumeDetailFixture.reads.length)
     await page.clock.runFor(12000)
     expect(await page.evaluate(() => window.volumeDetailFixture.reads.length)).toBe(readCount)
+  })
+
+  it("loads historical volume end and revision from the selected workspace", async () => {
+    await page.getByTestId("volume-detail-tab-info").click()
+    const lifecycle = page.getByTestId("chapter-browse-volume-lifecycle")
+    const volumeEnd = lifecycle.locator('[data-phase="volume_end"]')
+    const revision = lifecycle.locator('[data-phase="revision"]')
+    await page.evaluate(({ path, markdown }) => { window.volumeDetailFixture.setFile(path, markdown) }, {
+      path: lifecyclePath, markdown: lifecycleMarkdown({ endedAtMs: 0 }),
+    })
+    await page.clock.runFor(8200)
+    await expect.poll(() => volumeEnd.getAttribute("data-status")).toBe("done")
+    expect(await volumeEnd.textContent()).toContain("已标记卷末")
+    expect(await revision.getAttribute("data-status")).toBe("pending")
+
+    await page.evaluate(({ path, markdown }) => { window.volumeDetailFixture.setFile(path, markdown) }, {
+      path: lifecyclePath, markdown: lifecycleMarkdown({ endedAtMs: 10, revisionStartedAtMs: 10 }),
+    })
+    await page.clock.runFor(8200)
+    await expect.poll(() => revision.getAttribute("data-status")).toBe("current")
+
+    await page.evaluate(({ path, markdown }) => {
+      window.volumeDetailFixture.setScopedFile("project-1", "workspace-2", path, markdown)
+      window.volumeDetailFixture.configure({ workspaceRootRef: "workspace-2" })
+    }, { path: lifecyclePath, markdown: lifecycleMarkdown() })
+    await expect.poll(() => volumeEnd.getAttribute("data-status")).toBe("pending")
+    await expect.poll(() => page.evaluate((path) => window.volumeDetailFixture.reads.some((read) =>
+      read.projectId === "project-1" && read.workspaceRootRef === "workspace-2" && read.path === path), lifecyclePath)).toBe(true)
+    expect(await revision.getAttribute("data-status")).toBe("pending")
+  })
+
+  it("rejects foreign and malformed lifecycle files and gives the active session precedence", async () => {
+    await page.getByTestId("volume-detail-tab-info").click()
+    const lifecycle = page.getByTestId("chapter-browse-volume-lifecycle")
+    const volumeEnd = lifecycle.locator('[data-phase="volume_end"]')
+    const revision = lifecycle.locator('[data-phase="revision"]')
+    for (const overrides of [
+      { volumeFolderName: "第二卷 别卷", endedAtMs: 10 },
+      { startedAtMs: null, endedAtMs: 10 },
+      { startedAtMs: -1, endedAtMs: 10 },
+      { startedAtMs: 10, endedAtMs: 9 },
+      { endedAtMs: Number.MAX_SAFE_INTEGER + 1 },
+      { endedAtMs: "10" },
+      { endedAtMs: 0.5 },
+      { revisionStartedAtMs: 10 },
+      { endedAtMs: 10, revisionStartedAtMs: 9 },
+    ]) {
+      await page.evaluate(({ path, markdown }) => { window.volumeDetailFixture.setFile(path, markdown) }, {
+        path: lifecyclePath, markdown: lifecycleMarkdown(overrides),
+      })
+      await page.clock.runFor(8000)
+      await expect.poll(() => page.evaluate(() => window.volumeDetailFixture.activeReads)).toBe(0)
+      expect(await volumeEnd.getAttribute("data-status"), JSON.stringify(overrides)).toBe("pending")
+      expect(await revision.getAttribute("data-status"), JSON.stringify(overrides)).toBe("pending")
+    }
+
+    await page.evaluate(({ path, markdown }) => { window.volumeDetailFixture.setFile(path, markdown) }, {
+      path: lifecyclePath, markdown: lifecycleMarkdown({ endedAtMs: 10, revisionStartedAtMs: 11 }),
+    })
+    await page.clock.runFor(8200)
+    await expect.poll(() => revision.getAttribute("data-status")).toBe("current")
+
+    const active = buildVolumeLifecycle({
+      started: true, styleReady: true, protagonistReady: true,
+      opening: "开场", climaxes: "高潮", ending: "结局", subplots: "伏笔；谜题",
+      conceptionReady: true, chapterCount: 8, chapterLimit: 8,
+    })
+    await page.evaluate((activeVolumeLifecycle) => { window.volumeDetailFixture.configure({ activeVolumeLifecycle }) }, {
+      ...active, volumeFolderName: folder,
+    })
+    await expect.poll(() => volumeEnd.textContent()).toContain("待标记卷末")
+    expect(await lifecycle.getByTestId("volume-lifecycle-subplot-count").textContent()).toContain("已确认支线 2/6")
+    expect(await revision.getAttribute("data-status")).toBe("pending")
   })
 
   it("shows planning without waiting for published-body reads and updates words after edits/publication", async () => {

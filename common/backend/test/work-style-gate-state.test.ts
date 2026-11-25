@@ -75,6 +75,24 @@ describe("work style gate state machine", () => {
     expect(canProceedPastWorkStyleGate(ready)).toBe(true)
   })
 
+  it("accepts the common「规则路径：」anchor wording in a complete style document", () => {
+    const selected = transitionWorkStyleGateState(initialWorkStyleGateState(), {
+      type: "select_style",
+      proseStylePath: "表现输出/笔风规则/仙侠.md",
+      novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
+      novelSubcategoryRulePath: "表现输出/小说次大类规则/飞卢.md",
+    })
+    const markdown = completeStyle
+      .replace("小说大类规则：", "小说大类规则路径：")
+      .replace("小说次大类规则：", "小说次大类规则路径：")
+    const ready = transitionWorkStyleGateState(selected, {
+      type: "style_document_saved",
+      markdown,
+      digest: "style-digest-alt",
+    })
+    expect(ready).toMatchObject({ status: "ready", styleDigest: "style-digest-alt" })
+  })
+
   it("does not approve a complete document that ignores the selected prose rule", () => {
     const selected = transitionWorkStyleGateState(initialWorkStyleGateState(), {
       type: "select_style",

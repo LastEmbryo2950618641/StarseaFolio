@@ -18,10 +18,14 @@ import {
   PLATFORM_BASE_RULE_RESOURCES,
   SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES,
   defaultSkillIdsForPhase,
+  extractPromptDocSection,
   formatSkillEvidenceHeader,
   listPlatformSkills,
   resolvePromptDefinition,
   resolveSkillDefinition,
+  stagePromptDocForPhase,
+  stagePromptDocForSkill,
+  STAGE_SKILL_DOCS,
   SYNOPSIS_SKILLS_PROTOCOL,
 } from "@starseafolio/prompt-contracts"
 
@@ -89,7 +93,18 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
   }
 
   public async loadPhase(phase: AIPhase): Promise<PromptResource> {
-    return this.load(resolvePromptDefinition(phase).resourcePath)
+    const stageDoc = stagePromptDocForPhase(phase)
+    if (stageDoc === undefined) {
+      return this.load(resolvePromptDefinition(phase).resourcePath)
+    }
+    const markdown = await this.readBundledOrOverride(stageDoc.resourcePath)
+    const marker = `phase:${phase.replaceAll("_", "-")}`
+    return {
+      ref: `${PROMPT_CONTRACT_VERSION}:${stageDoc.resourcePath}#${marker}`,
+      version: PROMPT_CONTRACT_VERSION,
+      digest: digest(extractPromptDocSection(markdown, marker)),
+      text: extractPromptDocSection(markdown, marker),
+    }
   }
 
   public async listSkills(): Promise<readonly Readonly<{
@@ -117,6 +132,24 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
       throw new Error(`Unknown skill: ${skillId}`)
     }
     const includeReferences = options?.includeReferences === true
+    const stageSkill = STAGE_SKILL_DOCS[skillId]
+    if (stageSkill !== undefined) {
+      const stageDoc = stagePromptDocForSkill(skillId)
+      if (stageDoc === undefined) throw new Error(`Missing stage document for skill: ${skillId}`)
+      const markdown = await this.readBundledOrOverride(stageDoc.resourcePath)
+      const text = composePromptTexts([
+        formatSkillEvidenceHeader(skill.id, includeReferences),
+        extractPromptDocSection(markdown, stageSkill.marker),
+      ])
+      return {
+        skillId: skill.id,
+        includeReferences,
+        ref: `${PROMPT_CONTRACT_VERSION}:skill:${skill.id}`,
+        version: PROMPT_CONTRACT_VERSION,
+        digest: digest(text),
+        text,
+      }
+    }
     const paths = includeReferences
       ? [skill.primaryResource, ...skill.referenceResources]
       : [skill.primaryResource]
@@ -165,14 +198,18 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
   }
 
   private async load(resourcePath: string): Promise<PromptResource> {
-    const override = await this.promptLibrary?.readOverride(resourcePath)
-    const text = normalizePrompt(override ?? await readFile(resolve(this.promptPackageRoot, resourcePath), "utf8"))
+    const text = await this.readBundledOrOverride(resourcePath)
     return {
       ref: `${PROMPT_CONTRACT_VERSION}:${resourcePath}`,
       version: PROMPT_CONTRACT_VERSION,
       digest: digest(text),
       text,
     }
+  }
+
+  private async readBundledOrOverride(resourcePath: string): Promise<string> {
+    const override = await this.promptLibrary?.readOverride(resourcePath)
+    return normalizePrompt(override ?? await readFile(resolve(this.promptPackageRoot, resourcePath), "utf8"))
   }
 
   private async loadComposite(refSuffix: string, resourcePaths: readonly string[]): Promise<PromptResource> {

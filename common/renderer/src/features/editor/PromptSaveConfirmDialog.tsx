@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react"
 import { Sparkles } from "lucide-react"
 
-import { promptCategoryLabel } from "../workspace/prompt-paths.js"
+import { promptCategoryLabel, promptScope } from "../workspace/prompt-paths.js"
 
 export const PROMPT_SAVE_CONFIRM_MESSAGE = "这是平台提示词。保存后会写入全局提示词库，并影响所有作品后续生成。确定保存吗？"
+export const PROJECT_PROMPT_SAVE_CONFIRM_MESSAGE = "这是本作品提示词。保存后只影响当前作品后续生成，不会写入全局提示词库。确定保存吗？"
 
 type Props = Readonly<{
   path: string
@@ -15,6 +16,8 @@ type Props = Readonly<{
 export function PromptSaveConfirmDialog({ path, onConfirm, onCancel }: Props): React.JSX.Element {
   const confirmButtonRef = useRef<HTMLButtonElement>(null)
   const category = promptCategoryLabel(path)
+  const scope = promptScope(path)
+  const globalPrompt = scope === undefined || scope === "基础规则"
 
   useEffect(() => {
     confirmButtonRef.current?.focus()
@@ -48,11 +51,13 @@ export function PromptSaveConfirmDialog({ path, onConfirm, onCancel }: Props): R
         <span className="work-name-prompt-icon" aria-hidden="true"><Sparkles size={16} /></span>
         <div>
           <strong id="prompt-save-confirm-title">保存提示词</strong>
-          <small>{category === undefined ? "全局提示词库" : `全局提示词库 · ${category}`} · {path}</small>
+          <small>{category === undefined
+            ? globalPrompt ? "全局提示词库" : "本作品提示词"
+            : `${globalPrompt ? "全局提示词库" : "本作品提示词"} · ${category}`} · {path}</small>
         </div>
       </header>
       <div className="work-name-prompt-body">
-        <p>{PROMPT_SAVE_CONFIRM_MESSAGE}</p>
+        <p>{globalPrompt ? PROMPT_SAVE_CONFIRM_MESSAGE : PROJECT_PROMPT_SAVE_CONFIRM_MESSAGE}</p>
       </div>
       <footer>
         <button type="button" data-testid="prompt-save-cancel" onClick={onCancel}>取消</button>

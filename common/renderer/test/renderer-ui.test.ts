@@ -452,6 +452,19 @@ describe("renderer workbench UI contract", () => {
         status: "active",
         createdAtMs: 1,
         updatedAtMs: 1,
+        volumeLifecycle: {
+          phase: "writing",
+          stages: [{ phase: "writing", label: "开始编撰", status: "current" }],
+          chapterCount: 3,
+          chapterLimit: 12,
+          wordCount: 1,
+          targetWordCount: 10,
+          subplotCount: 1,
+          subplotLimit: 6,
+          ended: false,
+          revision: false,
+          volumeFolderName: "第一卷 雨夜",
+        },
       },
       onSetFocus: vi.fn(),
       focusChapters: [{
@@ -463,6 +476,10 @@ describe("renderer workbench UI contract", () => {
 
     expect(html).toContain("data-testid=\"creation-desk-focus-bar\"")
     expect(html).toContain("第一章 雨夜来信")
+    expect(html).toContain('data-testid="creation-desk-volume-progress"')
+    expect(html).toContain("第一卷 雨夜")
+    expect(html).toContain("开始编撰")
+    expect(html).toContain("待写入 4/12")
     expect(html).toContain("打开梗概文件")
     expect(html).not.toContain("章节正文/第一卷 待命名/第一章 雨夜来信 [剧情梗概].md")
   })

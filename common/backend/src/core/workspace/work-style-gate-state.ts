@@ -34,9 +34,17 @@ export function transitionWorkStyleGateState(
       if (state.status !== "style_selected") return state
       const assessment = assessWorkStyleMarkdown(event.markdown)
       const selectedPath = normalizePath(state.selectedProseStylePath)
-      if (!assessment.complete || !normalizePath(event.markdown).includes(`小说笔风：${selectedPath}`)
-        || !normalizePath(event.markdown).includes(`小说大类规则：${state.novelMajorCategoryRulePath}`)
-        || !normalizePath(event.markdown).includes(`小说次大类规则：${state.novelSubcategoryRulePath}`)) return state
+      const normalizedMarkdown = normalizePath(event.markdown)
+      // The model sometimes writes「小说大类规则路径：」instead of the canonical anchor.
+      const hasAnchor = (label: string, path: string): boolean => (
+        normalizedMarkdown.includes(`${label}：${normalizePath(path)}`)
+        || normalizedMarkdown.includes(`${label}路径：${normalizePath(path)}`)
+        || normalizedMarkdown.includes(`${label}: ${normalizePath(path)}`)
+        || normalizedMarkdown.includes(`${label}路径: ${normalizePath(path)}`)
+      )
+      if (!assessment.complete || !hasAnchor("小说笔风", selectedPath)
+        || !hasAnchor("小说大类规则", state.novelMajorCategoryRulePath)
+        || !hasAnchor("小说次大类规则", state.novelSubcategoryRulePath)) return state
       return {
         status: "ready",
         selectedProseStylePath: state.selectedProseStylePath,

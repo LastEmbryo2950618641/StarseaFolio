@@ -170,7 +170,8 @@ import {
   settingsExtractionArtifactSchema,
   workStyleRevisionArtifactSchema,
 } from "@starseafolio/prompt-contracts"
-import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
+import { AFTER_USER_MESSAGE_PROMPT_DOC } from "@starseafolio/prompt-contracts"
+import { renderPromptDocSection, renderPromptDocSectionSync, renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 const turnModelPhases: readonly AIPhase[] = [
   "interpret",
@@ -3053,7 +3054,9 @@ export class TurnOrchestrator {
     const workflowSection = workflowAppendixSection(input.phase, input.input.workflow)
     const workflowAppendix = workflowSection === undefined
       ? undefined
-      : renderRuntimePrompt("turn-context", workflowSection)
+      : workflowSection.endsWith("-query")
+        ? await renderPromptDocSection(AFTER_USER_MESSAGE_PROMPT_DOC, `query:${workflowSection}`)
+        : renderRuntimePrompt("turn-context", workflowSection)
     const archiveSessionId = input.input.conversationArchiveSessionId
     const conversation = this.dependencies.synopsisConversation
     const canReadArchive = input.phase === "draft" && archiveSessionId !== undefined && conversation !== undefined
@@ -5755,6 +5758,8 @@ function isMandatoryWorkspaceEntry(entry: WorkspaceCatalogEntry): boolean {
   if (entry.entryKind !== "file") return false
   return entry.relativePath === "设定集/readme.md"
     || entry.relativePath === "参考文件/readme.md"
+    || entry.relativePath.startsWith("提示词/用户规则/系统提示词/")
+    || entry.relativePath.startsWith("提示词/系统记忆/系统提示词/")
     || entry.relativePath.startsWith("世界推演规则/用户规则/")
 }
 
@@ -6686,7 +6691,7 @@ function queryReviewDecision(
       reason: groundingRequiresRevision
         ? [
             result.reason,
-            renderRuntimePrompt("turn-context", "query-grounding"),
+            renderPromptDocSectionSync(AFTER_USER_MESSAGE_PROMPT_DOC, "query:query-grounding"),
             unresolvedRetrievalEvidence ? renderRuntimePrompt("turn-context", "unresolved-query-evidence") : undefined,
           ].filter(Boolean).join("\n")
         : result.reason,

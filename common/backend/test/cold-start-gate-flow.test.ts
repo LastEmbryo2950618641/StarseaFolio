@@ -3,12 +3,14 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import Database from "better-sqlite3"
 
-import { PROTOCOL_VERSION, type PhaseRequestEnvelope, type SynopsisConversationChoice } from "@starseafolio/contracts"
+import { PROTOCOL_VERSION, type PhaseRequestEnvelope, type SynopsisConversationChoice, type SynopsisConversationSendResult } from "@starseafolio/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
 import { assessWorkStyleMarkdown, WORK_STYLE_RULE_PATH } from "../src/core/workspace/work-style-gate.js"
 
 import { confirmedVolumeStorylineFixture, openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+
+import { taggedVolumeFixture } from "./helpers/tagged-volume-fixture.js"
 
 const harnesses: ChapterHarness[] = []
 
@@ -27,6 +29,26 @@ async function invoke<T>(harness: ChapterHarness, method: string, payload: Recor
   })
   if (!response.ok) throw new Error(JSON.stringify(response.error))
   return response.data as T
+}
+
+function volumeStartFixtureModel(model: AIModelPort = new FakeAiModelAdapter(randomUUID)): AIModelPort {
+  return {
+    info: model.info,
+    execute: async (request, options) => {
+      if (options?.phasePrompt?.text.includes("独立一行输出 <volume-start/>")) {
+        return {
+          result: {
+            schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId,
+            phase: request.phase, outcome: "continue", artifact: { assistantMessage: "<volume-start/>" },
+            requestedReads: [], citedReadIds: [], producedArtifactIds: [], decisionRecordIds: [],
+            unresolvedDependencies: [], reason: "Start volume fixture", selfReview: "Boundary only",
+          },
+          usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0 },
+        }
+      }
+      return model.execute(request, options)
+    },
+  }
 }
 
 describe("cold-start style gate flow", () => {
@@ -124,7 +146,7 @@ describe("cold-start style gate flow", () => {
             finalSelfReview: "已分别提交卷目标、卷梗概与卷大纲，未写章节材料。",
           }
         }
-        modelResponses.push(artifact)
+        modelResponses.push(taggedVolumeFixture(artifact))
         return {
           result: {
             schemaVersion: 1,
@@ -132,7 +154,7 @@ describe("cold-start style gate flow", () => {
             contextId: request.contextId,
             phase: request.phase,
             outcome: "continue",
-            artifact,
+            artifact: taggedVolumeFixture(artifact),
             requestedReads: [],
             citedReadIds: [...request.committedReadIds],
             producedArtifactIds: [],
@@ -188,13 +210,15 @@ describe("cold-start style gate flow", () => {
     })
     expect(sent.volumePlanningStage).toBe(true)
     expect(sent.autoContinue?.message).toContain("当前卷首次规划已通过写入门禁")
-    expect(modelResponses.at(-1)).toMatchObject({
-      creationDeskSettings: { minimumWordCount: 2500, maximumWordCount: 3500 },
-    })
     expect(modelResponses.some((response) => (
       typeof response === "object" && response !== null
-      && "creationDeskSettings" in response
-      && (response as { creationDeskSettings?: unknown }).creationDeskSettings !== undefined
+      && typeof (response as { assistantMessage?: unknown }).assistantMessage === "string"
+      && (response as { assistantMessage: string }).assistantMessage.includes("minimumWordCount: 2500")
+    ))).toBe(true)
+    expect(modelResponses.some((response) => (
+      typeof response === "object" && response !== null
+      && typeof (response as { assistantMessage?: unknown }).assistantMessage === "string"
+      && (response as { assistantMessage: string }).assistantMessage.includes("<writing-settings>")
     ))).toBe(true)
     expect(sent.creationDeskSettings).toEqual({
       descriptionRulePath: "表现输出/描写规则/自动.md",
@@ -373,10 +397,14 @@ describe("cold-start style gate flow", () => {
     const delegate = new FakeAiModelAdapter(randomUUID)
     const modelRequests: PhaseRequestEnvelope[] = []
     const modelResponses: unknown[] = []
+    const discussOptions: Array<{ outputMode?: string; onSchemaRepair?: unknown; prompt?: string }> = []
     const model: AIModelPort = {
       info: delegate.info,
       execute: async (request, options) => {
         modelRequests.push(request)
+        if (request.phase === "synopsis_discuss") {
+          discussOptions.push({ outputMode: options?.outputMode, onSchemaRepair: options?.onSchemaRepair, prompt: options?.phasePrompt?.text })
+        }
         const execution = await delegate.execute(request, options)
         modelResponses.push(execution.result.artifact)
         return execution
@@ -384,7 +412,7 @@ describe("cold-start style gate flow", () => {
     }
     const harness = await openChapterHarness("Fresh Book Gate Test", {
       workStyleGateReady: false,
-      model,
+      model: volumeStartFixtureModel(model),
     })
     harnesses.push(harness)
     const base = {
@@ -403,6 +431,11 @@ describe("cold-start style gate flow", () => {
       seededStyle = undefined
     }
     expect(assessWorkStyleMarkdown(seededStyle).complete).toBe(false)
+    const boundary = await invoke<SynopsisConversationSendResult>(harness, "synopsis.conversation.send", {
+      ...base,
+      message: "开始第一卷。",
+    })
+    expect(boundary.autoContinue?.message).toBe("开始第一卷。")
     const sent = await invoke<{
       session: { synopsisPath: string }
       messages: Array<{ role: string; content: string; choices?: SynopsisConversationChoice[] }>
@@ -419,6 +452,9 @@ describe("cold-start style gate flow", () => {
       && choice.workStyleSelection.novelSubcategoryRulePath.startsWith("表现输出/小说次大类规则/")
     ))).toBe(true)
     expect(modelRequests.some((request) => request.phase === "synopsis_discuss")).toBe(true)
+    expect(discussOptions.length).toBeGreaterThan(0)
+    expect(discussOptions.every((option) => option.outputMode === "text" && option.onSchemaRepair === undefined)).toBe(true)
+    expect(discussOptions.some((option) => option.prompt?.includes("<compose-work-style-choices>"))).toBe(true)
     expect(modelRequests.some((request) => (
       request.phase === "synopsis_discuss"
       && (request.input as { readEvidence: Array<{ ownerKind: string; ownerId: string; semanticText: string }> })
@@ -449,17 +485,17 @@ describe("cold-start style gate flow", () => {
       message: "按你的推荐来定风格",
       batchProceed: true,
     })
-    expect(selected.messages.find((message) => message.role === "assistant")?.content).toContain("审核")
+    expect(discussOptions.at(-1)?.prompt).toContain("<compose-work-style>")
+    expect(selected.messages.slice(boundary.messages.length).find((message) => message.role === "assistant")?.content).toContain("审核")
     expect(modelRequests.at(-1)?.input).toMatchObject({
       synopsisDiscuss: { workStyleGate: { status: "style_selected" } },
     })
     expect(modelRequests.length - requestsBeforeSelection).toBe(1)
     expect(modelResponses.at(-1)).toMatchObject({
-      presentationWrites: [{ relativePath: WORK_STYLE_RULE_PATH }],
+      assistantMessage: expect.stringContaining("<compose-work-style>"),
     })
-    const returnedStyle = (modelResponses.at(-1) as {
-      presentationWrites: Array<{ markdown: string }>
-    }).presentationWrites[0]!.markdown
+    const returnedStyle = ((modelResponses.at(-1) as { assistantMessage: string }).assistantMessage
+      .split("<compose-work-style>")[1] ?? "").split("</compose-work-style>")[0]!.trim()
     expect(assessWorkStyleMarkdown(returnedStyle)).toMatchObject({ complete: true })
     const styleMarkdown = await harness.container.workspace.readMarkdown(harness.workspaceRootRef, WORK_STYLE_RULE_PATH)
     expect(assessWorkStyleMarkdown(styleMarkdown).complete).toBe(true)
@@ -476,7 +512,7 @@ describe("cold-start style gate flow", () => {
   })
 
   it("requires a choice even when the style file is complete but no choice was made", async () => {
-    const harness = await openChapterHarness("Cold Start Gate Test", { workStyleGateReady: false })
+    const harness = await openChapterHarness("Cold Start Gate Test", { workStyleGateReady: false, model: volumeStartFixtureModel() })
     harnesses.push(harness)
     await harness.container.workspace.saveUserMarkdown(
       harness.workspaceRootRef,
@@ -502,6 +538,11 @@ describe("cold-start style gate flow", () => {
       "synopsis.conversation.start",
       base,
     )
+    const boundary = await invoke<SynopsisConversationSendResult>(harness, "synopsis.conversation.send", {
+      ...base,
+      message: "开始第一卷。",
+    })
+    expect(boundary.autoContinue?.message).toBe("开始第一卷。")
 
     const sent = await invoke<{
       session: { synopsisPath: string }
@@ -516,7 +557,7 @@ describe("cold-start style gate flow", () => {
       batchProceed: true,
     })
 
-    const assistant = sent.messages.find((message) => message.role === "assistant")
+    const assistant = sent.messages.slice(boundary.messages.length).find((message) => message.role === "assistant")
     expect(assistant?.content).not.toContain("正式输出")
     expect(assistant?.choices?.length).toBeGreaterThanOrEqual(2)
     expect(assistant?.choices?.length).toBeLessThanOrEqual(3)

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { afterEach, describe, expect, it } from "vitest"
 import { PROTOCOL_VERSION, type SynopsisConversationSendResult } from "@starseafolio/contracts"
+import { taggedVolumeFixture } from "./helpers/tagged-volume-fixture.js"
+import { textFixtureModel } from "./helpers/discuss-fixture-text.js"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { openChapterHarness, prepareChapterPlanning, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
@@ -16,10 +18,16 @@ async function invoke<T>(h: ChapterHarness, method: string, payload: Record<stri
 
 function fixtureModel(inputs: Record<string, unknown>[]): AIModelPort {
   let todoStep = 0
-  return {
+  const model: AIModelPort = {
     info: { provider: "fixture", model: "creative-interview", available: true, contextWindowTokens: 64_000 },
-    execute: (request) => {
+    execute: (request, options) => {
       const input = request.input as Record<string, unknown>
+      if (options?.phasePrompt?.text.includes("独立一行输出 <volume-start/>")) {
+        return Promise.resolve({ result: { schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId,
+          phase: request.phase, outcome: "continue", artifact: { assistantMessage: "<volume-start/>" }, requestedReads: [],
+          citedReadIds: [], producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [],
+          reason: "卷始", selfReview: "卷始" }, usage: { inputTokens: 1, outputTokens: 1, latencyMs: 0 } })
+      }
       inputs.push(input)
       const discussion = input.synopsisDiscuss as Record<string, unknown> | undefined
       const interview = discussion?.creativeSetup as { status: string; pendingQuestion?: { field: string } } | undefined
@@ -59,12 +67,19 @@ function fixtureModel(inputs: Record<string, unknown>[]): AIModelPort {
         continueTurn: true,
         finalSelfReview: "询问用户；不代表用户确认。",
       }
+      const taggedArtifact = interview === undefined ? (options?.outputMode === "text" ? taggedVolumeFixture(artifact) : artifact) : {
+        assistantMessage: interview.status === "awaiting_write"
+          ? `${artifact.protagonistSupplementMarkdown}\n<creative-character-json>${JSON.stringify(artifact.protagonistSupplementFields)}</creative-character-json>`
+          : `${artifact.assistantMessage}\n<creative-choices>\n${artifact.choices?.map(choice => `- ${choice.label}`).join("\n")}\n</creative-choices>`,
+        synopsisBody: artifact.synopsisBody,
+      }
       return Promise.resolve({ result: { schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId,
-        phase: request.phase, outcome: "continue", artifact, requestedReads: [], citedReadIds: [...request.committedReadIds],
+        phase: request.phase, outcome: "continue", artifact: taggedArtifact, requestedReads: [], citedReadIds: [...request.committedReadIds],
         producedArtifactIds: [], decisionRecordIds: [], unresolvedDependencies: [], reason: "fixture", selfReview: "fixture" },
       usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0 } })
     },
   }
+  return textFixtureModel(model)
 }
 
 async function start(): Promise<{ h: ChapterHarness; inputs: Record<string, unknown>[] }> {
@@ -76,14 +91,18 @@ async function start(): Promise<{ h: ChapterHarness; inputs: Record<string, unkn
 }
 
 async function send(h: ChapterHarness, message: string, setupAnswerTo?: string): Promise<SynopsisConversationSendResult> {
+  const result = await invoke<SynopsisConversationSendResult>(h, "synopsis.conversation.send", { message, batchProceed: true,
+    ...(setupAnswerTo === undefined ? {} : { setupAnswerTo }) })
+  // Fresh sessions first verify the volume boundary marker on a standalone turn.
+  if (result.autoContinue?.message !== message) return result
   return invoke(h, "synopsis.conversation.send", { message, batchProceed: true,
     ...(setupAnswerTo === undefined ? {} : { setupAnswerTo }) })
 }
 
 function chapterWriteAttemptModel(inputs: Record<string, unknown>[], volumeFolderName?: string): AIModelPort {
   const base = fixtureModel(inputs)
-  return { ...base, execute: async (request) => {
-    const response = await base.execute(request)
+  const model: AIModelPort = { ...base, execute: async (request, options) => {
+    const response = await base.execute(request, options)
     const artifact = response.result.artifact as Record<string, unknown>
     const tool = artifact["toolRequest"] as { action?: string; arguments?: string } | undefined
     if (tool?.action === "invoke" && tool.arguments !== undefined) {
@@ -91,7 +110,13 @@ function chapterWriteAttemptModel(inputs: Record<string, unknown>[], volumeFolde
       for (const todo of args.todos) todo.status = "completed"
       tool.arguments = JSON.stringify(args)
     }
-    if (artifact["volumePlanMeta"] === undefined) return response
+    if (artifact.volumePlanMeta === undefined
+      && (typeof artifact.assistantMessage !== "string" || !artifact.assistantMessage.includes("<compose-volume-meta>"))) return response
+    if (volumeFolderName === undefined) {
+      return { ...response, result: { ...response.result, artifact: {
+        assistantMessage: "<compose-synopsis>\n# 第一章\n缺卷规划时不应写入这段内容。\n</compose-synopsis>",
+      } } }
+    }
     return { ...response, result: { ...response.result, artifact: {
       assistantMessage: "尝试直接写第一章。", synopsisBody: "# 第一章\n缺卷规划时不应写入这段内容。",
       planningWriteIntent: { synopsis: "create" },
@@ -99,6 +124,7 @@ function chapterWriteAttemptModel(inputs: Record<string, unknown>[], volumeFolde
       choices: [{ label: "继续创作", action: "continue_discuss" }], finalSelfReview: "测试越过实际内容检查。",
     } } }
   } }
+  return textFixtureModel(model)
 }
 
 describe("user-confirmed protagonist and volume state machines", () => {
@@ -130,7 +156,7 @@ describe("user-confirmed protagonist and volume state machines", () => {
     const result = await send(h, "切换第二卷后继续批量创作。")
     const saved = await invoke<{ content: string }>(h, "workspace.read", { relativePath: result.session.synopsisPath })
     expect(saved.content).not.toContain("缺卷规划时不应写入这段内容")
-    const next = await send(h, result.autoContinue?.message ?? "继续批量推进。")
+    const next = await send(h, result.autoContinue?.message ?? "继续批量推进")
     expect(next.awaitingSetupInput).toMatchObject({ scope: `volume:${volume}`, field: "opening" })
     expect(next.autoContinue).toBeUndefined()
   })

@@ -1240,7 +1240,6 @@ export class BackendFacade {
     let chapterSequence = input.chapterSequence
     if (input.workflow === "turn") {
       await runtime.assertWorkStyleGateReady()
-      await runtime.assertVolumePlanningGateReady(input.chapterSequence)
       if (await chapterResolve.isGraphSyncBlocking(input.projectId)) {
         runtimeLog("warn", "backend-facade", "turn.blocked.graph_sync", { projectId: input.projectId })
         throw new RevisionInvalidStateError("存在尚未完成图同步的章节修订，请先完成图同步后再开始新一轮推演")
@@ -1249,6 +1248,7 @@ export class BackendFacade {
       if (chapterSequence > nextChapterSequence) {
         throw new RevisionInvalidStateError("前一章尚未经过图修订发布为正文，不能处理下一章")
       }
+      await runtime.assertVolumePlanningGateReady(input.chapterSequence)
       const workflowGate = await runtime.createChapterSynopsisService().getWorkflowGate({
         projectId: input.projectId,
         workspaceRootRef: input.workspaceRootRef,

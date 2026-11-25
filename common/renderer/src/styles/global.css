@@ -3978,7 +3978,7 @@ a.project-rail-download {
 .secret-input button { width: 31px; height: 100%; border: 0; border-left: 1px solid var(--border-subtle); background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; }
 .secret-input button:hover { background: var(--bg-hover); color: var(--text); }
 .model-select-input { display: flex; align-items: center; overflow: hidden; }
-.model-select-input select { flex: 1; min-width: 0; height: 100%; padding: 0 8px; border: 0; outline: 0; background: var(--bg-input); color: var(--text); font: 11px "Cascadia Code", Consolas, monospace; }
+.model-select-input input { flex: 1; min-width: 0; height: 100%; padding: 0 8px; border: 0; outline: 0; background: var(--bg-input); color: var(--text); font: 11px "Cascadia Code", Consolas, monospace; }
 .model-editor select option { background-color: var(--bg-input); color: var(--text); }
 .model-select-input select:disabled { color: var(--text-faint); }
 .model-select-input button { width: 34px; height: 100%; border: 0; border-left: 1px solid var(--border-subtle); background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; }
@@ -6766,13 +6766,24 @@ a.project-rail-download {
   padding: 0 10px;
   white-space: nowrap;
 }
-.creation-desk-session-bar .creation-desk-volume-progress {
-  flex: 0 0 auto;
+.creation-desk-focus-stack .creation-desk-volume-progress {
+  padding: 4px 0;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   overflow: visible;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.creation-desk-volume-progress > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.creation-desk-volume-progress > span:not(:first-child) {
+  flex: 0 0 auto;
 }
 .creation-desk-focus-combobox {
   position: relative;
@@ -8887,15 +8898,10 @@ input::placeholder, textarea::placeholder { color: #ffffff; opacity: 1; }
   background: var(--bg-hover);
   color: var(--text);
 }
-.creation-desk-message.user .creation-desk-message-body {
-  background: var(--accent-soft);
-  border-radius: var(--radius-md);
-  color: var(--text);
-}
+.creation-desk-message.user .creation-desk-message-body,
 .creation-desk-message.assistant .creation-desk-message-body {
-  background: var(--bg-sidebar);
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  background: transparent;
+  color: var(--text);
 }
 
 .right-tabs {

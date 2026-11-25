@@ -121,6 +121,31 @@ describe("ModelConfigurationDialog", () => {
     expect(html).toContain("model-add-profile")
   })
 
+  it("renders an editable model selector and accepts a configured 3M context window", () => {
+    const profile = {
+      ...createProfileFromPreset("custom"),
+      baseUrl: "https://example.test/v1",
+      model: "manual-model-id",
+      contextWindowTokens: 3_000_000,
+      hasApiKey: true,
+    }
+    const html = renderToStaticMarkup(React.createElement(ModelConfigurationDialog, {
+      profiles: [profile],
+      activeProfileId: profile.id,
+      onClose: vi.fn(),
+      onSave: vi.fn(),
+    }))
+
+    const modelInput = html.match(/<input[^>]+placeholder="输入或选择模型"[^>]*>/u)?.[0]
+    expect(modelInput).toContain('value="manual-model-id"')
+    const listId = modelInput?.match(/list="([^"]+)"/u)?.[1]
+    expect(listId).toBeTruthy()
+    expect(html).toContain(`<datalist id="${listId}">`)
+    const contextInput = html.match(/<input[^>]+type="number"[^>]*>/u)?.[0]
+    expect(contextInput).toContain('value="3000000"')
+    expect(contextInput).not.toContain("max=")
+  })
+
   it("exposes OpenAI/Anthropic families and vendor presets with differentiated defaults", () => {
     expect(API_PROTOCOL_OPTIONS.map((item) => item.value)).toEqual([
       "openai_chat_completions",

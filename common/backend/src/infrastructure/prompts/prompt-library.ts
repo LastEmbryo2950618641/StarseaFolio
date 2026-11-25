@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 
@@ -14,7 +14,7 @@ import { dirname, join, resolve } from "node:path"
  */
 
 export const PROMPT_LIBRARY_ROOT = "提示词"
-export const PROMPT_LIBRARY_CATEGORIES = ["系统规则", "阶段提示", "运行时提示", "写作指南", "技能"] as const
+export const PROMPT_LIBRARY_CATEGORIES = ["基础规则", "用户规则", "系统记忆"] as const
 /** Seed digest manifest living at the prompt library root. */
 export const PROMPT_LIBRARY_SEED_MANIFEST = ".seed-manifest.json"
 
@@ -119,51 +119,22 @@ function withLibraryLock<T>(libraryRoot: string, task: () => Promise<T>): Promis
   return running
 }
 
-function readMdNames(directory: string): string[] {
-  return readdirSync(directory)
-    .filter((name) => name.endsWith(".md"))
-    .sort((left, right) => left.localeCompare(right, "zh-CN"))
-}
-
 export function createPromptLibraryEntries(promptPackageRoot: string): readonly PromptLibraryEntry[] {
-  const resourceRoot = join(promptPackageRoot, "resources")
-  const system: PromptLibraryEntry[] = [
-    { resourcePath: "resources/v1/world-rules-overview.md", libraryPath: "系统规则/world-rules-overview.md", workspaceMirrors: ["世界推演规则/总览.md"] },
-    { resourcePath: "resources/v1/base-rules.md", libraryPath: "系统规则/base-rules.md", workspaceMirrors: ["世界推演规则/基础规则/base-rules.md"] },
-    { resourcePath: "resources/v1/content-handling.md", libraryPath: "系统规则/content-handling.md", workspaceMirrors: ["世界推演规则/基础规则/content-handling.md"] },
-    { resourcePath: "resources/v1/webnovel-prose-logic.md", libraryPath: "系统规则/webnovel-prose-logic.md", workspaceMirrors: ["世界推演规则/基础规则/webnovel-prose-logic.md"] },
-    { resourcePath: "resources/v1/settings-query-guide.md", libraryPath: "系统规则/settings-query-guide.md", workspaceMirrors: ["世界推演规则/基础规则/settings-query-guide.md"] },
-    { resourcePath: "resources/v1/skill-index.md", libraryPath: "系统规则/skill-index.md", workspaceMirrors: [] },
+  void promptPackageRoot
+  return [
+    { resourcePath: "resources/v1/prompt-docs/system/01-world-and-base.md", libraryPath: "基础规则/系统提示词/01-世界与基础规则.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/system/02-content-and-safety.md", libraryPath: "基础规则/系统提示词/02-内容处理与安全边界.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/system/03-writing-voice.md", libraryPath: "基础规则/系统提示词/03-去AI味与写作声音.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/system/04-query-facts.md", libraryPath: "基础规则/系统提示词/04-查询事实规则.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/system/05-revision-audit.md", libraryPath: "基础规则/系统提示词/05-修订审核规则.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/system/06-discuss-skill-index.md", libraryPath: "基础规则/系统提示词/06-讨论技能索引.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/dynamic/01-before-user-message.md", libraryPath: "基础规则/消息前后/用户消息前/01-用户消息前.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/dynamic/02-after-user-message.md", libraryPath: "基础规则/消息前后/用户消息后/02-用户消息后.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/stages/01-new-chapter.md", libraryPath: "基础规则/阶段提示词/01-新章节阶段.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/stages/02-synopsis.md", libraryPath: "基础规则/阶段提示词/02-梗概阶段.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/stages/03-draft.md", libraryPath: "基础规则/阶段提示词/03-草稿阶段.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/stages/04-ingestion.md", libraryPath: "基础规则/阶段提示词/04-章节入库阶段.md", workspaceMirrors: [] },
   ]
-  const guides: PromptLibraryEntry[] = [
-    { resourcePath: "resources/v1/plot-synopsis-guide.md", libraryPath: "写作指南/plot-synopsis-guide.md", workspaceMirrors: ["世界推演规则/基础规则/plot-synopsis-guide.md"] },
-    { resourcePath: "resources/v1/user-to-synopsis-guide.md", libraryPath: "写作指南/user-to-synopsis-guide.md", workspaceMirrors: ["世界推演规则/基础规则/user-to-synopsis-guide.md"] },
-    { resourcePath: "resources/v1/synopsis-to-outline-guide.md", libraryPath: "写作指南/synopsis-to-outline-guide.md", workspaceMirrors: ["世界推演规则/基础规则/synopsis-to-outline-guide.md"] },
-    { resourcePath: "resources/v1/outline-to-draft-guide.md", libraryPath: "写作指南/outline-to-draft-guide.md", workspaceMirrors: ["世界推演规则/基础规则/outline-to-draft-guide.md"] },
-    { resourcePath: "resources/v1/settings-revision-guide.md", libraryPath: "写作指南/settings-revision-guide.md", workspaceMirrors: ["世界推演规则/基础规则/settings-revision-guide.md"] },
-    { resourcePath: "resources/v1/discuss-creation-desk-workflow.md", libraryPath: "写作指南/discuss-creation-desk-workflow.md", workspaceMirrors: ["世界推演规则/基础规则/discuss-creation-desk-workflow.md"] },
-    { resourcePath: "resources/v1/guides/batch-volume-deduction-plan.md", libraryPath: "写作指南/batch-volume-deduction-plan.md", workspaceMirrors: ["世界推演规则/基础规则/batch-volume-deduction-plan.md"] },
-    { resourcePath: "resources/v1/guides/character-profiles.md", libraryPath: "写作指南/character-profiles.md", workspaceMirrors: ["世界推演规则/人物设定.md"] },
-  ]
-  const skills: PromptLibraryEntry[] = [
-    { resourcePath: "resources/skills/starsea-writing/SKILL.md", libraryPath: "技能/starsea-writing.md", workspaceMirrors: [] },
-    { resourcePath: "resources/skills/book-cold-start/SKILL.md", libraryPath: "技能/book-cold-start.md", workspaceMirrors: [] },
-    { resourcePath: "resources/vendor/chinese-webnovel-skills/skills/deslop.md", libraryPath: "技能/deslop.md", workspaceMirrors: [] },
-    { resourcePath: "resources/vendor/chinese-webnovel-skills/skills/dialogue.md", libraryPath: "技能/dialogue.md", workspaceMirrors: [] },
-    { resourcePath: "resources/vendor/chinese-webnovel-skills/skills/human.md", libraryPath: "技能/human.md", workspaceMirrors: [] },
-    { resourcePath: "resources/vendor/chinese-webnovel-skills/skills/emotion.md", libraryPath: "技能/emotion.md", workspaceMirrors: [] },
-  ]
-  const phases = readMdNames(join(resourceRoot, "v1/phases")).map((name): PromptLibraryEntry => ({
-    resourcePath: `resources/v1/phases/${name}`,
-    libraryPath: `阶段提示/${name}`,
-    workspaceMirrors: [],
-  }))
-  const runtime = readMdNames(join(resourceRoot, "v1/runtime")).map((name): PromptLibraryEntry => ({
-    resourcePath: `resources/v1/runtime/${name}`,
-    libraryPath: `运行时提示/${name}`,
-    workspaceMirrors: [],
-  }))
-  return [...system, ...phases, ...runtime, ...guides, ...skills]
 }
 
 type ResolvedEntry = Readonly<{

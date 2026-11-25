@@ -30,10 +30,9 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
   {
     id: "webnovel-deslop",
     name: "去 AI 味（deslop）",
-    summary: "改工整/排比/翻译腔/空洞抒情；写正文或润色时用。",
-    injectPolicy: "default",
-    // 讨论侧只在写草稿动作时由 service 按轮显式加载，不进 discuss 默认包。
-    defaultPhases: ["draft"],
+    summary: "改工整/排比/翻译腔/空洞抒情；已并入全局“去 AI 味与写作声音”系统提示词，不再默认注入。",
+    injectPolicy: "always",
+    defaultPhases: [],
     primaryResource: `${VENDOR}/skills/deslop.md`,
     referenceResources: [
       `${VENDOR}/references/anti-ai-checklist.md`,
@@ -45,10 +44,9 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
   {
     id: "webnovel-dialogue",
     name: "对话与台词",
-    summary: "口语化、潜台词、角色声音、禁对白乒乓；写对白或改书面腔时用。",
-    injectPolicy: "default",
-    // 同 deslop：讨论侧写草稿时由 service 按轮显式加载。
-    defaultPhases: ["draft"],
+    summary: "口语化、潜台词、角色声音、禁对白乒乓；已并入全局“去 AI 味与写作声音”系统提示词，不再默认注入。",
+    injectPolicy: "always",
+    defaultPhases: [],
     primaryResource: `${VENDOR}/skills/dialogue.md`,
     referenceResources: [`${VENDOR}/references/dialogue-library.md`],
     scriptsDir: "resources/skills/webnovel-dialogue/scripts",
@@ -58,7 +56,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "webnovel-human",
     name: "人味 / 失控感",
     summary: "表面去味后仍像说明书时用：非理性、留白、私货。",
-    injectPolicy: "onDemand",
+    injectPolicy: "always",
     defaultPhases: [],
     primaryResource: `${VENDOR}/skills/human.md`,
     referenceResources: [`${VENDOR}/references/human-texture.md`],
@@ -68,7 +66,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "webnovel-emotion",
     name: "情绪演出",
     summary: "喊情绪不演、缺身体反应时用；查情绪→外显对照。",
-    injectPolicy: "onDemand",
+    injectPolicy: "always",
     defaultPhases: [],
     primaryResource: `${VENDOR}/skills/emotion.md`,
     referenceResources: [`${VENDOR}/references/show-emotion.md`],
@@ -107,7 +105,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "style-bible",
     name: "项目风格手册与声口",
     summary: "开书/续写前定旁白距离、角色声音矩阵、称呼与禁改平项。",
-    injectPolicy: "onDemand",
+    injectPolicy: "always",
     defaultPhases: [],
     primaryResource:
       "resources/vendor/webnovel-handbook/docs/core-writing/37-project-style-bible-character-voice.md",
@@ -121,7 +119,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "naming-consistency",
     name: "命名称谓一致性",
     summary: "人名/地名/称呼/术语防撞与前后一致；开书定命名或查撞名时用。",
-    injectPolicy: "onDemand",
+    injectPolicy: "always",
     defaultPhases: [],
     primaryResource:
       "resources/vendor/webnovel-handbook/docs/core-writing/106-naming-address-terminology-recognition-consistency.md",
@@ -132,7 +130,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "dialogue-subtext",
     name: "对话潜台词与战术话轮",
     summary: "对白有议程/潜台词/群戏分层；改审讯腔或同声对白时用。",
-    injectPolicy: "onDemand",
+    injectPolicy: "always",
     defaultPhases: [],
     primaryResource:
       "resources/vendor/webnovel-handbook/docs/advanced-craft/75-dialogue-subtext-tactical-conversation.md",
@@ -146,7 +144,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
     id: "style-profile",
     name: "文风剖析协议",
     summary: "从对标书抽出句长/对话/情绪周期文风手册时用。",
-    injectPolicy: "onDemand",
+    injectPolicy: "always",
     defaultPhases: [],
     primaryResource:
       "resources/vendor/oh-story-claudecode/skills/story-long-analyze/references/style-profile-generator.md",

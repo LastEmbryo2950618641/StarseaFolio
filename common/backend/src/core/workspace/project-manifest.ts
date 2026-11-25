@@ -183,7 +183,7 @@ export const fixedWorkspaceEntries: readonly FixedWorkspaceEntry[] = Object.free
   {
     key: "agent-memory",
     role: "agent_memory",
-    relativePath: "世界推演规则/Agent记忆",
+    relativePath: "提示词/系统记忆/系统提示词",
     entryKind: "directory",
     immutablePath: true,
     allowedExtensions: [".md"],
@@ -193,7 +193,7 @@ export const fixedWorkspaceEntries: readonly FixedWorkspaceEntry[] = Object.free
   {
     key: "agent-memory-index",
     role: "agent_memory",
-    relativePath: "世界推演规则/Agent记忆/MEMORY.md",
+    relativePath: "提示词/系统记忆/系统提示词/MEMORY.md",
     entryKind: "file",
     immutablePath: true,
     allowedExtensions: [".md"],
@@ -203,7 +203,7 @@ export const fixedWorkspaceEntries: readonly FixedWorkspaceEntry[] = Object.free
   {
     key: "user-rules",
     role: "user_rules",
-    relativePath: "世界推演规则/用户规则",
+    relativePath: "提示词/用户规则/系统提示词",
     entryKind: "directory",
     immutablePath: true,
     allowedExtensions: [".md"],

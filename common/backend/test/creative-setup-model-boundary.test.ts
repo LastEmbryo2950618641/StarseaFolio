@@ -13,6 +13,8 @@ import { SqliteCreativeSetupRepository } from "../src/infrastructure/sqlite/repo
 import { openProjectDatabase } from "../src/infrastructure/sqlite/sqlite-database.js"
 import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 
+import { taggedVolumeFixture } from "./helpers/tagged-volume-fixture.js"
+
 type CompletionMessages = Parameters<DeepSeekCompletionClient["complete"]>[0]["messages"]
 type ModelSetup = {
   scope: string
@@ -49,6 +51,9 @@ describe("creative setup real model boundary", () => {
     const planning: Discussion[] = []
     let planningStep = 0
     const complete = vi.fn<DeepSeekCompletionClient["complete"]>((input) => {
+      if (input.messages.some(message => message.content.includes("独立一行输出 <volume-start/>"))) {
+        return Promise.resolve({ content: "<volume-start/>", usage: { prompt_tokens: 100, completion_tokens: 50 } })
+      }
       completions.push(input.messages.map(message => ({ ...message })))
       expect(input.messages.some(message => message.content.includes("用户最新明确的创作或修订指令"))).toBe(true)
       expect(input.messages.some(message => message.content.includes("同步更新受影响的设定、卷信息、梗概和大纲"))).toBe(true)
@@ -116,8 +121,14 @@ describe("creative setup real model boundary", () => {
           finalSelfReview: "主角和卷主支线均已由用户确认，只提交卷规划。",
         }
       }
-      return Promise.resolve({ content: JSON.stringify({ outcome: "continue", artifact,
-        requestedReads: [], citedReadIds: [], unresolvedDependencies: [], reason: "本地模型边界测试", selfReview: "已核对" }),
+      const resultContent = setup !== undefined
+        ? setup.status === "awaiting_write"
+          ? `补充与已确认核心一致的人物信息。矿友沈砚协助林烬修补矿具。<creative-character-json>${JSON.stringify(artifact.protagonistSupplementFields)}</creative-character-json>`
+          : `请确认${setup.pendingQuestion?.field ?? "当前设定"}。<creative-choices>\n- ${setup.pendingQuestion?.field}：谨慎追查线索\n- ${setup.pendingQuestion?.field}：冒险争夺信物\n</creative-choices>`
+        : String(taggedVolumeFixture(artifact).assistantMessage)
+      const nativeTool = artifact.toolRequest as { name: string; action: string; arguments?: string } | undefined
+      return Promise.resolve({ content: resultContent,
+        ...(nativeTool === undefined ? {} : { toolCalls: [{ name: nativeTool.name, arguments: JSON.stringify({ action: nativeTool.action, arguments: nativeTool.arguments }) }] }),
       usage: { prompt_tokens: 100, completion_tokens: 50 } })
     })
     const model = new DeepSeekAiModelAdapter({ ...defaultDeepSeekRuntimeConfig, maxSchemaRepairAttempts: 0 },
@@ -159,6 +170,9 @@ describe("creative setup real model boundary", () => {
       expect(await repository.find(h.projectId, "protagonist")).toBeUndefined()
       expect(await repository.find(h.projectId, volumeScope)).toBeUndefined()
       await invoke(h, "synopsis.conversation.start")
+      const boundary = await send("开始第一卷。")
+      expect(boundary.autoContinue?.message).toBe("开始第一卷。")
+      complete.mockClear()
       let result = await send("矿工少年修仙，靠锻造改变命运；先确认主角与本卷设定。")
       expect(complete).toHaveBeenCalledTimes(1)
       const protagonistAnswers = ["谨慎坚韧，喜欢锻造", "黑发灰眼，左手有旧伤", "十七岁", "矿场孤儿，父母失踪",

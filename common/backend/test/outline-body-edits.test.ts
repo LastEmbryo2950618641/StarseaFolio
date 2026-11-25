@@ -9,6 +9,7 @@ import { synopsisDiscussArtifactSchema } from "@starseafolio/prompt-contracts"
 
 import { applySearchReplace } from "../src/application/chapters/markdown-search-replace.js"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
+import { textFixtureModel } from "./helpers/discuss-fixture-text.js"
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
 import {
   openChapterHarness,
@@ -29,7 +30,9 @@ async function withHarness(
   run: (harness: ChapterHarness) => Promise<void>,
   options?: Readonly<{ model?: AIModelPort }>,
 ): Promise<void> {
-  const harness = await openChapterHarness("Outline Body Edits Test", options)
+  const harness = await openChapterHarness("Outline Body Edits Test", options?.model === undefined
+    ? options
+    : { ...options, model: textFixtureModel(options.model) })
   temporaryRoots.push(harness.root)
   try {
     await prepareVolumePlanning(harness)
@@ -205,18 +208,21 @@ describe("outline bodyEdits integration", () => {
     const delegate = new FakeAiModelAdapter(randomUUID)
     const model: AIModelPort = {
       info: delegate.info,
+      async classifyDiscussTurn({ message }) {
+        return { scope: message.startsWith("再修改细纲") ? { outline: "patch" } : { advance: true }, usage: { inputTokens: 0, outputTokens: 0, latencyMs: 0 } }
+      },
       async execute(request, options) {
         const result = await delegate.execute(request, options)
-        const response = result.result as { artifact?: Record<string, unknown> }
-        if (response.artifact === undefined) return result
-        const hasOutlinePatch = response.artifact.bodyEdits !== undefined
+        if (request.phase !== "synopsis_discuss" || !options?.phasePrompt?.text.includes("<compose-outline-patch>")
+          || result.result.outcome === "request_read") return result
+        expect(options.outputMode).toBe("text")
         return {
           ...result,
           result: {
             ...result.result,
-            artifact: hasOutlinePatch
-              ? { ...response.artifact, planningWriteIntent: { outline: "patch" } }
-              : response.artifact,
+            artifact: {
+              assistantMessage: "<compose-outline-patch>\n<search>\n> 作者手改标记\n</search>\n<replace>\n> 作者手改标记\n\n场2按用户要求收紧\n</replace>\n</compose-outline-patch>",
+            },
           },
         }
       },
@@ -307,7 +313,7 @@ describe("outline bodyEdits integration", () => {
       })
       const assistant = [...sent.messages].reverse().find((message) => message.role === "assistant")
 
-      expect(readFileSync(outlineAbs, "utf8")).toBe(rewrittenOutline)
+      expect(readFileSync(outlineAbs, "utf8").trimEnd()).toBe(rewrittenOutline.trimEnd())
       expect(assistant?.content).not.toContain("保留原文")
     }, { model })
   })

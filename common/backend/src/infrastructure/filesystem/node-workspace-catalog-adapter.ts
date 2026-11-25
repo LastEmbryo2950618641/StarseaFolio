@@ -24,7 +24,7 @@ export class NodeWorkspaceCatalogAdapter implements WorkspaceCatalogPort {
     }
 
     const entries = await Promise.all([...report.inventory]
-      .filter((entry) => entry.path !== "提示词" && !entry.path.startsWith("提示词/"))
+      .filter((entry) => !isPlatformPromptOnlyPath(entry.path))
       .sort((left, right) => left.path.localeCompare(right.path, "zh-CN"))
       .map(async (entry): Promise<WorkspaceCatalogEntry> => {
         if (entry.kind === "directory") {
@@ -60,10 +60,17 @@ export class NodeWorkspaceCatalogAdapter implements WorkspaceCatalogPort {
   }
 }
 
+function isPlatformPromptOnlyPath(path: string): boolean {
+  if (path === "提示词") return true
+  if (!path.startsWith("提示词/")) return false
+  return !path.startsWith("提示词/用户规则/") && !path.startsWith("提示词/系统记忆/")
+}
+
 function classifyRole(relativePath: string): WorkspaceCatalogEntry["role"] {
   const topLevel = relativePath.split("/")[0]
   switch (topLevel) {
     case "世界推演规则": return "world_rules"
+    case "提示词": return "world_rules"
     case "设定集": return "settings"
     case "参考文件": return "references"
     case "章节正文": return "chapters"

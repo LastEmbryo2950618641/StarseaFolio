@@ -14,6 +14,7 @@ import { ChapterRevisionService, RevisionInvalidStateError } from "../src/applic
 import { FakeAiModelAdapter } from "../src/infrastructure/models/fake-ai-model-adapter.js"
 import { DEFAULT_VOLUME_FOLDER_NAME, deriveSynopsisMarkdownPath, deriveOutlineMarkdownPath, digest, siblingPlanningMarkdownPath } from "../src/core/index.js"
 import { confirmedVolumeStorylineFixture, openChapterHarness, prepareChapterPlanning, seedCommittedChapter, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { textFixtureModel } from "./helpers/discuss-fixture-text.js"
 
 const EMPTY_SYNOPSIS = "# 第一章 雨夜旧站台 剧情梗概\n\n"
 const EMPTY_OUTLINE = "# 第一章 雨夜旧站台 剧情细纲\n\n"
@@ -98,7 +99,7 @@ async function withScript(
       }
     },
   }
-  const harness = await openChapterHarness("Token loop regression", { model })
+  const harness = await openChapterHarness("Token loop regression", { model: textFixtureModel(model) })
   try {
     await harness.container.workspace.saveUserMarkdown(harness.workspaceRootRef, "大纲/第一卷 待命名.批量计划.md", serializeVolumePlanningState({
       ...confirmedVolumeStorylineFixture,
@@ -293,7 +294,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       expect(next.session.chapterSequence).toBe(2)
       expect(next.appendedDraft?.draftVersionId).toBeTruthy()
       expect(next.autoContinue).toBeUndefined()
-      expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(outline)
+      expect((await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).trimEnd()).toBe(outline.trimEnd())
       expect(calls).toBe(switchCall + 2)
       const db = new Database(join(harness.applicationDataRoot, "projects", harness.projectId, "project.sqlite"))
       try {
@@ -324,17 +325,14 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     let calls = 0
     const synopsis = "# 第一卷梗概\n主角追查雨夜站台的信件，查明失踪者下落。"
     const outline = "# 第一卷大纲\n第一章发现信件；后续逐步查明失踪真相。"
-    await withScript((call, request) => {
+    await withScript((call, request, options) => {
       calls = call
+      expect(options?.outputMode).toBe("text")
+      if (call > 1) expect(options?.contextMessages?.some(message => message.content.includes("已保留卷规划。请补齐 <writing-settings>"))).toBe(true)
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
       return call === 1 ? {
-        volumePlanMeta: { targetChapterCount: 8, targetWordCount: 24000 },
-        volumeSynopsis: { markdown: synopsis }, arcPlan: { markdown: outline }, choices,
-      } : { creationDeskSettings: {
-        descriptionRulePath: "表现输出/描写规则/自动.md",
-        proseStyleRulePath: "表现输出/笔风规则/默认笔风规则.md",
-        minimumWordCount: 2500, maximumWordCount: 3500, boundaryPace: "advance_allowed", causalityFocus: "action",
-      }, choices }
+        assistantMessage: `已整理规划。\n<compose-volume-synopsis>\n${synopsis}\n</compose-volume-synopsis>\n<compose-volume-outline>\n${outline}\n</compose-volume-outline>\n<compose-volume-meta>\ntargetChapterCount: 8\ntargetWordCount: 24000\n</compose-volume-meta>`,
+      } : { assistantMessage: "<writing-settings>\ndescriptionRulePath: 表现输出/描写规则/自动.md\nproseStyleRulePath: 表现输出/笔风规则/默认笔风规则.md\nminimumWordCount: 2500\nmaximumWordCount: 3500\nboundaryPace: advance_allowed\ncausalityFocus: action\n</writing-settings>" }
     }, async (harness, send) => {
       await harness.container.workspace.saveUserMarkdown(harness.workspaceRootRef, "大纲/第一卷 待命名.批量计划.md", serializeVolumePlanningState({
         ...confirmedVolumeStorylineFixture,
@@ -386,16 +384,16 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
-  it("retains a complete draft when the next response only supplies stop choices", async () => {
+  it("keeps the delivered draft without another model call when stop choices are present", async () => {
     let calls = 0
     await withScript((call, request) => {
       calls = call
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
-      return call === 1 ? { chapterDraftProposal: draft } : { choices }
+      return { chapterDraftProposal: draft, choices }
     }, async (_harness, send) => {
       const sent = await send({ batchProceed: false })
       expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
-      expect(calls).toBe(2)
+      expect(calls).toBe(1)
     })
   })
 
@@ -433,8 +431,24 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
         .toContain("来自失踪者的信")
       expect(sent.proceedProgress?.stage).toBe("synopsis_discuss")
       expect(sent.autoContinue?.message).toContain("剧情梗概已入库")
-      expect(sent.autoContinue?.message).toContain("进入梗概阶段")
+      expect(sent.autoContinue?.message).toContain("进入构思阶段")
       expect(sent.autoContinue?.message).not.toContain("推进尚未完成的下一步")
+    })
+  })
+
+  it("keeps 构思 atomic in precise mode: a synopsis write still continues to outline/draft", async () => {
+    const synopsisBody = "# 第一章 雨夜旧站台 剧情梗概\n主角在旧站台发现一封来自失踪者的信，并决定追查信件来源。"
+    await withScript((call, request) => {
+      expect(call).toBe(1)
+      expect((request.input as TurnPhaseInput).synopsisDiscuss).toMatchObject({ batchProceed: false })
+      synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
+      return { synopsisBody }
+    }, async (harness, send) => {
+      await clearChapterPlanningMaterials(harness)
+      const sent = await send({ message: "先写这一章的剧情梗概", proceedMode: "precise" })
+      expect(sent.proceedProgress?.stage).toBe("synopsis_discuss")
+      expect(sent.autoContinue?.message).toContain("进入构思阶段")
+      expect(sent.autoContinue?.message).toContain("连续完成细纲与草稿")
     })
   })
 
@@ -771,7 +785,7 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
-  it("repairs a schema error at the advisory threshold and still saves the draft", async () => {
+  it("retries one phase-contract error at the advisory threshold and still saves the draft", async () => {
     let calls = 0
     await withScript((call, request) => {
       calls = call

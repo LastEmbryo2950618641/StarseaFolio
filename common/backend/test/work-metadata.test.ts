@@ -29,14 +29,23 @@ async function withHarness(run: (harness: ChapterHarness) => Promise<void>, opti
 function metadataModel(captured: Array<{ title?: string; description?: string }>): AIModelPort {
   const fake = new FakeAiModelAdapter(randomUUID)
   return {
+    async classifyDiscussTurn() {
+      return { scope: {}, usage: { inputTokens: 0, outputTokens: 0, latencyMs: 0 } }
+    },
     async execute(request, options) {
       const result = await fake.execute(request, options)
       if (request.phase !== "synopsis_discuss") return result
+      if (options?.phasePrompt?.text.includes("独立一行输出 <volume-start/>")) {
+        return { ...result, result: { ...result.result, outcome: "continue", requestedReads: [],
+          artifact: { assistantMessage: "<volume-start/>" } } }
+      }
       const input = request.input as { synopsisDiscuss?: { currentWorkDisplayName?: string; currentWorkDescription?: string } }
       captured.push({ title: input.synopsisDiscuss?.currentWorkDisplayName, description: input.synopsisDiscuss?.currentWorkDescription })
       synopsisConversationStreamHub.setTodos(request.projectId, [{ id: "metadata", content: "更新作品资料", status: "completed" }], Date.now())
       return { ...result, result: { ...result.result, outcome: "continue", artifact: {
-        assistantMessage: "已调整作品资料，接下来可以讨论人物或主线。",
+        assistantMessage: options?.outputMode === "text"
+          ? "已调整作品资料。\n<creative-choices>\n- 讨论人物\n- 讨论主线\n</creative-choices>\n<work-title>潮声未歇</work-title>\n<work-description>少年循着一封旧信追查失踪者，在海港的风雨中寻找真相。</work-description>"
+          : "已调整作品资料，接下来可以讨论人物或主线。",
         finalSelfReview: "仅更新整部作品的标题与简介。",
         workDisplayName: "潮声未歇", workDescription: "少年循着一封旧信追查失踪者，在海港的风雨中寻找真相。",
         choices: [
@@ -115,6 +124,8 @@ describe("work title and description", () => {
     await withHarness(async (harness) => {
       await invoke(harness, "project.rename", { displayName: "潮声纪", description: "海港少年。" })
       await invoke(harness, "synopsis.conversation.start")
+      const boundary = await invoke<SynopsisConversationSendResult>(harness, "synopsis.conversation.send", { message: "开始第一卷。" })
+      expect(boundary.autoContinue?.message).toBe("开始第一卷。")
       const sent = await invoke<SynopsisConversationSendResult>(harness, "synopsis.conversation.send", { message: "先讨论主角，顺便根据构思调整书名和简介。" })
       expect(captured[0]).toEqual({ title: "潮声纪", description: "海港少年。" })
       expect(sent.workDescription).toBe("少年循着一封旧信追查失踪者，在海港的风雨中寻找真相。")

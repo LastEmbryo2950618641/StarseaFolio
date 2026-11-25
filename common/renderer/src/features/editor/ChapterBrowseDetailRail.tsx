@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import type { ChapterRevisionReadResult, ChapterWorkflowGate, DeductionGoal, RevisionDraftVersion } from "@starseafolio/contracts"
+import { buildVolumeLifecycle, type ChapterRevisionReadResult, type ChapterWorkflowGate, type DeductionGoal, type RevisionDraftVersion, type VolumeLifecycle } from "@starseafolio/contracts"
 import { AlertTriangle, ArrowLeft, BookOpenText, ChevronDown, ChevronRight, FileText, Info, Link2, Library, ScrollText } from "lucide-react"
 
 import { invokeBackend } from "../../api/client.js"
@@ -32,6 +32,7 @@ export type ChapterBrowseDetailRailProps = Readonly<{
   workspaceRootRef: string
   chapter: DiscussFocusChapterOption | undefined
   volume?: ChapterBrowseVolumeSelection
+  activeVolumeLifecycle?: VolumeLifecycle | undefined
   backLabel?: string
   unpublishedDrafts?: readonly ChapterRevisionReadResult[]
   draftCandidateVersionId?: string
@@ -42,6 +43,18 @@ export type ChapterBrowseDetailRailProps = Readonly<{
 
 type ChapterDetailTab = "info" | "synopsis" | "outline" | "draft" | "body"
 type VolumeDetailTab = "info" | "synopsis" | "outline"
+
+type VolumePlanningFiles = Readonly<{
+  scopeKey: string
+  planMarkdown: string | undefined
+  lifecycleMarkdown: string | undefined
+}>
+
+type SavedVolumeLifecycle = Readonly<{
+  startedAtMs: number
+  endedAtMs?: number
+  revisionStartedAtMs?: number
+}>
 
 const VOLUME_DETAIL_TABS: ReadonlyArray<Readonly<{ id: VolumeDetailTab; label: string; icon: typeof Info }>> = [
   { id: "info", label: "卷信息", icon: Info },
@@ -62,7 +75,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
   const [activeTab, setActiveTab] = useState<ChapterDetailTab>("info")
   const [volumeSynopsis, setVolumeSynopsis] = useState<string>()
   const [volumeOutline, setVolumeOutline] = useState<string>()
-  const [volumePlanMarkdown, setVolumePlanMarkdown] = useState<string>()
+  const [volumePlanningFiles, setVolumePlanningFiles] = useState<VolumePlanningFiles>()
   const [volumeWordCount, setVolumeWordCount] = useState(0)
   const [volumeTab, setVolumeTab] = useState<VolumeDetailTab>("info")
   const [synopsisLoading, setSynopsisLoading] = useState(false)
@@ -97,6 +110,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
   }, [props.chapter, props.unpublishedDrafts])
 
   const volumeFolderKey = props.volume?.folderName
+  const volumeScopeKey = JSON.stringify([props.projectId, props.workspaceRootRef, volumeFolderKey])
   // Parent streaming updates recreate the volume object without changing this selection.
   const volumeBodyPathsKey = JSON.stringify(props.volume?.chapters
     .flatMap((chapter) => chapter.bodyPath === undefined ? [] : [chapter.bodyPath]) ?? [])
@@ -158,7 +172,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
     let cancelled = false
     setVolumeSynopsis(undefined)
     setVolumeOutline(undefined)
-    setVolumePlanMarkdown(undefined)
+    setVolumePlanningFiles(undefined)
     if (!volumeMode || volumeFolderKey === undefined) {
       setSynopsisLoading(false)
       return
@@ -175,12 +189,20 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
         `大纲/${volumeFolderKey}.梗概.md`,
         volumeOutlinePath(volumeFolderKey),
         volumeBatchPlanPath(volumeFolderKey),
+        `大纲/${volumeFolderKey}.卷状态.md`,
       ].map((path) => readWorkspaceMarkdown(props.projectId, props.workspaceRootRef, path)
-        .catch(() => undefined))).then(([synopsis, outline, plan]) => {
+        .catch(() => undefined))).then(([synopsis, outline, plan, lifecycle]) => {
         if (!cancelled) {
           if (synopsis !== undefined) setVolumeSynopsis((previous) => previous === synopsis ? previous : synopsis)
           if (outline !== undefined) setVolumeOutline((previous) => previous === outline ? previous : outline)
-          if (plan !== undefined) setVolumePlanMarkdown((previous) => previous === plan ? previous : plan)
+          setVolumePlanningFiles((previous) => {
+            const current = previous?.scopeKey === volumeScopeKey ? previous : undefined
+            const planMarkdown = plan ?? current?.planMarkdown
+            const lifecycleMarkdown = lifecycle ?? current?.lifecycleMarkdown
+            return current?.planMarkdown === planMarkdown && current?.lifecycleMarkdown === lifecycleMarkdown
+              ? current
+              : { scopeKey: volumeScopeKey, planMarkdown, lifecycleMarkdown }
+          })
         }
       }).finally(() => {
         inFlight = false
@@ -193,7 +215,7 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [volumeMode, props.projectId, volumeFolderKey, props.workspaceRootRef])
+  }, [volumeMode, props.projectId, volumeFolderKey, props.workspaceRootRef, volumeScopeKey])
 
   useEffect(() => {
     let cancelled = false
@@ -272,10 +294,19 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
   if (volumeMode && props.volume !== undefined) {
     const synopsisText = volumeSynopsis?.trim() ?? ""
     const outlineText = volumeOutline?.trim() ?? ""
-    const parsedPlan = parseVolumePlanInfo(volumePlanMarkdown)
+    const files = volumePlanningFiles?.scopeKey === volumeScopeKey ? volumePlanningFiles : undefined
+    const parsedPlan = parseVolumePlanInfo(files?.planMarkdown)
     const plan = parsedPlan?.volumeFolderName === props.volume.folderName ? parsedPlan : undefined
     const planPath = volumeBatchPlanPath(props.volume.folderName)
     const report = volumeHookReport
+    const publishedChapterCount = props.volume.chapters.filter((chapter) => chapter.bodyPath !== undefined).length
+    const activeLifecycle = props.activeVolumeLifecycle?.volumeFolderName === props.volume.folderName
+      ? props.activeVolumeLifecycle
+      : undefined
+    const savedLifecycle = activeLifecycle === undefined
+      ? parseSavedVolumeLifecycle(files?.lifecycleMarkdown, props.volume.folderName)
+      : undefined
+    const lifecycle = activeLifecycle ?? buildPlanVolumeLifecycle(plan, publishedChapterCount, volumeWordCount, savedLifecycle)
     return <aside className="chapter-browse-rail" data-testid="chapter-browse-detail-rail" data-mode="volume">
       <header className="chapter-browse-rail-header">
         {props.onBack === undefined ? null : <button
@@ -309,8 +340,9 @@ export function ChapterBrowseDetailRail(props: ChapterBrowseDetailRailProps): Re
       {volumeTab === "info" ? <>
       <VolumePlanningInfo
         plan={plan}
-        publishedChapterCount={props.volume.chapters.filter((chapter) => chapter.bodyPath !== undefined).length}
+        publishedChapterCount={publishedChapterCount}
         wordCount={volumeWordCount}
+        lifecycle={lifecycle}
         onOpenPlan={() => { props.onOpenBody(planPath) }}
       />
       <section className="chapter-browse-section" data-testid="chapter-browse-volume-hooks">
@@ -535,19 +567,100 @@ export async function loadChapterDraftHistory(input: Readonly<{
   return result.versions
 }
 
+function parseSavedVolumeLifecycle(markdown: string | undefined, volumeFolderName: string): SavedVolumeLifecycle | undefined {
+  // Match the fenced JSON written by the backend's volume lifecycle store.
+  const json = markdown?.trim().match(/^(?:#[ \t]+[^\r\n]+\r?\n(?:[ \t]*\r?\n)*)?```json[ \t]*\r?\n([\s\S]+)\r?\n```$/u)?.[1]
+  if (json === undefined) return undefined
+  try {
+    const value: unknown = JSON.parse(json)
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
+    const record = value as Record<string, unknown>
+    if (Object.keys(record).some((key) => !["volumeFolderName", "startedAtMs", "endedAtMs", "revisionStartedAtMs"].includes(key))) return undefined
+    const { startedAtMs, endedAtMs, revisionStartedAtMs } = record
+    if (record.volumeFolderName !== volumeFolderName || !isLifecycleTimestamp(startedAtMs)) return undefined
+    if (endedAtMs !== undefined && (!isLifecycleTimestamp(endedAtMs) || endedAtMs < startedAtMs)) return undefined
+    if (revisionStartedAtMs !== undefined && (!isLifecycleTimestamp(revisionStartedAtMs)
+      || endedAtMs === undefined || revisionStartedAtMs < endedAtMs)) return undefined
+    return {
+      startedAtMs,
+      ...(endedAtMs === undefined ? {} : { endedAtMs }),
+      ...(revisionStartedAtMs === undefined ? {} : { revisionStartedAtMs }),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function isLifecycleTimestamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+function confirmedVolumeStoryline(plan: VolumeBatchPlan | undefined): VolumeBatchPlan["storyline"] {
+  const storyline = plan?.storyline
+  return plan?.storylineConfirmedAtMs !== undefined && storyline !== undefined
+    && Object.values(storyline).every((text) => text.trim().length > 0) ? storyline : undefined
+}
+
+function buildPlanVolumeLifecycle(
+  plan: VolumeBatchPlan | undefined,
+  publishedChapterCount: number,
+  wordCount: number,
+  state?: SavedVolumeLifecycle,
+): VolumeLifecycle {
+  const confirmed = confirmedVolumeStoryline(plan) !== undefined
+  const lifecycle = buildVolumeLifecycle({
+    started: state !== undefined || plan !== undefined,
+    styleReady: plan !== undefined,
+    protagonistReady: plan !== undefined,
+    ...plan?.storyline,
+    conceptionReady: confirmed,
+    chapterCount: publishedChapterCount,
+    chapterLimit: plan?.targetChapterCount ?? 0,
+    wordCount,
+    targetWordCount: plan?.targetWordCount ?? 0,
+    endedAtMs: state?.endedAtMs,
+    revision: state?.revisionStartedAtMs !== undefined,
+  })
+  return confirmed ? lifecycle : { ...lifecycle, subplotCount: 0 }
+}
+
+function VolumeLifecycleProgress({ lifecycle }: Readonly<{ lifecycle: VolumeLifecycle }>): React.JSX.Element {
+  return <section className="chapter-browse-section" data-testid="chapter-browse-volume-lifecycle">
+    <h4><Info size={13} aria-hidden="true" />阶段进度</h4>
+    <ol className="chapter-workflow-stage-list chapter-volume-lifecycle-list">
+      {lifecycle.stages.map((stage) => {
+        const ended = stage.phase === "volume_end" && lifecycle.ended
+        const status = ended ? "done" : stage.status
+        const label = ended ? "已标记卷末"
+          : status === "done" ? "已完成"
+            : status === "pending" ? "待开始"
+              : stage.phase === "volume_end" ? "待标记卷末" : "当前阶段"
+        return <li key={stage.phase} data-phase={stage.phase} data-status={status}>
+          <span>{stage.label}</span>
+          <span data-testid={stage.phase === "subplot_selection" ? "volume-lifecycle-subplot-count" : undefined}>
+            {stage.phase === "subplot_selection"
+              ? `${label} · 已确认支线 ${String(status === "done" ? lifecycle.subplotCount : 0)}/${String(lifecycle.subplotLimit)}`
+              : label}
+          </span>
+        </li>
+      })}
+    </ol>
+  </section>
+}
+
 export function VolumePlanningInfo(props: Readonly<{
   plan: VolumeBatchPlan | undefined
   publishedChapterCount: number
   wordCount: number
+  lifecycle?: VolumeLifecycle
   onOpenPlan(): void
 }>): React.JSX.Element {
   const { plan } = props
   const targetChapterCount = plan?.targetChapterCount ?? 0
   const targetWordCount = plan?.targetWordCount ?? 0
   const storyline = plan?.storyline
-  const confirmed = plan?.storylineConfirmedAtMs !== undefined
-    && storyline !== undefined
-    && Object.values(storyline).every((text) => text.trim().length > 0)
+  const confirmed = confirmedVolumeStoryline(plan) !== undefined
+  const lifecycle = props.lifecycle ?? buildPlanVolumeLifecycle(plan, props.publishedChapterCount, props.wordCount)
   const sections = [
     { key: "opening", label: "主线开场", text: storyline?.opening },
     { key: "climaxes", label: "主线高潮（可多个）", text: storyline?.climaxes },
@@ -567,6 +680,7 @@ export function VolumePlanningInfo(props: Readonly<{
         <li><span>大纲</span><span>{volumeArtifactWriteStatus(plan?.outlineWriteCount)}</span></li>
       </ul>
     </section>
+    <VolumeLifecycleProgress lifecycle={lifecycle} />
     <section className="chapter-browse-section" data-testid="chapter-browse-volume-storyline">
       <h4><BookOpenText size={13} aria-hidden="true" />主线与支线</h4>
       <p className="chapter-browse-muted" data-testid="volume-storyline-status" data-status={confirmed ? "confirmed" : "pending"}>

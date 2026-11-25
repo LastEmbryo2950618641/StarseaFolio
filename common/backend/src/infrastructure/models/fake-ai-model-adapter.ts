@@ -58,7 +58,10 @@ export class FakeAiModelAdapter implements AIModelPort {
     if (options?.signal?.aborted) return Promise.reject(executionCancellationReason(options.signal))
     const startedAt = Date.now()
     const input = request.input as TurnPhaseInput
-    const synopsisReads = request.phase === "synopsis_discuss"
+    const volumeMarker = request.phase === "synopsis_discuss" && options?.outputMode === "text"
+      ? /独立一行输出 (<volume-(?:start|end|revise)\/>)/u.exec(options.phasePrompt?.text ?? "")?.[1]
+      : undefined
+    const synopsisReads = request.phase === "synopsis_discuss" && volumeMarker === undefined
       ? this.createSynopsisBootstrapReads(input, options?.contextMessages)
       : []
     const requestedReads = synopsisReads.length > 0
@@ -68,13 +71,24 @@ export class FakeAiModelAdapter implements AIModelPort {
         ? this.createVerificationProbeReads(input)
         : []
     const artifact = requestedReads.length > 0 ? undefined : this.createArtifact(request.phase, input)
+    const textArtifact = options?.outputMode === "text"
+      ? (requestedReads.length > 0
+          ? { assistantMessage: "正在读取资料（设定集索引、设定集与 reference）。" }
+          : volumeMarker !== undefined
+            ? { assistantMessage: volumeMarker }
+            : artifact === undefined || artifact === null
+              ? artifact
+              : fakeComposeArtifact(artifact as Record<string, unknown>, options.phasePrompt?.text))
+      : artifact
+    if (options?.outputMode === "text" && textArtifact !== undefined && textArtifact !== null && typeof textArtifact === "object" && "assistantMessage" in textArtifact)
+      options.onPartial?.({ contentDelta: String(textArtifact.assistantMessage) })
     const result: PhaseResultEnvelope = {
       schemaVersion: 1,
       envelopeId: request.envelopeId,
       contextId: request.contextId,
       phase: request.phase,
       outcome: requestedReads.length > 0 ? "request_read" : request.phase === "commit_review" ? "approve" : "continue",
-      ...(artifact === undefined ? {} : { artifact }),
+      ...(textArtifact === undefined ? {} : { artifact: textArtifact }),
       requestedReads,
       citedReadIds: [...request.committedReadIds],
       producedArtifactIds: [],
@@ -1054,4 +1068,100 @@ function estimateTokens(value: unknown): number {
 function chineseNumber(value: number): string {
   const numbers = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
   return numbers[value] ?? String(value)
+}
+
+function fakeComposeArtifact(artifact: Record<string, unknown>, prompt?: string): Record<string, unknown> {
+  if (prompt?.includes("<handoff-outline>")) {
+    const plan = artifact.arcPlan as { markdown?: string } | undefined
+    return { assistantMessage: [artifact.assistantMessage, plan?.markdown && `<handoff-outline>\n${plan.markdown}\n</handoff-outline>`].filter(Boolean).join("\n\n") }
+  }
+  if (prompt?.includes("<compose-volume-synopsis>") || prompt?.includes("<compose-volume-outline>")
+    || prompt?.includes("<compose-volume-meta>")) {
+    const parts = [String(artifact.assistantMessage ?? "")]
+    const volumeSynopsis = artifact.volumeSynopsis as { markdown?: string } | undefined
+    const arcPlan = artifact.arcPlan as { markdown?: string } | undefined
+    const meta = artifact.volumePlanMeta as { targetChapterCount?: number; targetWordCount?: number } | undefined
+    const settings = artifact.creationDeskSettings as Record<string, string | number> | undefined
+    if (volumeSynopsis?.markdown) parts.push(`<compose-volume-synopsis>\n${volumeSynopsis.markdown}\n</compose-volume-synopsis>`)
+    if (arcPlan?.markdown) parts.push(`<compose-volume-outline>\n${arcPlan.markdown}\n</compose-volume-outline>`)
+    if (meta?.targetChapterCount !== undefined && meta.targetWordCount !== undefined) {
+      parts.push(`<compose-volume-meta>\ntargetChapterCount: ${String(meta.targetChapterCount)}\ntargetWordCount: ${String(meta.targetWordCount)}\n</compose-volume-meta>`)
+    }
+    if (settings !== undefined) {
+      parts.push(`<writing-settings>\n${Object.entries(settings).map(([key, value]) => `${key}: ${String(value)}`).join("\n")}\n</writing-settings>`)
+    }
+    if (artifact.continueTurn === true) parts.push("<continue-turn/>")
+    return { assistantMessage: parts.filter((part) => part.length > 0).join("\n\n") }
+  }
+  if (prompt?.includes("<compose-work-style-choices>") && Array.isArray(artifact.choices)) {
+    const groups = artifact.choices.map((choice: { label?: string; workStyleSelection?: Record<string, string> }) => [
+      `label: ${String(choice.label ?? "")}`,
+      `novelMajorCategoryRulePath: ${choice.workStyleSelection?.novelMajorCategoryRulePath ?? ""}`,
+      `novelSubcategoryRulePath: ${choice.workStyleSelection?.novelSubcategoryRulePath ?? ""}`,
+      `proseStyleRulePath: ${choice.workStyleSelection?.proseStyleRulePath ?? ""}`,
+    ].join("\n")).join("\n\n")
+    return {
+      assistantMessage: `${String(artifact.assistantMessage ?? "")}\n<compose-work-style-choices>\n${groups}\n</compose-work-style-choices>`,
+    }
+  }
+  if (prompt?.includes("<compose-work-style>") && Array.isArray(artifact.presentationWrites)) {
+    const write = artifact.presentationWrites[0] as { markdown?: string } | undefined
+    return {
+      assistantMessage: `${String(artifact.assistantMessage ?? "")}\n<compose-work-style>\n${write?.markdown ?? ""}\n</compose-work-style>`,
+    }
+  }
+  if ((prompt?.includes("只刷新选项。") || prompt?.includes("【创作设定访谈输出格式】")) && Array.isArray(artifact.choices)) {
+    const labels = artifact.choices.map((choice: { label: string }) => `- ${choice.label}`).join("\n")
+    return { assistantMessage: `${String(artifact.assistantMessage ?? "")}\n<creative-choices>\n${labels}\n</creative-choices>` }
+  }
+  const synopsis = typeof artifact.synopsisBody === "string" ? artifact.synopsisBody : undefined
+  const outline = typeof artifact.outlineBody === "string" ? artifact.outlineBody : undefined
+  const draft = artifact.chapterDraftProposal !== null && typeof artifact.chapterDraftProposal === "object"
+    ? artifact.chapterDraftProposal as Record<string, unknown>
+    : undefined
+  const bodyEdits = artifact.bodyEdits as { ops?: Array<{ oldText?: string; newText?: string }> } | undefined
+  const stagingPromote = artifact.stagingPromote as { settingsWrites?: Array<Record<string, unknown>>; reason?: string } | undefined
+  if (synopsis === undefined && outline === undefined && draft === undefined
+    && !Array.isArray(artifact.goalProposals) && bodyEdits === undefined && stagingPromote === undefined) return artifact
+  const stagingBlock = stagingPromote === undefined ? "" : [
+    "<staging-promote>",
+    ...(stagingPromote.settingsWrites ?? []).flatMap((write) => [
+      `<staging-write entry="${String(write.entryId ?? "")}" path="${String(write.relativePath ?? "")}" mode="${String(write.mode ?? "create")}"${write.readmeEntry === undefined ? "" : ` readme="${String(write.readmeEntry)}"`}>`,
+      String(write.markdown ?? ""),
+      "</staging-write>",
+    ]),
+    ...(stagingPromote.reason === undefined ? [] : [`reason: ${stagingPromote.reason}`]),
+    "</staging-promote>",
+  ].join("\n")
+  const patchBlock = bodyEdits === undefined
+    ? ""
+    : `<compose-outline-patch>\n${(bodyEdits.ops ?? []).map((op) => (
+        `<search>\n${String(op.oldText ?? "")}\n</search>\n<replace>\n${String(op.newText ?? "")}\n</replace>`
+      )).join("\n")}\n</compose-outline-patch>`
+  const goalBlocks = (Array.isArray(artifact.goalProposals) ? artifact.goalProposals : []).map((proposal) => {
+    const entry = proposal as { payload?: Record<string, unknown>; reason?: string }
+    const lines = [`kind: ${String(entry.payload?.kind ?? "")}`]
+    for (const [key, value] of Object.entries(entry.payload ?? {})) {
+      if (key !== "kind") lines.push(`${key}: ${String(value)}`)
+    }
+    if (entry.reason !== undefined) lines.push(`reason: ${entry.reason}`)
+    return lines.join("\n")
+  })
+  const parts = [
+    typeof artifact.assistantMessage === "string" ? artifact.assistantMessage : "",
+    typeof artifact.chapterTitle === "string" ? `<chapter-title>${artifact.chapterTitle}</chapter-title>` : "",
+    typeof artifact.volumeFolderName === "string" ? `<volume-folder>${artifact.volumeFolderName}</volume-folder>` : "",
+    typeof artifact.workDisplayName === "string" ? `<work-title>${artifact.workDisplayName}</work-title>` : "",
+    typeof artifact.workDescription === "string" ? `<work-description>${artifact.workDescription}</work-description>` : "",
+    synopsis === undefined ? "" : `<compose-synopsis>\n${synopsis}\n</compose-synopsis>`,
+    outline === undefined ? "" : `<compose-outline>\n${outline}\n</compose-outline>`,
+    draft === undefined
+      ? ""
+      : `<compose-draft>\n# ${String(draft.heading ?? "正文")}\n${String(draft.body ?? "")}\n</compose-draft>`,
+    artifact.continueTurn === true ? "<continue-turn/>" : "",
+    goalBlocks.length === 0 ? "" : `<goal-proposals>\n${goalBlocks.join("\n---\n")}\n</goal-proposals>`,
+    patchBlock,
+    stagingBlock,
+  ].filter((part) => part.length > 0)
+  return { assistantMessage: parts.join("\n\n") }
 }

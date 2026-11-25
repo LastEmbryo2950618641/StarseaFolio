@@ -4,9 +4,30 @@ import { expect, it, vi } from "vitest"
 import { PROTOCOL_VERSION } from "@starseafolio/contracts"
 import type { AIModelPort } from "../src/application/turns/ports/ai-model-port.js"
 import { NikowenkuReferenceService } from "../src/infrastructure/web-research/nikowenku-reference-service.js"
-import { openChapterHarness } from "./helpers/chapter-coordination-harness.js"
+import { openChapterHarness, type ChapterHarness } from "./helpers/chapter-coordination-harness.js"
 import { CompositeWebResearchAdapter } from "../src/infrastructure/web-research/composite-web-research-adapter.js"
 import { synopsisConversationStreamHub } from "../src/application/chapters/synopsis-conversation-stream-hub.js"
+
+async function acceptVolumeStart(harness: ChapterHarness): Promise<void> {
+  const { projectId, workspaceRootRef } = harness
+  const runtime = await harness.container.getRuntime(projectId, workspaceRootRef)
+  const message = "开始第一卷。"
+  const boundary = await runtime.createSynopsisConversationService().send({
+    projectId, workspaceRootRef, message,
+    model: { async execute(request) {
+      return {
+        result: {
+          schemaVersion: 1, envelopeId: request.envelopeId, contextId: request.contextId,
+          phase: request.phase, outcome: "continue", artifact: { assistantMessage: "<volume-start/>" },
+          requestedReads: [], citedReadIds: [], producedArtifactIds: [], decisionRecordIds: [],
+          unresolvedDependencies: [], reason: "Start volume fixture", selfReview: "Boundary only",
+        },
+        usage: { inputTokens: 100, outputTokens: 50, latencyMs: 0 },
+      }
+    } },
+  })
+  expect(boundary.autoContinue?.message).toBe(message)
+}
 
 it("shows page rejection details and a failed read status in the actual conversation stream", async () => {
   const page = vi.spyOn(CompositeWebResearchAdapter.prototype, "fetchPageDetailed").mockResolvedValue({
@@ -37,6 +58,7 @@ it("shows page rejection details and a failed read status in the actual conversa
   } }
   const harness = await openChapterHarness("Web Read Failure", { model, workStyleGateReady: false, creativeSetupReady: false })
   try {
+    await acceptVolumeStart(harness)
     await harness.facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(),
       method: "synopsis.conversation.send", payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef, message: "写 Fate/stay night 同人，先读取人物资料。" } })
     expect(page).toHaveBeenCalledOnce()
@@ -67,6 +89,7 @@ it("can describe and execute original-work research before style confirmation wi
   } }
   const harness = await openChapterHarness("Reference Tools Gate", { model, workStyleGateReady: false, creativeSetupReady: false })
   try {
+    await acceptVolumeStart(harness)
     const response = await harness.facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(),
       method: "synopsis.conversation.send", payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef, message: "写 Example 同人，先核对原作。" } })
     expect(search).toHaveBeenCalledOnce()
@@ -114,6 +137,7 @@ it("reads newly imported original-work chapters in the same conversation send", 
   } }
   const harness = await openChapterHarness("Imported Reference Read", { model, workStyleGateReady: false, creativeSetupReady: false })
   try {
+    await acceptVolumeStart(harness)
     const response = await harness.facade.handle({ protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(),
       method: "synopsis.conversation.send", payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef, message: "写 Example 同人，下载首章并实际读取原作。" } })
     expect(crawl).toHaveBeenCalledOnce()

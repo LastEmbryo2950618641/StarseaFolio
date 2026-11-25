@@ -26,6 +26,7 @@ export * from "./reads.js"
 export * from "./runtime-metrics.js"
 export * from "./tasks.js"
 export * from "./version.js"
+export * from "./volume-lifecycle.js"
 export * from "./workspace.js"
 export * from "./world-evolution.js"
 

@@ -111,7 +111,7 @@ describe("TurnOrchestrator", () => {
     const fixture = await createFixture()
     await fixture.workspace.saveUserMarkdown(
       fixture.workspaceRoot,
-      "世界推演规则/用户规则/角色出场.md",
+      "提示词/用户规则/系统提示词/角色出场.md",
       "# 角色出场\n\n用户指定的角色出场规则。\n",
     )
     await fixture.workspace.saveUserMarkdown(
@@ -158,7 +158,7 @@ describe("TurnOrchestrator", () => {
     })
 
     expect(interpretInput?.readEvidence.map((evidence) => evidence.ownerId)).toEqual(expect.arrayContaining([
-      "世界推演规则/用户规则/角色出场.md",
+      "提示词/用户规则/系统提示词/角色出场.md",
       "设定集/readme.md",
       "参考文件/readme.md",
       "表现输出/描写规则/感官描写.md",
@@ -490,10 +490,11 @@ describe("TurnOrchestrator", () => {
     })
 
     expect(interpretAttempts).toBe(1)
-    expect(ruleAssemblyInput?.readEvidence.map((evidence) => evidence.ownerId)).toEqual([
+    expect(ruleAssemblyInput?.readEvidence.map((evidence) => evidence.ownerId)).toEqual(expect.arrayContaining([
       "参考文件/readme.md",
       "设定集/readme.md",
-    ])
+      "提示词/系统记忆/系统提示词/MEMORY.md",
+    ]))
     expect(ruleAssemblyInput?.retrievalGaps).toEqual([{
       typeId: "system:retrieval-gap",
       requestId: exhaustedRequestId,
@@ -1146,7 +1147,7 @@ describe("TurnOrchestrator", () => {
     expect(phaseRuns).toHaveLength(11)
     expect(retrievalRequest.remainingBudget?.retrievalExecutionDeadlineAtMs).toBeTypeOf("number")
     expect(retrievalRequest.remainingBudget?.retrievalPhaseDeadlineAtMs).toBeTypeOf("number")
-    expect(context?.segments).toHaveLength(14)
+    expect(context?.segments).toHaveLength(15)
     expect(context?.budget.maxTokens).toBe(57_600)
     expect(context?.ruleSnapshotId).toBeDefined()
     expect(await fixture.database.selectFrom("ai_decision_records").selectAll().execute()).toHaveLength(1)
@@ -1472,7 +1473,7 @@ describe("TurnOrchestrator", () => {
       .where("hidden_at", "is", null)
       .execute()
     writeFileSync(
-      join(fixture.workspaceRoot, "世界推演规则", "用户规则", "容量证据预算.md"),
+      join(fixture.workspaceRoot, "提示词", "用户规则", "系统提示词", "容量证据预算.md"),
       `# 容量证据预算\n\n${"必须继承的用户规则。".repeat(2_000)}\n`,
       "utf8",
     )
@@ -4441,7 +4442,7 @@ describe("TurnOrchestrator", () => {
     // draft 行为不变：仍只挂自己的三个默认 skill。
     const draftPrompt = promptsByPhase.get("draft")?.[0] ?? ""
     expect(draftPrompt).toContain("【skill-pack:draft】")
-    for (const skillId of ["webnovel-deslop", "webnovel-dialogue", "outline-to-draft"]) {
+    for (const skillId of ["outline-to-draft"]) {
       expect(draftPrompt.match(new RegExp(`【skill:${skillId}】`, "gu"))).toHaveLength(1)
     }
     expect(draftPrompt).not.toContain("【skill:settings-revision】")

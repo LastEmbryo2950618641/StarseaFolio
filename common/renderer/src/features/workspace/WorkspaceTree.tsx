@@ -17,7 +17,7 @@ import { filterInventoryForSkillView } from "./skill-tree-filter.js"
 import { isChapterBodyMarkdownPath } from "../editor/synopsis-path.js"
 import { WorkspaceTreeContextMenu } from "./WorkspaceTreeContextMenu.js"
 import { workspaceTreeLabel } from "./workspace-tree-labels.js"
-import { isPromptPath } from "./prompt-paths.js"
+import { filterVisiblePromptEntries, isPromptPath, promptTag } from "./prompt-paths.js"
 
 export const SETTINGS_LINEAGE_VIRTUAL_PATH = "__virtual__/设定沿革"
 
@@ -66,7 +66,7 @@ export function WorkspaceTree({
   const [showSceneCards, setShowSceneCards] = useState(false)
   const [contextMenu, setContextMenu] = useState<Readonly<{ path: string; x: number; y: number }> | undefined>(undefined)
   const visibleEntries = useMemo(
-    () => filterInventoryForSkillView(entries, { showSceneCards }),
+    () => filterVisiblePromptEntries(filterInventoryForSkillView(entries, { showSceneCards })),
     [entries, showSceneCards],
   )
   const tree = useMemo(() => buildTree(visibleEntries), [visibleEntries])
@@ -168,8 +168,9 @@ function TreeRow({
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(() => expandedBySelection.has(node.path))
   const lockKind = resolveWorkspaceLockKind(node.path)
-  // Prompt files are editable; show a「提示词」badge instead of the scaffold lock.
+  // Prompt files are editable; show the fixed/message/stage tag instead of the scaffold lock.
   const promptFile = node.kind === "file" && isPromptPath(node.path)
+  const promptBadge = promptFile ? promptTag(node.path) ?? "提示词" : undefined
   const displayName = workspaceTreeLabel(node.path, node.name)
   const displayNameTitle = displayName === node.name ? undefined : `${displayName}（${node.name}）`
   const selected = node.kind === "file" && !lineageActive && selectedPath === node.path
@@ -220,7 +221,7 @@ function TreeRow({
         type="button"
         className="tree-row-main"
         aria-label={promptFile
-          ? `${displayName}（提示词）`
+          ? `${displayName}（${promptBadge ?? "提示词"}）`
           : lockKind === undefined ? displayName : `${displayName}（${lockTooltip(lockKind)}）`}
         onClick={() => { onSelect(node.path); }}
       >
@@ -229,7 +230,7 @@ function TreeRow({
       </button>
       {promptFile
         ? <UiTooltip label="平台提示词，可编辑；保存前会确认写入全局提示词库">
-            <span className="tree-row-virtual-badge">提示词</span>
+            <span className="tree-row-virtual-badge">{promptBadge}</span>
           </UiTooltip>
         : lockKind === undefined
           ? null

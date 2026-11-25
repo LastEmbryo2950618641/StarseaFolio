@@ -28,6 +28,15 @@ describe("DeepSeekModelCatalogAdapter", () => {
     expect(options?.headers).toMatchObject({ Authorization: "Bearer test-key" })
   })
 
+  it("discovers models at the configured OpenAI-compatible API root", async () => {
+    const request = vi.fn<typeof fetch>(async () => Response.json({ data: [{ id: "gpt-6.2-sol" }] }))
+    const adapter = new DeepSeekModelCatalogAdapter(request)
+
+    await expect(adapter.list({ baseUrl: "https://example.test/v1", apiKey: "test-key" }))
+      .resolves.toEqual({ models: [{ id: "gpt-6.2-sol" }] })
+    expect(request.mock.calls[0]?.[0]).toEqual(new URL("https://example.test/v1/models"))
+  })
+
   it("rejects insecure remote model endpoints before requesting", async () => {
     const request = vi.fn<typeof fetch>()
     const adapter = new DeepSeekModelCatalogAdapter(request)

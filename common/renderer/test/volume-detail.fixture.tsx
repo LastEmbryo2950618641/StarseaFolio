@@ -1,11 +1,18 @@
 import { useState } from "react"
 import { createRoot } from "react-dom/client"
-import type { ClientRequest, ClientResponse } from "@starseafolio/contracts"
+import type { ClientRequest, ClientResponse, VolumeLifecycle } from "@starseafolio/contracts"
 
 import { ChapterBrowseDetailRail } from "../src/features/editor/ChapterBrowseDetailRail.js"
 import "../src/styles/global.css"
 
-type Context = { projectId: string; workspaceRootRef: string; folderName: string; bodyPaths: string[]; mounted: boolean }
+type Context = {
+  projectId: string
+  workspaceRootRef: string
+  folderName: string
+  bodyPaths: string[]
+  mounted: boolean
+  activeVolumeLifecycle?: VolumeLifecycle
+}
 type Read = { projectId: string; workspaceRootRef: string; path: string }
 export type VolumeDetailFixture = {
   reads: Read[]
@@ -81,6 +88,7 @@ function Fixture(): React.JSX.Element {
   return <div style={{ height: 600, width: 380 }}>
     {context.mounted ? <ChapterBrowseDetailRail
       projectId={context.projectId} workspaceRootRef={context.workspaceRootRef} chapter={undefined}
+      activeVolumeLifecycle={context.activeVolumeLifecycle}
       volume={{ folderName: context.folderName, chapters: context.bodyPaths.map((bodyPath, index) => ({
         sequence: index + 1, label: `第${String(index + 1)}章`, volumeFolderName: context.folderName, bodyPath,
       })) }}

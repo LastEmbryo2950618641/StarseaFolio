@@ -139,7 +139,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
       await readBundledPromptMarkdown(BATCH_VOLUME_GUIDE_RESOURCE),
       { encoding: "utf8", flag: "wx" },
     )
-    await writeFile(resolveInside(root, "世界推演规则/Agent记忆/MEMORY.md"), defaults.agentMemoryIndex, {
+    await writeFile(resolveInside(root, "提示词/系统记忆/系统提示词/MEMORY.md"), defaults.agentMemoryIndex, {
       encoding: "utf8",
       flag: "wx",
     })
@@ -230,9 +230,9 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     for (const [relativePath, markdown] of platformRules) {
       await refreshPlatformRule(root, relativePath, markdown)
     }
-    await mkdir(resolveInside(root, "世界推演规则/Agent记忆"), { recursive: true })
+    await mkdir(resolveInside(root, "提示词/系统记忆/系统提示词"), { recursive: true })
     await writeFileIfMissing(
-      resolveInside(root, "世界推演规则/Agent记忆/MEMORY.md"),
+      resolveInside(root, "提示词/系统记忆/系统提示词/MEMORY.md"),
       defaults.agentMemoryIndex,
     )
     await mkdir(resolveInside(root, "大纲"), { recursive: true })
@@ -254,6 +254,46 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     await writeFileIfMissing(resolveInside(root, "暂存区/世界与规则草稿.md"), defaults.stagingWorld)
     await writeFileIfMissing(resolveInside(root, "暂存区/待落盘清单.md"), defaults.stagingPromoteIndex)
     await mkdir(resolveInside(root, "提示词"), { recursive: true })
+    const promptScopes = ["基础规则", "用户规则", "系统记忆"]
+    const promptCategories = [
+      "系统提示词",
+      "阶段提示词",
+      "消息前后/用户消息前",
+      "消息前后/用户消息后",
+    ]
+    for (const scope of promptScopes) {
+      for (const category of promptCategories) {
+        await mkdir(resolveInside(root, `提示词/${scope}/${category}`), { recursive: true })
+      }
+    }
+    await migrateLegacyPromptScope(root, "世界推演规则/用户规则", "提示词/用户规则/系统提示词")
+    await migrateLegacyPromptScope(root, "世界推演规则/Agent记忆", "提示词/系统记忆/系统提示词")
+    await migrateFlatStagePromptFolders(root)
+    // Migration may create parent directories after the main scaffold pass; ensure all leaf folders exist.
+    for (const scope of promptScopes) {
+      for (const category of promptCategories) {
+        await mkdir(resolveInside(root, `提示词/${scope}/${category}`), { recursive: true })
+      }
+    }
+    const emptyProjectPromptDocs = [
+      "用户规则/系统提示词/用户规则.md",
+      "用户规则/阶段提示词/新章节阶段.md",
+      "用户规则/阶段提示词/梗概阶段.md",
+      "用户规则/阶段提示词/草稿阶段.md",
+      "用户规则/阶段提示词/章节入库阶段.md",
+      "用户规则/消息前后/用户消息前.md",
+      "用户规则/消息前后/用户消息后.md",
+      "系统记忆/系统提示词/系统记忆.md",
+      "系统记忆/阶段提示词/新章节阶段.md",
+      "系统记忆/阶段提示词/梗概阶段.md",
+      "系统记忆/阶段提示词/草稿阶段.md",
+      "系统记忆/阶段提示词/章节入库阶段.md",
+      "系统记忆/消息前后/用户消息前.md",
+      "系统记忆/消息前后/用户消息后.md",
+    ]
+    for (const relativePath of emptyProjectPromptDocs) {
+      await writeFileIfMissing(resolveInside(root, `提示词/${relativePath}`), "")
+    }
     await Promise.all((defaults.promptLibraryFiles ?? []).map((file) => (
       refreshPromptFile(root, file.relativePath, file.markdown)
     )))
@@ -760,6 +800,48 @@ async function refreshPlatformRule(root: string, relativePath: string, markdown:
     await rename(pendingPath, path)
   } finally {
     await rm(pendingPath, { force: true })
+  }
+}
+
+async function migrateLegacyPromptScope(root: string, sourcePath: string, targetPath: string): Promise<void> {
+  const source = resolveInside(root, sourcePath)
+  const target = resolveInside(root, targetPath)
+  try {
+    const entries = await readdir(source, { withFileTypes: true })
+    await mkdir(target, { recursive: true })
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue
+      const targetFile = join(target, entry.name)
+      try {
+        await lstat(targetFile)
+      } catch {
+        await copyFile(join(source, entry.name), targetFile)
+      }
+    }
+  } catch {
+    // No legacy folder; nothing to migrate.
+  }
+}
+
+async function migrateFlatStagePromptFolders(root: string): Promise<void> {
+  const stages = ["新章节阶段", "梗概阶段", "草稿阶段", "章节入库阶段"]
+  for (const scope of ["基础规则", "用户规则", "系统记忆"]) {
+    const category = resolveInside(root, `提示词/${scope}/阶段提示词`)
+    for (const stage of stages) {
+      const legacy = join(category, stage)
+      try {
+        const entries = await readdir(legacy, { withFileTypes: true })
+        for (const entry of entries) {
+          if (!entry.isFile() || !entry.name.endsWith(".md")) continue
+          const flatName = entry.name.includes(stage) ? entry.name : `${stage}-${entry.name}`
+          const target = join(category, flatName)
+          try { await lstat(target) } catch { await copyFile(join(legacy, entry.name), target) }
+        }
+        await rm(legacy, { recursive: true, force: true })
+      } catch {
+        // Legacy folder absent.
+      }
+    }
   }
 }
 

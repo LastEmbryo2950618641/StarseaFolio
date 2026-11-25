@@ -7,6 +7,12 @@ Current phase: {{phase}}.
 Return exactly one JSON object and no Markdown fences or commentary.
 The trailing user messages contain the mandatory output schema and current request-specific requirements.
 
+## text-phase-protocol
+
+StarseaFolio protocol {{version}}.
+Current phase: {{phase}}.
+Follow the current phase instructions for plain text and tagged Markdown. Use the provided tools for tool calls. Do not return a JSON result envelope.
+
 ## output-schema
 
 MANDATORY OUTPUT SCHEMA - stable instructions for the current phase:

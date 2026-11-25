@@ -1,12 +1,15 @@
 import { aiPhaseValues, type AIPhase } from "@starseafolio/contracts"
 
-import { SKILL_INDEX_RESOURCE } from "./skill-registry.js"
+import { DISCUSS_SYSTEM_PROMPT_DOC, SYSTEM_PROMPT_DOCS } from "./prompt-docs.js"
 
 export const PROMPT_CONTRACT_VERSION = "v1" as const
 export const WORLD_RULES_OVERVIEW_RESOURCE = "resources/v1/world-rules-overview.md" as const
 export const BASE_RULES_RESOURCE = "resources/v1/base-rules.md" as const
 export const CONTENT_HANDLING_RESOURCE = "resources/v1/content-handling.md" as const
 export const WEBNOVEL_PROSE_LOGIC_RESOURCE = "resources/v1/webnovel-prose-logic.md" as const
+export const WRITING_VOICE_SYSTEM_RESOURCE = "resources/v1/writing-voice-system.md" as const
+export const QUERY_FACTS_SYSTEM_RESOURCE = "resources/v1/query-facts-system.md" as const
+export const REVISION_AUDIT_SYSTEM_RESOURCE = "resources/v1/revision-audit-system.md" as const
 export const PLOT_SYNOPSIS_GUIDE_RESOURCE = "resources/v1/plot-synopsis-guide.md" as const
 export const USER_TO_SYNOPSIS_GUIDE_RESOURCE = "resources/v1/user-to-synopsis-guide.md" as const
 export const SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE = "resources/v1/synopsis-to-outline-guide.md" as const
@@ -44,17 +47,13 @@ export const WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES = Object.freeze([
  * Skill index is discuss-only (it needs load_skill); writing/query guides load by phase/skill.
  */
 export const PLATFORM_BASE_RULE_RESOURCES = Object.freeze([
-  WORLD_RULES_OVERVIEW_RESOURCE,
-  BASE_RULES_RESOURCE,
-  CONTENT_HANDLING_RESOURCE,
-  WEBNOVEL_PROSE_LOGIC_RESOURCE,
-  SETTINGS_QUERY_GUIDE_RESOURCE,
+  ...SYSTEM_PROMPT_DOCS,
 ] as const)
 
-/** Discuss sticky prefix — common base plus the skill index (discuss has load_skill). */
+/** Discuss sticky prefix — common base plus the discuss skill index. */
 export const SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES = Object.freeze([
   ...PLATFORM_BASE_RULE_RESOURCES,
-  SKILL_INDEX_RESOURCE,
+  DISCUSS_SYSTEM_PROMPT_DOC,
 ] as const)
 
 export type PromptDefinition = {

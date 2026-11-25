@@ -1303,6 +1303,76 @@ describe("DeepSeekAiModelAdapter", () => {
     })).toBeInstanceOf(DeepSeekAiModelAdapter)
   })
 
+  it("projects native request_read tool arguments through the host read assembler", async () => {
+    const request = createRequest({ phase: "synopsis_discuss" })
+    let completionInput: Parameters<DeepSeekCompletionClient["complete"]>[0] | undefined
+    const client: DeepSeekCompletionClient = {
+      complete: (input) => {
+        completionInput = input
+        return Promise.resolve({
+          content: "我需要先核对设定集。",
+          toolCalls: [{
+            name: "request_read",
+            arguments: JSON.stringify({
+              reads: [{
+                reason: "核对雨夜站台的既有设定",
+                expectedEvidence: "雨夜站台设定",
+                query: {
+                  exactKeys: ["雨夜站台"],
+                  sourceKinds: ["reference"],
+                },
+              }],
+            }),
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        })
+      },
+    }
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, jsonModeEnabled: false },
+      { getSecret: () => Promise.resolve("test-key") },
+      new NodePromptResourceAdapter(promptRoot),
+      client,
+    )
+
+    const execution = await adapter.execute(request, {
+      outputMode: "text",
+      contextMessages: [{
+        messageId: randomUUID(), sequence: 1, role: "user", kind: "phase_instruction",
+        taskId: "older-task", turnId: "older-turn", phase: "synopsis_discuss",
+        content: "Return exactly one JSON object. Legacy discussion format.",
+      }],
+    })
+
+    expect(execution.result.outcome).toBe("request_read")
+    expect(execution.result.artifact).toEqual({
+      assistantMessage: "我需要先核对设定集。",
+      finalSelfReview: expect.any(String),
+    })
+    expect(execution.result.requestedReads).toHaveLength(1)
+    expect(execution.result.requestedReads[0]).toMatchObject({
+      reason: "核对雨夜站台的既有设定",
+      expectedEvidence: "雨夜站台设定",
+      query: {
+        exactKeys: ["雨夜站台"],
+        semanticTexts: [],
+        sourceKinds: ["reference"],
+        directions: ["both"],
+        maxCandidates: 24,
+        maxDepth: 2,
+      },
+    })
+    expect(execution.result.requestedReads[0]?.requestId).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(completionInput?.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ function: expect.objectContaining({ name: "request_read" }) }),
+    ]))
+    expect(completionInput).not.toHaveProperty("responseFormat")
+    const messages = completionInput?.messages ?? []
+    expect(messages.some(({ content }) => content.includes("Do not return a JSON result envelope."))).toBe(true)
+    expect(messages.some(({ content }) => content.includes("Return exactly one JSON object"))).toBe(false)
+    expect(messages.every(({ content }) => content.trim().length > 0)).toBe(true)
+  })
+
   it("validates JSON text without provider JSON Mode and maps prompt cache usage", async () => {
     const request = createRequest()
     const fake = await new FakeAiModelAdapter(randomUUID).execute(request)
@@ -1515,7 +1585,211 @@ describe("DeepSeekAiModelAdapter", () => {
     }
   })
 
-  it("uses the OpenAI Responses protocol without storing remote response state", async () => {
+  it.each([false, true])("assembles a native request_read envelope over Chat Completions (stream=%s)", async (stream) => {
+    const args = JSON.stringify({ reads: [{ reason: "补足背景", expectedEvidence: "设定集索引" }] })
+    const extraArgs = JSON.stringify({ reads: [{ reason: "核对章节", expectedEvidence: "章节索引" }] })
+    const message = stream ? null : "先读取设定集索引。"
+    const partial = vi.fn()
+    let requestBody: Record<string, unknown> = {}
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = []
+      request.on("data", (chunk: Buffer) => { chunks.push(chunk) })
+      request.on("end", () => {
+        requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>
+        if (stream) {
+          const deltas = [
+            { tool_calls: [{ index: 2, id: "call_2", type: "function", function: { name: "request_read", arguments: extraArgs.slice(0, 12) } }] },
+            { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "request_read", arguments: args.slice(0, 12) } }] },
+            { tool_calls: [{ index: 2, function: { arguments: extraArgs.slice(12) } }] },
+            { tool_calls: [{ index: 0, function: { arguments: args.slice(12) } }] },
+          ]
+          response.writeHead(200, { "content-type": "text/event-stream" })
+          for (const delta of deltas) {
+            response.write(`data: ${JSON.stringify({ id: "chatcmpl-test", choices: [{ delta }] })}\n\n`)
+          }
+          response.end('data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n')
+        } else {
+          response.writeHead(200, { "content-type": "application/json" })
+          response.end(JSON.stringify({ id: "chatcmpl-test", choices: [{ finish_reason: "tool_calls", message: {
+            role: "assistant", content: message,
+            tool_calls: [{ id: "call_1", type: "function", function: { name: "request_read", arguments: args } }],
+          } }] }))
+        }
+      })
+    })
+    await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve) })
+    const address = server.address() as AddressInfo
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, baseUrl: `http://127.0.0.1:${String(address.port)}`, maxAttempts: 1 },
+      { getSecret: () => Promise.resolve("test-key") },
+      new NodePromptResourceAdapter(promptRoot),
+    )
+    const phaseRequest = createRequest({ phase: "synopsis_discuss", promptRef: "v1:synopsis_discuss" })
+
+    try {
+      const execution = await adapter.execute(phaseRequest, { outputMode: "text", ...(stream ? { onPartial: partial } : {}) })
+      expect(requestBody).not.toHaveProperty("response_format")
+      expect(requestBody.tools).toEqual(expect.arrayContaining([
+        expect.objectContaining({ function: expect.objectContaining({ name: "request_read" }) }),
+      ]))
+      expect(execution.result).toMatchObject({
+        envelopeId: phaseRequest.envelopeId,
+        contextId: phaseRequest.contextId,
+        phase: "synopsis_discuss",
+        outcome: "request_read",
+        artifact: { assistantMessage: message ?? "正在读取资料。" },
+        requestedReads: [{
+          requestId: expect.any(String), reason: "补足背景", expectedEvidence: "设定集索引",
+          query: { semanticTexts: ["设定集索引"], directions: ["both"] },
+        }, ...(stream ? [{
+          requestId: expect.any(String), reason: "核对章节", expectedEvidence: "章节索引",
+          query: { semanticTexts: ["章节索引"], directions: ["both"] },
+        }] : [])],
+      })
+      expect(execution.result.artifact).not.toHaveProperty("toolRequest")
+      expect(partial).not.toHaveBeenCalled()
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => { if (error === undefined) resolve(); else reject(error) })
+      })
+    }
+  })
+
+  it.each([
+    ["{", "valid JSON"],
+    ['{"reads":[]}', "non-empty reads array"],
+    ['{"reads":[{}],"extra":true}', "non-empty reads array"],
+    ['{"reads":[{"reason":"查设定"}]}', "expectedEvidence"],
+  ])("rejects invalid native request_read arguments %s without schema repair", async (args, error) => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>().mockResolvedValue({
+      content: null, toolCalls: [{ name: "request_read", arguments: args }],
+    })
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, maxSchemaRepairAttempts: 2 },
+      { getSecret: () => Promise.resolve("test-key") },
+      new NodePromptResourceAdapter(promptRoot),
+      { complete },
+    )
+    const onSchemaRepair = vi.fn()
+    const request = createRequest({ phase: "synopsis_discuss", promptRef: "v1:synopsis_discuss" })
+    await expect(adapter.execute(request, { outputMode: "text", onSchemaRepair })).rejects.toThrow(error)
+    expect(complete).toHaveBeenCalledOnce()
+    expect(onSchemaRepair).not.toHaveBeenCalled()
+  })
+
+  it("rejects truncated text even when the provider returned closed compose tags", async () => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>().mockResolvedValue({
+      content: "<compose-synopsis>梗概</compose-synopsis><compose-outline>细纲</compose-outline><compose-draft>草稿</compose-draft>",
+      finishReason: "length",
+    })
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, maxSchemaRepairAttempts: 2 },
+      { getSecret: () => Promise.resolve("test-key") },
+      new NodePromptResourceAdapter(promptRoot),
+      { complete },
+    )
+    const onSchemaRepair = vi.fn()
+    const request = createRequest({ phase: "synopsis_discuss" })
+    await expect(adapter.execute(request, { outputMode: "text", onSchemaRepair })).rejects.toThrow(/本次响应不会写入/u)
+    expect(complete).toHaveBeenCalledOnce()
+    expect(onSchemaRepair).not.toHaveBeenCalled()
+  })
+
+  it("rejects legacy JSON envelopes in text mode without repair", async () => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>().mockResolvedValue({
+      content: '{"outcome":"continue","artifact":{"assistantMessage":"旧协议"}}',
+      finishReason: "stop",
+    })
+    const adapter = new DeepSeekAiModelAdapter(
+      defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") },
+      new NodePromptResourceAdapter(promptRoot),
+      { complete },
+    )
+    const onSchemaRepair = vi.fn()
+    await expect(adapter.execute(createRequest({ phase: "synopsis_discuss" }), { outputMode: "text", onSchemaRepair }))
+      .rejects.toThrow(/必须使用纯文本/u)
+    expect(complete).toHaveBeenCalledOnce()
+    expect(onSchemaRepair).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])("offers and validates native reads over OpenAI Responses (stream=%s)", async (stream) => {
+    const chunksReceived = vi.fn()
+    const validArgs = JSON.stringify({ reads: [{ reason: "Check the setting", expectedEvidence: "Setting notes", query: { semanticTexts: ["old station"] } }] })
+    let args = validArgs
+    let completedResponse = true
+    let received: Record<string, unknown> = {}
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = []
+      request.on("data", (chunk: Buffer) => { chunks.push(chunk) })
+      request.on("end", () => {
+        received = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>
+        const call = { id: "fc_1", type: "function_call", name: "request_read", call_id: "call_1", arguments: args, status: "completed" }
+        const completed = {
+          id: "resp_read", object: "response", status: "completed", usage: { input_tokens: 12, output_tokens: 5, total_tokens: 17 },
+          output: [call, { type: "message", role: "assistant", content: [{ type: "output_text", text: "Checking the setting." }] }],
+        }
+        if (!stream) {
+          response.writeHead(200, { "content-type": "application/json" })
+          response.end(JSON.stringify(completed))
+          return
+        }
+        response.writeHead(200, { "content-type": "text/event-stream" })
+        const events = [
+          { type: "response.output_item.added", output_index: 0, item: { ...call, arguments: "", status: "in_progress" } },
+          { type: "response.function_call_arguments.delta", output_index: 0, item_id: call.id, delta: args.slice(0, 10) },
+          { type: "response.function_call_arguments.delta", output_index: 0, item_id: call.id, delta: args.slice(10) },
+          { type: "response.function_call_arguments.done", output_index: 0, item_id: call.id, name: call.name, arguments: args },
+          { type: "response.output_item.done", output_index: 0, item: call },
+          { type: "response.output_text.delta", output_index: 1, content_index: 0, item_id: "msg_1", delta: "Checking the setting." },
+          ...(completedResponse ? [{ type: "response.completed", response: completed }] : []),
+        ]
+        for (const [index, event] of events.entries()) {
+          response.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event, sequence_number: index })}\n\n`)
+        }
+        response.end()
+      })
+    })
+    await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve) })
+    const { port } = server.address() as AddressInfo
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, apiProtocol: "openai_responses", baseUrl: `http://127.0.0.1:${String(port)}`, maxAttempts: 1 },
+      { getSecret: () => Promise.resolve("test-key") },
+      new NodePromptResourceAdapter(promptRoot),
+    )
+    const request = createRequest({ phase: "synopsis_discuss", promptRef: "v1:synopsis_discuss" })
+    const onSchemaRepair = vi.fn()
+    const options = { outputMode: "text" as const, onSchemaRepair, ...(stream ? { onPartial: chunksReceived } : {}) }
+    try {
+      const execution = await adapter.execute(request, options)
+      expect(received.tools).toEqual([expect.objectContaining({ type: "function", name: "request_read", strict: false })])
+      expect(received.tool_choice).toBe("auto")
+      expect(received.stream === true).toBe(stream)
+      expect(received).not.toHaveProperty("text")
+      expect(execution.result).toMatchObject({
+        outcome: "request_read", artifact: { assistantMessage: "Checking the setting." },
+        requestedReads: [{ requestId: expect.any(String), expectedEvidence: "Setting notes", query: { semanticTexts: ["old station"] } }],
+      })
+      expect(execution.usage.inputTokens).toBe(12)
+      if (stream) expect(chunksReceived).toHaveBeenCalledWith({ contentDelta: "Checking the setting." })
+      args = JSON.stringify({ reads: [] })
+      await expect(adapter.execute(request, options)).rejects.toThrow("non-empty reads array")
+      if (stream) {
+        args = validArgs
+        completedResponse = false
+        await expect(adapter.execute(request, options)).rejects.toThrow("without a completed response")
+      }
+      expect(onSchemaRepair).not.toHaveBeenCalled()
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => { if (error === undefined) resolve(); else reject(error) })
+      })
+    }
+  })
+
+  it("uses the OpenAI Responses protocol with vendor-default storage and service tier", async () => {
     const phaseRequest = createRequest()
     const fake = await new FakeAiModelAdapter(randomUUID).execute(phaseRequest)
     let receivedPath = ""
@@ -1572,8 +1846,8 @@ describe("DeepSeekAiModelAdapter", () => {
         ...defaultDeepSeekRuntimeConfig,
         apiProtocol: "openai_responses",
         baseUrl: `http://127.0.0.1:${String(address.port)}`,
-        disableResponseStorage: true,
-        serviceTier: "fast",
+        disableResponseStorage: false,
+        serviceTier: "priority",
         reasoningEffort: "xhigh",
         jsonModeEnabled: true,
         maxAttempts: 1,
@@ -1587,8 +1861,8 @@ describe("DeepSeekAiModelAdapter", () => {
       const execution = await adapter.execute(phaseRequest)
       expect(receivedPath).toBe("/responses")
       expect(receivedUserAgent).toBe("StarseaFolio/0.1")
-      expect(receivedBody.store).toBe(false)
-      expect(receivedBody.service_tier).toBe("fast")
+      expect(receivedBody).not.toHaveProperty("store")
+      expect(receivedBody).not.toHaveProperty("service_tier")
       expect(receivedBody.reasoning).toEqual({ effort: "xhigh", summary: "detailed" })
       expect(receivedBody.text).toEqual({ format: { type: "json_object" } })
       expect(receivedBody.input).toEqual(expect.arrayContaining([
@@ -1611,7 +1885,7 @@ describe("DeepSeekAiModelAdapter", () => {
     }
   })
 
-  it("omits the Responses service tier when automatic provider selection is configured", async () => {
+  it("keeps provider defaults for response storage and service tier", async () => {
     const phaseRequest = createRequest()
     const fake = await new FakeAiModelAdapter(randomUUID).execute(phaseRequest)
     let receivedBody: Record<string, unknown> = {}
@@ -1662,6 +1936,7 @@ describe("DeepSeekAiModelAdapter", () => {
     try {
       await adapter.execute(phaseRequest)
       expect(receivedBody).not.toHaveProperty("service_tier")
+      expect(receivedBody).not.toHaveProperty("store")
     } finally {
       server.closeAllConnections()
       await new Promise<void>((resolve, reject) => {

@@ -79,12 +79,16 @@ function proceedModePromptAppendix(
     ].join("")
   }
   const gates = mergeCustomProceedGates(customGates)
-  const autoLabels = (Object.entries(gates) as Array<[keyof DiscussCustomProceedGates, boolean]>)
-    .filter(([, auto]) => auto)
-    .map(([stage]) => STAGE_LABEL[stage])
-  const stopLabels = (Object.entries(gates) as Array<[keyof DiscussCustomProceedGates, boolean]>)
-    .filter(([, auto]) => !auto)
-    .map(([stage]) => STAGE_LABEL[stage])
+  const nodes: ReadonlyArray<{ label: string; auto: boolean }> = [
+    { label: STAGE_LABEL.chapter_requirements, auto: gates.chapter_requirements },
+    {
+      label: "构思（梗概+细纲+草稿）",
+      auto: gates.synopsis_discuss && gates.outline_discuss && gates.draft_discuss,
+    },
+    { label: STAGE_LABEL.body_discuss, auto: gates.body_discuss },
+  ]
+  const autoLabels = nodes.filter((node) => node.auto).map((node) => node.label)
+  const stopLabels = nodes.filter((node) => !node.auto).map((node) => node.label)
   return renderRuntimePrompt("discuss-agent-policy", "custom", {
     autoNodes: autoLabels.length > 0
       ? renderRuntimePrompt("discuss-agent-policy", "custom-auto-nodes", { labels: autoLabels.join("、") })
@@ -103,8 +107,8 @@ function proceedModePromptAppendix(
 
 const STAGE_LABEL: Record<keyof DiscussCustomProceedGates, string> = {
   chapter_requirements: "新章用户要求",
-  synopsis_discuss: "梗概讨论",
-  outline_discuss: "细纲讨论",
-  draft_discuss: "草稿讨论",
+  synopsis_discuss: "构思（梗概+细纲+草稿）",
+  outline_discuss: "构思（梗概+细纲+草稿）",
+  draft_discuss: "构思（梗概+细纲+草稿）",
   body_discuss: "正文确认",
 }

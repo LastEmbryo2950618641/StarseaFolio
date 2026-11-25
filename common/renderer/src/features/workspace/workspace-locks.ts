@@ -10,7 +10,7 @@ import {
   isChapterPlanningMarkdownPath,
   isSynopsisMarkdownPath,
 } from "../editor/synopsis-path.js"
-import { isPromptPath, normalizeWorkspacePath } from "./prompt-paths.js"
+import { isPromptAuthoringDirectory, isPromptPath, normalizeWorkspacePath } from "./prompt-paths.js"
 
 export { isSynopsisMarkdownPath, normalizeWorkspacePath }
 
@@ -139,8 +139,6 @@ export function lockTooltip(kind: WorkspaceLockKind): string {
 /** Preferred destinations for new user markdown (most specific first). */
 export const USER_WRITABLE_CREATE_ROOTS = [
   "设定集",
-  "世界推演规则/用户规则",
-  "世界推演规则/Agent记忆",
   "大纲",
   "参考文件",
   "表现输出/描写规则",
@@ -152,7 +150,6 @@ export const USER_WRITABLE_CREATE_ROOTS = [
 /** Roots that allow nested user folders (aligned with project-manifest allowUserFolders). */
 export const USER_FOLDER_CREATE_ROOTS = [
   "设定集",
-  "世界推演规则/用户规则",
   "参考文件",
   "表现输出/描写规则",
   "表现输出/笔风规则",
@@ -165,6 +162,7 @@ function isUnderRoot(path: string, root: string): boolean {
 
 export function canCreateMarkdownInDirectory(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
+  if (normalized.startsWith("提示词/")) return isPromptAuthoringDirectory(normalized)
   if (normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) return false
   if (normalized === "章节正文" || normalized.startsWith("章节正文/")) return false
   return USER_WRITABLE_CREATE_ROOTS.some((root) => isUnderRoot(normalized, root))
@@ -172,6 +170,10 @@ export function canCreateMarkdownInDirectory(path: string): boolean {
 
 export function canCreateFolderInDirectory(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
+  if (normalized.startsWith("提示词/")) {
+    return normalized === "提示词/用户规则/系统提示词"
+      || normalized === "提示词/系统记忆/系统提示词"
+  }
   if (normalized === CHARACTER_DIRECTORY || normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) return false
   // Volume folders are created directly under 章节正文 with「第N卷 标题」names.
   if (normalized === "章节正文") return true

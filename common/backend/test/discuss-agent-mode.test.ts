@@ -22,11 +22,12 @@ describe("discuss agent mode appendix", () => {
     expect(auto).not.toContain("推进模式=批量 · Auto 自决")
   })
 
-  it("Auto + precise requires every pipeline stop", () => {
+  it("Auto + precise keeps 构思 as one atomic stop", () => {
     const auto = discussAgentModePromptAppendix("auto", { proceedMode: "precise" })
     expect(auto).toContain("推进模式=精准")
-    expect(auto).toContain("用这份梗概写细纲")
-    expect(auto).toContain("按细纲写正文")
+    expect(auto).toContain("构思（梗概→细纲→草稿）")
+    expect(auto).toContain("原子节点")
+    expect(auto).not.toContain("用这份梗概写细纲")
   })
 
   it("Accept edits still allows stopping on a real content conflict when batch on", () => {
@@ -49,5 +50,6 @@ describe("discuss agent mode appendix", () => {
     expect(custom).toContain("推进模式=自定义")
     expect(custom).toContain("自动节点")
     expect(custom).toContain("停等节点")
+    expect(custom).toContain("构思（梗概+细纲+草稿）")
   })
 })

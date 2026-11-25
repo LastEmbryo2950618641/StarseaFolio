@@ -6,6 +6,6 @@ import { isChapterPlanningMarkdownPath } from "./synopsis-path.js"
  */
 export function isWorkspaceDocumentReadOnly(path: string | undefined): boolean {
   return path !== undefined
-    && path.startsWith("章节正文/")
-    && !isChapterPlanningMarkdownPath(path)
+    && (/^大纲\/[^/]+\.卷状态\.md$/iu.test(path)
+      || (path.startsWith("章节正文/") && !isChapterPlanningMarkdownPath(path)))
 }

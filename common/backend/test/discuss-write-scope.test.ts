@@ -14,6 +14,10 @@ const synopsis = "# 第一章 雨夜旧站台\n\n林烬听见即将发车的广�
 const outline = "# 第一章 雨夜旧站台\n\n林烬从车窗看见熟悉的身影。"
 const choices = [{ label: "核对本章节奏", action: "continue_discuss" }] as const
 
+function tagged(section: "synopsis" | "outline" | "draft", markdown: string) {
+  return `<compose-${section}>\n${markdown}\n</compose-${section}>`
+}
+
 async function send(harness: ChapterHarness, message: string, extra = {}) {
   return harness.facade.handle({
     protocolVersion: PROTOCOL_VERSION,
@@ -90,11 +94,7 @@ describe("discussion authorizes and verifies current-turn writes", () => {
         archiveReads += 1
         if (archiveReads === 1) return replyWithTool("invoke", { operation: "read", messageId: originalMessageId })
         return modelReply(request, {
-          planningWriteIntent: { draft: "write" },
-          chapterDraftProposal: {
-            base: "body", heading: "第一章 雨夜旧站台",
-            body: "消息传来后，东门领队派人疏散百姓，西门守卫把接应信号改成了三盏灯。",
-          },
+          assistantMessage: tagged("draft", "# 第一章 雨夜旧站台\n\n消息传来后，东门领队派人疏散百姓，西门守卫把接应信号改成了三盏灯。"),
         })
       },
     }
@@ -151,8 +151,8 @@ describe("discussion authorizes and verifies current-turn writes", () => {
         expect(options?.phasePrompt?.text).not.toContain("【skill:synopsis-to-outline】")
         rewriteCalls += 1
         return Promise.resolve(modelReply(request, rewriteCalls === 1
-          ? { planningWriteIntent: { outline: "rewrite" }, outlineBody: outline }
-          : { planningWriteIntent: { synopsis: "rewrite" }, synopsisBody: synopsis }))
+          ? { assistantMessage: tagged("outline", outline) }
+          : { assistantMessage: tagged("synopsis", synopsis) }))
       },
     } satisfies AIModelPort
     const harness = await openChapterHarness("Sticky synopsis scope", { model })
@@ -187,11 +187,16 @@ describe("discussion authorizes and verifies current-turn writes", () => {
   it("preserves a manually edited outline when batch planning proposes a replacement", async () => {
     const model: AIModelPort = {
       info: { provider: "test", model: "batch-planning", available: true, contextWindowTokens: 64_000 },
-      execute(request) {
+      execute(request, options) {
+        expect(options?.outputMode).toBe("text")
         return Promise.resolve(modelReply(request, {
-          planningWriteIntent: { volume: "whole_volume" },
-          volumePlanMeta: { targetChapterCount: 1, targetWordCount: 2000 },
-          volumeChapterPlans: [{ chapterSequence: 1, synopsisBody: synopsis, outlineBody: outline }],
+          assistantMessage: [
+            "<compose-volume-meta>", "targetChapterCount: 1", "targetWordCount: 2000", "</compose-volume-meta>",
+            '<compose-volume-chapter index="1">',
+            "<compose-volume-chapter-synopsis>", synopsis.trim(), "</compose-volume-chapter-synopsis>",
+            "<compose-volume-chapter-outline>", outline.trim(), "</compose-volume-chapter-outline>",
+            "</compose-volume-chapter>",
+          ].join("\n"),
         }))
       },
     }
@@ -229,8 +234,7 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       },
       execute(request) {
         return Promise.resolve(modelReply(request, {
-          planningWriteIntent: { synopsis: "rewrite" },
-          synopsisBody: synopsis,
+          assistantMessage: tagged("synopsis", synopsis),
           choices: [
             { label: "用新梗概重写细纲", action: "confirm_synopsis" },
           ],
@@ -269,7 +273,6 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       base: "body", heading: "第一章 雨夜旧站台",
       body: "林烬站在窗边望着站台。广播响了一声，他拿起车票往外走。",
     }
-    let useProposalList = false
     const model: AIModelPort = {
       info: fake.info,
       classifyDiscussTurn() {
@@ -278,10 +281,7 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       execute(request, options) {
         if (request.phase !== "synopsis_discuss") return fake.execute(request, options)
         return Promise.resolve(modelReply(request, {
-          planningWriteIntent: { draft: "write" },
-          ...(useProposalList
-            ? { chapterDraftProposals: [{ ...draft, chapterSequence: 1 }] }
-            : { chapterDraftProposal: draft }),
+          assistantMessage: tagged("draft", `# ${draft.heading}\n\n${draft.body}`),
         }))
       },
     }
@@ -299,8 +299,7 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       const revisions = harness.container.getCurrentRuntime()?.createChapterRevisionService()
       if (revisions === undefined) throw new Error("Missing revision service")
       const before = await revisions.listDraftVersions(saved.revisionTaskId)
-      for (const list of [false, true]) {
-        useProposalList = list
+      for (let repeat = 0; repeat < 2; repeat += 1) {
         const repeated = await send(harness, "再核对并修改第一章草稿。")
         if (!repeated.ok) throw new Error(repeated.error.message)
         const data = repeated.data as SynopsisConversationSendResult
@@ -331,8 +330,7 @@ describe("discussion authorizes and verifies current-turn writes", () => {
         draftCalls += 1
         const body = draftCalls === 1 ? "林烬走了。" : "林烬听见广播，抓紧车票，从雨中穿过站台。"
         return Promise.resolve(modelReply(request, {
-          chapterDraftProposal: { base: "body", heading: "雨夜旧站台", body },
-          planningWriteIntent: { draft: "write" },
+          assistantMessage: tagged("draft", `# 雨夜旧站台\n\n${body}`),
         }))
       },
     } satisfies AIModelPort

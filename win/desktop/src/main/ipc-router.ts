@@ -425,6 +425,10 @@ function parseBookCoverSetPayload(input: unknown): Readonly<{ workspaceRootRef: 
 async function readModelProfiles(backend: BackendProcess, vault: FileCredentialVault): Promise<DesktopModelProfiles> {
   modelProfilesReadPayloadSchema.parse({})
   const stored = await invokeData<ModelProfilesReadResult>(backend, "model.profiles.read", {})
+  return withModelCredentialStatus(stored, vault)
+}
+
+async function withModelCredentialStatus(stored: ModelProfilesReadResult, vault: FileCredentialVault): Promise<DesktopModelProfiles> {
   return {
     profiles: await Promise.all(stored.profiles.map(async (profile) => ({
       ...profile,
@@ -441,7 +445,7 @@ async function saveModelProfiles(backend: BackendProcess, vault: FileCredentialV
     if (profile.apiKey.trim().length > 0) await vault.set(profile.credentialRef, profile.apiKey.trim())
     else if (!profile.hasApiKey) await vault.remove(profile.credentialRef)
   }))
-  await invokeData(backend, "model.profiles.save", {
+  const stored = await invokeData<ModelProfilesReadResult>(backend, "model.profiles.save", {
     profiles: input.profiles.map((profile) => ({
       id: profile.id,
       name: profile.name,
@@ -458,7 +462,7 @@ async function saveModelProfiles(backend: BackendProcess, vault: FileCredentialV
     })),
     activeProfileId: input.activeProfileId,
   })
-  return readModelProfiles(backend, vault)
+  return withModelCredentialStatus(stored, vault)
 }
 
 async function listModels(backend: BackendProcess, vault: FileCredentialVault, rawInput: unknown): Promise<unknown> {

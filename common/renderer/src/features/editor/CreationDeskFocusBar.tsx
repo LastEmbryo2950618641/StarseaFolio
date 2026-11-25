@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, FileText } from "lucide-react"
-import type { DiscussFocusKind, SynopsisConversationSession } from "@starseafolio/contracts"
+import { VOLUME_LIFECYCLE_LABELS, type DiscussFocusKind, type SynopsisConversationSession, type VolumeLifecycle } from "@starseafolio/contracts"
 
 import {
   discussFocusOpenLabel,
@@ -14,6 +14,8 @@ type Props = Readonly<{
   chapters: readonly DiscussFocusChapterOption[]
   /** Target chapter count for the active volume plan; omit to show only the in-volume index. */
   volumeTargetChapterCount?: number
+  /** Backend-owned lifecycle for the current volume, when available. */
+  volumeLifecycle?: VolumeLifecycle & Readonly<{ volumeFolderName?: string }>
   onSelectChapter(sequence: number, focusKind: DiscussFocusKind): void
   onOpenFile(path: string): void
 }>
@@ -30,20 +32,24 @@ export function CreationDeskFocusBar(props: Props): React.JSX.Element {
       ? `第${String(props.session.chapterSequence)}章 ${props.session.title}`
       : `第${String(props.session.chapterSequence)}章`)
   const volumeProgressLabel = useMemo(() => {
-    const volumeName = selected?.volumeFolderName
+    const volumeName = props.session.volumeLifecycle?.volumeFolderName ?? selected?.volumeFolderName
     const volumeChapters = (volumeName === undefined
       ? props.chapters
       : props.chapters.filter((item) => item.volumeFolderName === volumeName)
     ).slice().sort((a, b) => a.sequence - b.sequence)
     const indexInVolume = volumeChapters.findIndex((item) => item.sequence === props.session.chapterSequence)
     const current = indexInVolume >= 0 ? indexInVolume + 1 : props.session.chapterSequence
-    const total = props.volumeTargetChapterCount
+    const lifecycle = props.session.volumeLifecycle
+    const total = lifecycle !== undefined && lifecycle.volumeFolderName === volumeName
+      ? lifecycle.chapterLimit
+      : props.volumeTargetChapterCount
     if (total !== undefined && total > 0) return `第 ${String(current)}/${String(total)} 章`
     return `第 ${String(current)} 章`
   }, [
     props.chapters,
     props.session.chapterSequence,
     props.volumeTargetChapterCount,
+    props.session.volumeLifecycle,
     selected?.volumeFolderName,
   ])
   const filtered = useMemo(() => {
@@ -72,7 +78,10 @@ export function CreationDeskFocusBar(props: Props): React.JSX.Element {
     if (open) inputRef.current?.focus()
   }, [open])
 
-  return <div className="creation-desk-session-bar" ref={rootRef} data-testid="creation-desk-focus-bar">
+  const lifecycle = props.session.volumeLifecycle
+  const volumeName = lifecycle?.volumeFolderName ?? selected?.volumeFolderName ?? "当前卷"
+  return <div className="creation-desk-focus-stack" ref={rootRef} data-testid="creation-desk-focus-bar">
+    <div className="creation-desk-session-bar">
     <FileText size={13} aria-hidden="true" />
     <div className="creation-desk-focus-combobox">
       <button
@@ -137,13 +146,6 @@ export function CreationDeskFocusBar(props: Props): React.JSX.Element {
           </div>
         : null}
     </div>
-    <span
-      className="creation-desk-volume-progress"
-      data-testid="creation-desk-volume-progress"
-      title="当前卷章节进度"
-    >
-      {volumeProgressLabel}
-    </span>
     {openPath === undefined
       ? null
       : <button
@@ -153,5 +155,16 @@ export function CreationDeskFocusBar(props: Props): React.JSX.Element {
         >
           {discussFocusOpenLabel(focusKind)}
         </button>}
+    </div>
+    <div className="creation-desk-volume-progress" data-testid="creation-desk-volume-progress" title="当前卷进度">
+      <span data-testid="creation-desk-volume-name">{volumeName}</span>
+      {lifecycle === undefined ? <span>{volumeProgressLabel}</span> : <>
+        <span data-testid="creation-desk-volume-stage">{lifecycle.phase === "volume_end" && !lifecycle.ended
+          ? "待标记卷末" : VOLUME_LIFECYCLE_LABELS[lifecycle.phase]}</span>
+        {lifecycle.phase === "writing"
+          ? <span data-testid="creation-desk-volume-writing-count">待写入 {Math.min(lifecycle.chapterCount + 1, lifecycle.chapterLimit)}/{lifecycle.chapterLimit}</span>
+          : lifecycle.chapterLimit > 0 ? <span>{lifecycle.chapterCount}/{lifecycle.chapterLimit} 章</span> : null}
+      </>}
+    </div>
   </div>
 }

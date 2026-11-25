@@ -27,7 +27,7 @@ Return exactly one JSON object and no Markdown fences or commentary.
 写入已有有效规划使用 rewrite。新建缺失或占位规划使用 create。明确局部修改细纲时使用 patch。
 最近对话仅用于理解指代和已明确接受的提议。单项修改就只返回该项；只有明确要求多项才同时返回。相同说法在不同上下文可能表达不同意图。
 若用户把后续推进交给系统，才用 advance=true。用户明确要求仅改某项或本步就停时，不能附 advance；推进模式只决定已授权任务的停点。
-明确要求切换章节焦点时用 focus=true；明确要求撤回现有正文回到推演时用 restage=true。
+明确要求切换章节焦点，或要求修改当前焦点之外的章或卷时，先仅用 focus=true；待焦点切换后再授权目标写入。明确要求撤回现有正文回到推演时用 restage=true。
 明确要求改章名或对齐标题用 chapterTitle=true，明确要求改卷名用 volumeTitle=true，明确要求通过命令执行工作区操作用 shell=true。
 当前有可发布草稿，且用户明确批准将这份现有草稿入库时，才单独返回 {"publish":true}。否定、引用按钮文案、询问是否应发布、对旧版本的确认、要求先改写或等待都不能授权发布现有草稿。批量编排自行发布，不返回 publish。
 

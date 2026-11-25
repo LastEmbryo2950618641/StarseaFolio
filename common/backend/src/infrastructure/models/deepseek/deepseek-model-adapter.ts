@@ -8,6 +8,7 @@ import {
   type ModelReasoningKind,
   type ModelContextMessageDraft,
   type PhaseRequestEnvelope,
+  phaseResultEnvelopeSchema,
   type VisibleModelContextMessage,
 } from "@starseafolio/contracts"
 import type { DeepSeekRuntimeConfig } from "@starseafolio/config"
@@ -30,6 +31,7 @@ import type {
   PromptResourcePort,
 } from "../../../application/index.js"
 import { ModelContextAppender } from "../../../application/index.js"
+import { DISCUSS_PROVIDER_TOOLS } from "../../../application/chapters/discuss-provider-tools.js"
 import { renderRuntimePrompt } from "../../../core/runtime-prompt.js"
 import {
   assembleModelPhaseResult,
@@ -61,6 +63,7 @@ export type DeepSeekCompletionInput = Readonly<{
   thinking?: { type: "enabled" | "disabled" }
   reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   onPartial?: (partial: Readonly<{ reasoningDelta?: string; contentDelta?: string }>) => void
+  tools?: readonly unknown[]
 }>
 
 export type DeepSeekMessage = Readonly<{
@@ -74,6 +77,8 @@ type PromptSnapshot = Readonly<{
   messageDigests: readonly string[]
 }>
 
+type DeepSeekToolCall = Readonly<{ name: string; arguments: string }>
+
 export type DeepSeekCompletionResponse = Readonly<{
   content: string | null
   reasoningContent?: string | null
@@ -81,6 +86,7 @@ export type DeepSeekCompletionResponse = Readonly<{
   finishReason?: string | null
   responseId?: string
   messageFieldNames?: readonly string[]
+  toolCalls?: readonly DeepSeekToolCall[]
   usage?: unknown
 }>
 
@@ -211,7 +217,8 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         : Promise.resolve(options.phasePrompt),
       this.clientPromise,
     ])
-    const protocolMessage = renderRuntimePrompt("provider-protocol", "phase-protocol", {
+    const textOutput = options?.outputMode === "text"
+    const protocolMessage = renderRuntimePrompt("provider-protocol", textOutput ? "text-phase-protocol" : "phase-protocol", {
       version: PROTOCOL_VERSION,
       phase: request.phase,
     })
@@ -221,8 +228,10 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       options?.contextMessages ?? [],
     )
     const modelRequestText = this.contextAppender.formatDelta(modelRequest)
-    const outputContractPrefix = buildOutputContractPrefix(request)
-    const outputReminder = buildOutputReminder(request, referenceView)
+    const outputContractPrefix = textOutput ? undefined : buildOutputContractPrefix(request)
+    const outputReminder = textOutput
+      ? "按本轮阶段提示使用普通文本及指定标签。需要资料时，使用当前提供的原生读取工具。"
+      : buildOutputReminder(request, referenceView)
     const requestMessages: ModelContextMessageDraft[] = [
       {
         role: "user",
@@ -259,7 +268,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
     ]
     const inheritedMessages = options?.contextMessages === undefined
       ? [{ role: "system" as const, content: baseRules?.text ?? "" }]
-      : normalizeContextMessages(options.contextMessages, request.phase, phasePrompt.text)
+      : normalizeContextMessages(options.contextMessages, request.phase, phasePrompt.text, textOutput)
     // Keep only the locked leading system rules as prefix. Phase instruction,
     // protocol, schema, and reminder stay at the request tail so adjacent phases
     // share a byte-identical KV prefix through the inherited chain.
@@ -271,7 +280,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       { role: "user", content: modelRequestText },
       { role: "user", content: phasePrompt.text },
       { role: "user", content: protocolMessage },
-      { role: "user", content: outputContractPrefix },
+      ...(outputContractPrefix === undefined ? [] : [{ role: "user" as const, content: outputContractPrefix }]),
       { role: "user", content: outputReminder },
     ]
     const promptSnapshot = createPromptSnapshot(request.phase, messages)
@@ -324,11 +333,12 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       const completionInput: DeepSeekCompletionInput = {
         model: this.config.model,
         messages,
-        ...(this.config.jsonModeEnabled ? { responseFormat: { type: "json_object" as const } } : {}),
+        ...(!textOutput && this.config.jsonModeEnabled ? { responseFormat: { type: "json_object" as const } } : {}),
         signal: mergeExecutionSignals(options?.signal, AbortSignal.timeout(timeoutMs)),
         thinking: { type: thinkingEnabled ? "enabled" : "disabled" },
         ...(thinkingEnabled ? { reasoningEffort: this.config.reasoningEffort } : {}),
         ...(options?.onPartial === undefined ? {} : { onPartial: options.onPartial }),
+        ...(textOutput ? { tools: DISCUSS_PROVIDER_TOOLS } : {}),
       }
       runtimeLog("debug", "deepseek-model", "completion.requested", {
         taskId: request.taskId,
@@ -400,6 +410,89 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         hasCacheMiss = true
       }
       try {
+        if (textOutput) {
+          if (response.finishReason === "length" || response.finishReason === "content_filter") {
+            throw new Error("讨论输出未完整结束，本次响应不会写入。")
+          }
+          const raw = (response.content ?? "").trim()
+          if (/^(?:```(?:json)?\s*)?\{\s*"(?:outcome|artifact|requestedReads|assistantMessage)"\s*:/iu.test(raw)) {
+            throw new Error("讨论响应必须使用纯文本或约定标签，本次响应不会写入。")
+          }
+          const toolCalls = response.toolCalls ?? []
+          const toolCall = toolCalls[0]
+          const readCalls = toolCalls.filter((call) => call.name === "request_read")
+          if (readCalls.length > 0 && readCalls.length !== toolCalls.length) {
+            throw new Error("request_read cannot be combined with other tools in one response")
+          }
+          const toolArgs = toolCall === undefined || readCalls.length > 0
+            ? undefined
+            : JSON.parse(toolCall.arguments) as { action?: "describe" | "invoke"; arguments?: string }
+          const readMessage = raw || "正在读取资料。"
+          if (raw.length === 0 && toolCall === undefined) throw new Error("Pure-text compose response was empty")
+          const textResult = readCalls.length > 0
+            ? phaseResultEnvelopeSchema.parse({
+                ...assembleModelPhaseResult(
+                  referenceView.restore(parseModelPhaseResult({
+                    outcome: "request_read",
+                    requestedReads: readCalls.flatMap((call) => parseNativeReadArguments(call.arguments)),
+                    reason: "Native request_read tool requested additional evidence.",
+                    selfReview: "The host will execute the requested reads before the next phase turn.",
+                  }, request.phase)),
+                  request,
+                ),
+                artifact: { assistantMessage: readMessage, finalSelfReview: "已请求补充资料，等待宿主读取。" },
+              })
+            : phaseResultEnvelopeSchema.parse({
+                schemaVersion: request.schemaVersion,
+                envelopeId: request.envelopeId,
+                contextId: request.contextId,
+                phase: request.phase,
+                outcome: "continue",
+                artifact: toolCall === undefined
+                  ? { assistantMessage: raw }
+                  : {
+                      assistantMessage: raw.length === 0 ? "正在调用工具。" : raw,
+                      finalSelfReview: "等待宿主校验并处理工具请求。",
+                      toolRequest: {
+                        name: toolCall.name,
+                        action: toolArgs?.action ?? "invoke",
+                        ...(toolArgs?.arguments === undefined ? {} : { arguments: toolArgs.arguments }),
+                      },
+                    },
+                requestedReads: [],
+                citedReadIds: [...request.committedReadIds],
+                producedArtifactIds: [],
+                decisionRecordIds: [],
+                unresolvedDependencies: [],
+                reason: "Pure-text compose response",
+                selfReview: "Protocol tags are parsed by the host before persistence.",
+              })
+          return {
+            result: textResult,
+            contextExchange: {
+              requestMessages,
+              responseMessage: {
+                role: "assistant",
+                kind: "phase_response",
+                taskId: request.taskId,
+                turnId: request.turnId,
+                phase: request.phase,
+                content: raw,
+              },
+            },
+            usage: {
+              modelCalls: repairAttempt + 1,
+              inputTokens: totalInputTokens,
+              ...(lastRequestInputTokens === undefined ? {} : { lastRequestInputTokens }),
+              outputTokens: totalOutputTokens,
+              latencyMs: Math.max(0, Date.now() - startedAt),
+              ...(hasCacheHit ? { cacheHitInputTokens } : {}),
+              ...(hasCacheMiss ? { cacheMissInputTokens } : {}),
+              provider: "deepseek",
+              model: this.config.model,
+            },
+          }
+        }
         if (response.finishReason === "length") {
           throw new SyntaxError("Provider stopped at the output token limit before completing a bounded phase result")
         }
@@ -490,7 +583,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
           && request.phase === "synopsis_discuss" && error instanceof UnreadableCitationError && !citationRepairUsed
         const dedicatedGraphReferenceRepair = repairAttempt >= this.config.maxSchemaRepairAttempts
           && isGraphReferenceValidationError(error) && !graphReferenceRepairUsed
-        const canRepair = (repairAttempt < this.config.maxSchemaRepairAttempts
+        const canRepair = !textOutput && (repairAttempt < this.config.maxSchemaRepairAttempts
           || dedicatedCitationRepair
           || dedicatedGraphReferenceRepair)
           && repairAttempt + 1 < request.remainingBudget.remainingCalls
@@ -564,33 +657,40 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
     return {
       complete: async (input) => {
         if (this.config.apiProtocol === "openai_responses") {
-          const response = await client.responses.create({
+          const readTools = input.tools?.flatMap((tool) => {
+            const definition = asRecord(asRecord(tool).function)
+            if (definition.name !== "request_read") return []
+            return [{ type: "function" as const, ...definition, strict: false }]
+          }) ?? []
+          const body = {
             model: input.model,
             input: input.messages.map((message) => ({ role: message.role, content: message.content })),
-            store: !this.config.disableResponseStorage,
-            ...(this.config.serviceTier === "auto" ? {} : { service_tier: this.config.serviceTier }),
             ...(input.responseFormat === undefined ? {} : { text: { format: input.responseFormat } }),
             ...(input.maxTokens === undefined ? {} : { max_output_tokens: input.maxTokens }),
             ...(input.thinking?.type === "enabled"
               ? { reasoning: { effort: input.reasoningEffort, summary: "detailed" as const } }
               : {}),
-          } as Parameters<typeof client.responses.create>[0], input.signal === undefined ? undefined : { signal: input.signal })
-          const responseRecord = asRecord(response)
-          const incompleteDetails = asRecord(responseRecord.incomplete_details)
-          const responseId = readString(responseRecord.id)
-          const responseStatus = readString(responseRecord.status)
-          const incompleteReason = readString(incompleteDetails.reason)
-          const finishReason = incompleteReason ?? responseStatus
-          const reasoningContent = nonEmptyReasoning(readResponsesReasoning(responseRecord.output))
-          const usage = normalizeResponsesUsage(responseRecord.usage)
-          return {
-            content: readString(responseRecord.output_text) ?? null,
-            ...(finishReason === undefined ? {} : { finishReason }),
-            ...(responseId === undefined ? {} : { responseId }),
-            messageFieldNames: Object.keys(responseRecord),
-            ...(reasoningContent === undefined ? {} : { reasoningContent, reasoningKind: "provider_summary" as const }),
-            ...(usage === undefined ? {} : { usage }),
+            ...(readTools.length === 0 ? {} : { tools: readTools, tool_choice: "auto" as const }),
+          } as OpenAI.Responses.ResponseCreateParamsNonStreaming
+          const requestOptions = input.signal === undefined ? undefined : { signal: input.signal }
+          if (readTools.length > 0 && input.onPartial !== undefined) {
+            const stream = await client.responses.create({ ...body, stream: true }, requestOptions)
+            for await (const event of stream) {
+              if (event.type === "response.output_text.delta") {
+                input.onPartial({ contentDelta: event.delta })
+              } else if (event.type === "response.reasoning_summary_text.delta") {
+                input.onPartial({ reasoningDelta: event.delta })
+              } else if (event.type === "response.completed") {
+                // The terminal response includes the fully assembled function arguments for every output item.
+                return readResponsesCompletion(event.response, true)
+              } else if (event.type === "error" || event.type === "response.failed" || event.type === "response.incomplete") {
+                throw new Error(`OpenAI Responses stream ended with ${event.type}`)
+              }
+            }
+            throw new Error("OpenAI Responses stream closed without a completed response")
           }
+          const response = await client.responses.create(body, requestOptions)
+          return readResponsesCompletion(response, readTools.length > 0)
         }
         // Node OpenAI SDK has no Python-style extra_body; DeepSeek expects `thinking` at the top level.
         const requestBody = {
@@ -600,6 +700,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
           ...(input.maxTokens === undefined ? {} : { max_tokens: input.maxTokens }),
           ...(input.thinking === undefined ? {} : { thinking: input.thinking }),
           ...(input.reasoningEffort === undefined ? {} : { reasoning_effort: input.reasoningEffort }),
+          ...(input.tools === undefined ? {} : { tools: [...input.tools], tool_choice: "auto" }),
         }
         if (input.onPartial !== undefined) {
           const stream = await client.chat.completions.create(
@@ -615,6 +716,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
           let finishReason: string | null | undefined
           let responseId: string | undefined
           let usage: unknown
+          const toolCalls = new Map<number, DeepSeekToolCall>()
           for await (const chunk of stream) {
             const chunkRecord = asRecord(chunk)
             if (responseId === undefined) responseId = readString(chunkRecord.id)
@@ -631,6 +733,18 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
               content += contentDelta
               input.onPartial({ contentDelta })
             }
+            if (Array.isArray(delta?.tool_calls)) {
+              for (const raw of delta.tool_calls as readonly unknown[]) {
+                const call = asRecord(raw)
+                const fn = asRecord(call.function)
+                const index = typeof call.index === "number" ? call.index : 0
+                const current = toolCalls.get(index)
+                toolCalls.set(index, {
+                  name: (current?.name ?? "") + (readString(fn.name) ?? ""),
+                  arguments: (current?.arguments ?? "") + (readString(fn.arguments) ?? ""),
+                })
+              }
+            }
             const chunkFinish = readString(choice?.finish_reason)
             if (chunkFinish !== undefined) finishReason = chunkFinish
           }
@@ -639,6 +753,9 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
             finishReason: finishReason ?? null,
             ...(responseId === undefined ? {} : { responseId }),
             messageFieldNames: ["content", "reasoning_content"],
+            ...(toolCalls.size === 0 ? {} : {
+              toolCalls: [...toolCalls.entries()].sort(([left], [right]) => left - right).map(([, call]) => call),
+            }),
             ...(reasoningContent.length === 0
               ? {}
               : { reasoningContent, reasoningKind: "provider_reasoning" as const }),
@@ -651,8 +768,12 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         ) as OpenAI.Chat.Completions.ChatCompletion
         const message = asRecord(response.choices[0]?.message)
         const reasoningContent = nonEmptyReasoning(readString(message.reasoning_content))
+        const toolCalls = response.choices[0]?.message.tool_calls?.flatMap((call) => (
+          call.type === "function" ? [{ name: call.function.name, arguments: call.function.arguments }] : []
+        ))
         return {
           content: response.choices[0]?.message.content ?? null,
+          ...(toolCalls === undefined || toolCalls.length === 0 ? {} : { toolCalls }),
           finishReason: response.choices[0]?.finish_reason ?? null,
           responseId: response.id,
           messageFieldNames: Object.keys(message),
@@ -686,6 +807,55 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         }
       }
     }
+  }
+}
+
+function parseNativeReadArguments(raw: string): readonly unknown[] {
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch (error) {
+    throw new Error("request_read arguments must be valid JSON", { cause: error })
+  }
+  const args = asRecord(value)
+  if (Object.keys(args).length !== 1 || !Array.isArray(args.reads) || args.reads.length === 0) {
+    throw new Error("request_read arguments must contain only a non-empty reads array")
+  }
+  return args.reads
+}
+
+function readResponsesCompletion(value: unknown, readToolOffered: boolean): DeepSeekCompletionResponse {
+  const response = asRecord(value)
+  const output = Array.isArray(response.output) ? response.output.map(asRecord) : []
+  const status = readString(response.status)
+  const incompleteReason = readString(asRecord(response.incomplete_details).reason)
+  const finishReason = incompleteReason ?? status
+  const responseId = readString(response.id)
+  const reasoningContent = nonEmptyReasoning(readResponsesReasoning(output))
+  const usage = normalizeResponsesUsage(response.usage)
+  const toolCalls = readToolOffered ? output.flatMap((item) => {
+    if (item.type !== "function_call") return []
+    if (item.name !== "request_read") throw new Error("OpenAI Responses returned an unoffered function tool")
+    if (status !== "completed" || (item.status !== undefined && item.status !== "completed")) {
+      throw new Error("OpenAI Responses returned an incomplete request_read call")
+    }
+    const args = readString(item.arguments)
+    if (args === undefined) throw new Error("OpenAI Responses request_read call has no arguments")
+    return [{ name: item.name, arguments: args }]
+  }) : []
+  const outputText = readString(response.output_text) ?? output.flatMap((item) => (
+    item.type === "message" && item.role === "assistant" && Array.isArray(item.content)
+      ? item.content.map(asRecord).flatMap((part) => part.type === "output_text" && typeof part.text === "string" ? [part.text] : [])
+      : []
+  )).join("")
+  return {
+    content: outputText || null,
+    ...(finishReason === undefined ? {} : { finishReason }),
+    ...(responseId === undefined ? {} : { responseId }),
+    messageFieldNames: Object.keys(response),
+    ...(toolCalls.length === 0 ? {} : { toolCalls }),
+    ...(reasoningContent === undefined ? {} : { reasoningContent, reasoningKind: "provider_summary" }),
+    ...(usage === undefined ? {} : { usage }),
   }
 }
 
@@ -724,8 +894,10 @@ function normalizeContextMessages(
   contextMessages: readonly VisibleModelContextMessage[],
   currentPhase: AIPhase,
   currentPhaseInstruction: string,
+  textOutput: boolean,
 ): DeepSeekMessage[] {
   const inherited = contextMessages.filter((message) => {
+    if (textOutput && message.phase === currentPhase && (message.kind === "phase_protocol" || message.kind === "phase_instruction")) return false
     if (message.taskId === undefined || message.turnId === undefined || message.phase !== currentPhase) return true
     if (message.kind === "phase_protocol") return false
     if (message.kind === "phase_instruction" && message.content === currentPhaseInstruction) return false

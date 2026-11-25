@@ -25,12 +25,12 @@ export class DeepSeekModelCatalogAdapter implements ModelCatalogPort {
         signal: AbortSignal.timeout(this.timeoutMs),
       })
     } catch (error) {
-      throw new DeepSeekModelError("network", `DeepSeek model list request failed: ${formatError(error)}`)
+      throw new DeepSeekModelError("network", `Model catalog request failed: ${formatError(error)}`)
     }
     if (!response.ok) {
       throw new DeepSeekModelError(
         "response",
-        `DeepSeek model list request failed (${String(response.status)} ${response.statusText || "HTTP error"})`,
+        `Model catalog request failed (${String(response.status)} ${response.statusText || "HTTP error"})`,
       )
     }
     let raw: unknown

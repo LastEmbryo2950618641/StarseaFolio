@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import { ArrowLeft, ChevronRight, Plus, CheckCircle2, Eye, EyeOff, KeyRound, LoaderCircle, RefreshCw, Server, Trash2 } from "lucide-react"
 
 import type { ModelDescriptor, ModelListResult } from "@starseafolio/contracts"
@@ -37,6 +37,7 @@ type CatalogState = Readonly<{
   signature: string
   status: "loading" | "success" | "error"
   models: readonly ModelDescriptor[]
+  error?: string
 }>
 
 export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, onSave }: Props): React.JSX.Element {
@@ -53,50 +54,45 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   const [catalogs, setCatalogs] = useState<Readonly<Record<string, CatalogState>>>({})
   const selectedProfile = useMemo(() => drafts.find((profile) => profile.id === selectedId) ?? drafts[0], [drafts, selectedId])
   const selectedCatalog = selectedProfile === undefined ? undefined : catalogs[selectedProfile.id]
-  const deepSeekSelected = selectedProfile !== undefined && isOfficialDeepSeekEndpoint(selectedProfile.baseUrl)
+  const modelListId = useId()
+  const canLoadCatalog = selectedProfile !== undefined && hasValidBaseUrl(selectedProfile.baseUrl)
+    && (selectedProfile.hasApiKey || selectedProfile.apiKey.trim().length > 0)
   const savedKeyPending = selectedProfile !== undefined
     && selectedProfile.hasApiKey
     && selectedProfile.apiKey.trim().length === 0
   const apiKeyInputValue = savedKeyPending && !showApiKey ? SAVED_API_KEY_MASK : (selectedProfile?.apiKey ?? "")
 
-  const loadDeepSeekModels = useCallback(async (profile: ModelProfile): Promise<ModelListResult | undefined> => {
+  const loadModels = useCallback(async (profile: ModelProfile): Promise<ModelListResult> => {
     const signature = catalogSignature(profile)
     setCatalogs((current) => ({
       ...current,
       [profile.id]: { signature, status: "loading", models: [] },
     }))
-    setTestState("testing")
-    setMessage("正在从 DeepSeek 获取可用模型...")
     try {
       const result = await listModelCatalog({
         baseUrl: profile.baseUrl.trim(),
         credentialRef: profile.credentialRef,
         apiKey: profile.apiKey.trim(),
       })
-      if (result.models.length === 0) throw new Error("DeepSeek 未返回可用模型")
+      if (result.models.length === 0) throw new Error("服务未返回可用模型")
       setCatalogs((current) => current[profile.id]?.signature !== signature ? current : {
         ...current,
         [profile.id]: { signature, status: "success", models: result.models },
       })
-      const availableModelIds = new Set(result.models.map((model) => model.id))
       setDrafts((current) => current.map((item) => (
         item.id === profile.id
           && catalogSignature(item) === signature
-          && (item.model.trim().length === 0 || !availableModelIds.has(item.model.trim()))
+          && item.model.trim().length === 0
           ? { ...item, model: result.models[0]?.id ?? "" }
           : item
       )))
-      setTestState("success")
-      setMessage(`已从 DeepSeek 获取 ${String(result.models.length)} 个可用模型`)
       return result
     } catch (error) {
       setCatalogs((current) => current[profile.id]?.signature !== signature ? current : {
         ...current,
-        [profile.id]: { signature, status: "error", models: [] },
+        [profile.id]: { signature, status: "error", models: [], error: error instanceof Error ? error.message : String(error) },
       })
-      setTestState("error")
-      setMessage(error instanceof Error ? error.message : String(error))
-      return undefined
+      throw error
     }
   }, [])
 
@@ -117,13 +113,12 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   }, [selectedId])
 
   useEffect(() => {
-    if (showList || selectedProfile === undefined || !isOfficialDeepSeekEndpoint(selectedProfile.baseUrl)) return
-    if ((!selectedProfile.hasApiKey && selectedProfile.apiKey.trim().length === 0) || !hasValidBaseUrl(selectedProfile.baseUrl)) return
+    if (showList || selectedProfile === undefined || !canLoadCatalog) return
     const signature = catalogSignature(selectedProfile)
     if (selectedCatalog?.signature === signature) return
-    const timeout = window.setTimeout(() => { void loadDeepSeekModels(selectedProfile) }, 500)
+    const timeout = window.setTimeout(() => { void loadModels(selectedProfile).catch(() => {}) }, 500)
     return () => { window.clearTimeout(timeout) }
-  }, [loadDeepSeekModels, selectedCatalog?.signature, selectedProfile, showList])
+  }, [canLoadCatalog, loadModels, selectedCatalog?.signature, selectedProfile, showList])
 
   const updateSelected = (changes: Partial<Omit<ModelProfile, "id">>): void => {
     setDrafts((current) => current.map((profile) => profile.id === selectedId ? { ...profile, ...changes } : profile))
@@ -146,8 +141,8 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
       return "请输入有效的 Base URL"
     }
     if (requireModel && profile.model.trim().length === 0) return "请选择模型"
-    if (!Number.isInteger(profile.contextWindowTokens) || profile.contextWindowTokens <= 0 || profile.contextWindowTokens > 2_000_000) {
-      return "最大上下文必须是 1 到 2,000,000 之间的整数"
+    if (!Number.isSafeInteger(profile.contextWindowTokens) || profile.contextWindowTokens <= 0) {
+      return "最大上下文必须是有效的正整数"
     }
     if (profile.apiKey.trim().length === 0 && !profile.hasApiKey) return "请输入 API Key"
     return undefined
@@ -217,47 +212,42 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
   }
 
   const testConnection = async (): Promise<void> => {
-    const validationError = validate(selectedProfile, !deepSeekSelected)
-    if (validationError !== undefined) {
+    const validationError = validate(selectedProfile, false)
+    if (validationError !== undefined || selectedProfile === undefined) {
       setTestState("error")
-      setMessage(validationError)
-      return
-    }
-    if (selectedProfile !== undefined && deepSeekSelected) {
-      await loadDeepSeekModels(selectedProfile)
+      setMessage(validationError ?? "请选择模型配置")
       return
     }
     setTestState("testing")
-    setMessage("正在检查配置格式...")
-    await new Promise((resolve) => setTimeout(resolve, 650))
-    setTestState("success")
-    setMessage("配置格式有效；正式版本将由后端执行连接测试")
+    setMessage("正在获取可用模型...")
+    try {
+      const result = await loadModels(selectedProfile)
+      setTestState("success")
+      setMessage(`已获取 ${String(result.models.length)} 个可用模型`)
+    } catch (error) {
+      setTestState("error")
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
   }
 
-  const activateSelected = (): void => {
-    const validationError = validate(selectedProfile)
-    if (validationError !== undefined) {
+  const save = async (activateSelected: boolean): Promise<void> => {
+    if (saving) return
+    const profile = activateSelected || !showList ? selectedProfile : drafts.find((item) => item.id === nextActiveId)
+    const validationError = validate(profile)
+    if (validationError !== undefined || profile === undefined) {
       setTestState("error")
-      setMessage(validationError)
+      setMessage(validationError ?? "请选择模型配置")
+      if (showList) setShowList(false)
       return
     }
-    setNextActiveId(selectedProfile?.id ?? "")
-    setTestState("success")
-    setMessage(`已切换为 ${selectedProfile?.name ?? "当前配置"}，保存后生效`)
-  }
-
-  const save = async (): Promise<void> => {
-    const activeProfile = drafts.find((profile) => profile.id === nextActiveId)
-    const validationError = validate(activeProfile)
-    if (validationError !== undefined) {
-      if (activeProfile !== undefined) setSelectedId(activeProfile.id)
-      setTestState("error")
-      setMessage(`当前模型：${validationError}`)
-      return
-    }
+    const activeId = activateSelected ? profile.id : nextActiveId
     setSaving(true)
     try {
-      await onSave(drafts.map(normalizeProfile), nextActiveId)
+      await onSave(drafts.map(normalizeProfile), activeId)
+    } catch (error) {
+      setTestState("error")
+      setMessage(error instanceof Error ? error.message : String(error))
+      if (showList) setShowList(false)
     } finally {
       setSaving(false)
     }
@@ -387,18 +377,20 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
               </div>
             </label>
             <label className="model-field">
-              <span>模型<small>{deepSeekSelected ? "输入密钥后自动读取 DeepSeek 模型列表" : "输入兼容服务支持的模型名称"}</small></span>
-              {deepSeekSelected ? <div className="model-select-input">
-                <select value={selectedProfile.model} disabled={selectedCatalog?.status === "loading" || selectedCatalog?.models.length === 0} onChange={(event) => { updateSelected({ model: event.target.value }); }}>
-                  {selectedCatalog?.models.length === 0 || selectedCatalog === undefined ? <option value="">{selectedCatalog?.status === "loading" ? "正在获取模型..." : selectedCatalog?.status === "error" ? "获取模型失败" : "等待 API Key"}</option> : null}
-                  {selectedCatalog?.models.map((model) => <option value={model.id} key={model.id}>{model.id}</option>)}
-                </select>
-                <UiTooltip label="重新获取 DeepSeek 模型列表"><button type="button" aria-label="重新获取 DeepSeek 模型列表" disabled={(!selectedProfile.hasApiKey && selectedProfile.apiKey.trim().length === 0) || selectedCatalog?.status === "loading"} onClick={() => { void loadDeepSeekModels(selectedProfile) }}><RefreshCw size={14} /></button></UiTooltip>
-              </div> : <input value={selectedProfile.model} onChange={(event) => { updateSelected({ model: event.target.value }); }} placeholder="输入模型名称" spellCheck={false} />}
+              <span>模型<small>{selectedCatalog?.status === "loading" ? "正在获取模型…"
+                : selectedCatalog?.status === "error" ? "未能获取模型列表，可手动输入模型名称"
+                  : "从服务列表选择，或手动输入模型名称"}</small></span>
+              <div className="model-select-input">
+                <input list={modelListId} value={selectedProfile.model} onChange={(event) => { updateSelected({ model: event.target.value }); }} placeholder="输入或选择模型" spellCheck={false} />
+                <datalist id={modelListId}>
+                  {selectedCatalog?.models.map((model) => <option value={model.id} key={model.id} />)}
+                </datalist>
+                <UiTooltip label="重新获取模型列表"><button type="button" aria-label="重新获取模型列表" disabled={!canLoadCatalog || selectedCatalog?.status === "loading"} onClick={() => { void loadModels(selectedProfile).catch(() => {}) }}><RefreshCw size={14} /></button></UiTooltip>
+              </div>
             </label>
             <label className="model-field">
               <span>最大上下文<small>该模型单次请求支持的上下文容量，是压缩计算的唯一来源</small></span>
-              <input type="number" value={selectedProfile.contextWindowTokens} min={1} max={2_000_000} step={1000} onChange={(event) => { updateSelected({ contextWindowTokens: Number(event.target.value) }); }} />
+              <input type="number" value={selectedProfile.contextWindowTokens} min={1} step={1} onChange={(event) => { updateSelected({ contextWindowTokens: Number(event.target.value) }); }} />
             </label>
             <div className="model-field">
               <span>深度思考<small>使用当前协议支持的原生推理能力</small></span>
@@ -410,16 +402,6 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
                 <option value="none">无</option><option value="minimal">最小</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最大</option>
               </select>
             </label>
-            <label className="model-field">
-              <span>服务等级<small>兼容服务不支持时使用自动</small></span>
-              <select className="model-enum-select" value={selectedProfile.serviceTier} onChange={(event) => { updateSelected({ serviceTier: event.target.value as ModelProfile["serviceTier"] }); }}>
-                <option value="auto">自动</option><option value="default">默认</option><option value="flex">Flex</option><option value="priority">Priority</option><option value="fast">Fast</option>
-              </select>
-            </label>
-            <div className="model-field">
-              <span>服务端响应存储<small>关闭后仅保留 StarseaFolio 本地历史</small></span>
-              <button className={`model-toggle ${selectedProfile.disableResponseStorage ? "" : "enabled"}`} type="button" role="switch" aria-checked={!selectedProfile.disableResponseStorage} onClick={() => { updateSelected({ disableResponseStorage: !selectedProfile.disableResponseStorage }); }}><i /><strong>{selectedProfile.disableResponseStorage ? "已关闭" : "已开启"}</strong></button>
-            </div>
             <div className="model-field">
               <span>JSON Mode<small>默认开启，非强制；输出仍由业务 Schema 校验</small></span>
               <button className={`model-toggle ${selectedProfile.jsonModeEnabled ? "enabled" : ""}`} type="button" role="switch" aria-checked={selectedProfile.jsonModeEnabled} onClick={() => { updateSelected({ jsonModeEnabled: !selectedProfile.jsonModeEnabled }); }}><i /><strong>{selectedProfile.jsonModeEnabled ? "已开启" : "已关闭"}</strong></button>
@@ -433,9 +415,9 @@ export function ModelConfigurationDialog({ profiles, activeProfileId, onClose, o
       </div>
       <footer className="model-dialog-footer">
         <p>配置保存在应用中；API Key 单独保存在当前设备。</p>
-        {showList ? null : <><button className="secondary-command" onClick={() => void testConnection()} disabled={testState === "testing"}>{testState === "testing" ? "测试中..." : "测试连接"}</button>
-        <button className="secondary-command" onClick={activateSelected}>设为当前</button></>}
-        <button className="dialog-primary-command" onClick={() => void save()} disabled={saving}>{saving ? "保存中..." : "保存更改"}</button>
+        {showList ? null : <><button type="button" className="secondary-command" onClick={() => void testConnection()} disabled={saving || testState === "testing"}>{testState === "testing" ? "测试中..." : "测试连接"}</button>
+        <button type="button" className="secondary-command" onClick={() => void save(true)} disabled={saving}>设为当前</button></>}
+        <button className="dialog-primary-command" type="button" onClick={() => void save(false)} disabled={saving}>{saving ? "保存中..." : "保存更改"}</button>
       </footer>
       {showProviderSheet ? <MobileBottomSheet title="选择模型厂商" name="model-provider" onClose={() => { setShowProviderSheet(false) }}>
         <div className="model-provider-sheet" data-testid="model-provider-sheet">

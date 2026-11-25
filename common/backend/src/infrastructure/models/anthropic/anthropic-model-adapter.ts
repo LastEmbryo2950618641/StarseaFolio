@@ -11,6 +11,7 @@ import type {
   PromptResourcePort,
 } from "../../../application/index.js"
 import type { PhaseRequestEnvelope } from "@starseafolio/contracts"
+import { DISCUSS_PROVIDER_TOOLS } from "../../../application/chapters/discuss-provider-tools.js"
 import { renderRuntimePrompt } from "../../../core/runtime-prompt.js"
 
 import {
@@ -108,10 +109,17 @@ async function completeAnthropicMessages(
   const budgetTokens = thinkingBudgetTokens(input.reasoningEffort)
   const maxTokens = Math.max(input.maxTokens ?? DEFAULT_MAX_TOKENS, thinkingEnabled ? budgetTokens + 1_024 : 1)
 
+  const readTool = input.tools?.some((tool) => asRecord(asRecord(tool).function).name === "request_read") !== true
+    ? undefined : DISCUSS_PROVIDER_TOOLS.find((tool) => tool.function.name === "request_read")
   const body: Record<string, unknown> = {
     model: input.model,
     max_tokens: maxTokens,
     messages,
+    ...(readTool === undefined ? {} : { tools: [{
+      name: readTool.function.name,
+      description: readTool.function.description,
+      input_schema: readTool.function.parameters,
+    }] }),
     ...(system.length === 0 ? {} : { system }),
     ...(thinkingEnabled
       ? { thinking: { type: "enabled", budget_tokens: budgetTokens } }
@@ -152,11 +160,11 @@ async function completeAnthropicMessages(
   }
 
   if (input.onPartial !== undefined) {
-    return readAnthropicStream(response, input.onPartial)
+    return readAnthropicStream(response, input.onPartial, readTool !== undefined)
   }
 
   const payload = asRecord(await response.json())
-  return parseAnthropicMessagePayload(payload)
+  return parseAnthropicMessagePayload(payload, readTool !== undefined)
 }
 
 function toAnthropicMessages(
@@ -219,6 +227,7 @@ function thinkingBudgetTokens(
 async function readAnthropicStream(
   response: Response,
   onPartial: NonNullable<DeepSeekCompletionInput["onPartial"]>,
+  readToolOffered: boolean,
 ): Promise<DeepSeekCompletionResponse> {
   if (response.body === null) {
     throw new DeepSeekModelError("response", "Anthropic stream response body is empty")
@@ -232,6 +241,8 @@ async function readAnthropicStream(
   let finishReason: string | null | undefined
   let responseId: string | undefined
   let usage: unknown
+  const toolCalls = new Map<number, { name: string; initialInput: unknown; arguments: string }>()
+  let streamCompleted = false
 
   const handleEvent = (rawEvent: string): void => {
     const lines = rawEvent.split("\n")
@@ -257,6 +268,17 @@ async function readAnthropicStream(
       if (message.usage !== undefined) usage = message.usage
       return
     }
+    if (type === "content_block_start") {
+      const block = asRecord(payload.content_block)
+      if (block.type === "tool_use") {
+        if (!readToolOffered || block.name !== "request_read") {
+          throw new DeepSeekModelError("response", "Anthropic returned an unoffered native tool call")
+        }
+        if (typeof payload.index !== "number") throw new DeepSeekModelError("response", "Anthropic tool call index was missing")
+        toolCalls.set(payload.index, { name: block.name, initialInput: block.input, arguments: "" })
+      }
+      return
+    }
     if (type === "content_block_delta") {
       const delta = asRecord(payload.delta)
       const deltaType = readString(delta.type)
@@ -266,6 +288,11 @@ async function readAnthropicStream(
           content += text
           onPartial({ contentDelta: text })
         }
+      } else if (deltaType === "input_json_delta") {
+        const partialJson = readString(delta.partial_json)
+        const call = typeof payload.index === "number" ? toolCalls.get(payload.index) : undefined
+        if (call === undefined) throw new DeepSeekModelError("response", "Anthropic tool argument delta had no matching tool call")
+        if (partialJson !== undefined) call.arguments += partialJson
       } else if (deltaType === "thinking_delta") {
         const thinking = typeof delta.thinking === "string" ? delta.thinking : ""
         if (thinking.length > 0) {
@@ -283,6 +310,7 @@ async function readAnthropicStream(
     }
     if (type === "message_stop") {
       finishReason = finishReason ?? "end_turn"
+      streamCompleted = true
     }
   }
 
@@ -299,12 +327,18 @@ async function readAnthropicStream(
     }
   }
   if (buffer.trim().length > 0) handleEvent(buffer)
+  if (!streamCompleted) throw new DeepSeekModelError("response", "Anthropic stream ended before message_stop")
+  const completedCalls = [...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, call]) => ({
+    name: call.name,
+    arguments: call.arguments || JSON.stringify(call.initialInput ?? {}),
+  }))
 
   return {
     content: content.length === 0 ? null : content,
-    finishReason: finishReason ?? null,
+    finishReason: finishReason === "max_tokens" ? "length" : finishReason ?? null,
     ...(responseId === undefined ? {} : { responseId }),
     messageFieldNames: ["content", "thinking"],
+    ...(completedCalls.length === 0 ? {} : { toolCalls: completedCalls }),
     ...(reasoningContent.length === 0
       ? {}
       : { reasoningContent, reasoningKind: "provider_reasoning" as const }),
@@ -312,23 +346,33 @@ async function readAnthropicStream(
   }
 }
 
-function parseAnthropicMessagePayload(payload: Record<string, unknown>): DeepSeekCompletionResponse {
+function parseAnthropicMessagePayload(payload: Record<string, unknown>, readToolOffered: boolean): DeepSeekCompletionResponse {
   const contentBlocks = Array.isArray(payload.content) ? payload.content : []
   let content = ""
   let reasoningContent = ""
+  const toolCalls: Array<{ name: string; arguments: string }> = []
   for (const block of contentBlocks) {
     const record = asRecord(block)
     const type = readString(record.type)
     if (type === "text" && typeof record.text === "string") content += record.text
     if (type === "thinking" && typeof record.thinking === "string") reasoningContent += record.thinking
+    if (type === "tool_use") {
+      if (!readToolOffered || record.name !== "request_read") {
+        throw new DeepSeekModelError("response", "Anthropic returned an unoffered native tool call")
+      }
+      const name = readString(record.name)
+      if (name === undefined) throw new DeepSeekModelError("response", "Anthropic returned a tool call without a name")
+      toolCalls.push({ name, arguments: JSON.stringify(record.input ?? {}) })
+    }
   }
   const finishReason = readString(payload.stop_reason) ?? null
   const responseId = readString(payload.id)
   return {
     content: content.length === 0 ? null : content,
-    finishReason,
+    finishReason: finishReason === "max_tokens" ? "length" : finishReason,
     ...(responseId === undefined ? {} : { responseId }),
     messageFieldNames: Object.keys(payload),
+    ...(toolCalls.length === 0 ? {} : { toolCalls }),
     ...(reasoningContent.length === 0
       ? {}
       : { reasoningContent, reasoningKind: "provider_reasoning" as const }),

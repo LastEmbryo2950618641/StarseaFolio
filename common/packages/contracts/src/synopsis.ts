@@ -7,6 +7,7 @@ import {
   turnDeductionGoalBundleSchema,
 } from "./deduction-goals.js"
 import { idSchema } from "./ids.js"
+import { volumeLifecycleSchema } from "./volume-lifecycle.js"
 import { chapterArtifactContentStateSchema } from "./common.js"
 
 export const chapterSynopsisSourceSchema = z.enum([
@@ -117,6 +118,7 @@ export const synopsisConversationSessionSchema = z.object({
   turnBootstrapInput: z.string().optional(),
   synopsisConfirmedAtMs: z.number().int().nonnegative().optional(),
   focusKind: discussFocusKindSchema.default("plot_synopsis"),
+  volumeLifecycle: volumeLifecycleSchema.optional(),
   status: z.enum(["active", "completed"]),
   createdAtMs: z.number().int().nonnegative(),
   updatedAtMs: z.number().int().nonnegative(),
@@ -274,9 +276,9 @@ export function resolveDiscussPipelineStage(input: Readonly<{
 /** Short Chinese labels for auto-continue copy (keep in sync with UI stage names). */
 export const DISCUSS_PIPELINE_STAGE_LABELS: Record<DiscussProceedStage, string> = {
   chapter_requirements: "新章要求",
-  synopsis_discuss: "梗概",
-  outline_discuss: "细纲",
-  draft_discuss: "草稿",
+  synopsis_discuss: "构思",
+  outline_discuss: "构思",
+  draft_discuss: "正文确认",
   body_discuss: "正文确认",
 }
 

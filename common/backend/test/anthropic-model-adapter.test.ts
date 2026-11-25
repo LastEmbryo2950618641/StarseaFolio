@@ -83,6 +83,53 @@ describe("AnthropicMessagesModelAdapter", () => {
     expect(typeof capturedBody?.system).toBe("string")
   })
 
+  it.each([false, true])("offers and assembles native request_read over Anthropic Messages (stream=%s)", async (stream) => {
+    const request = createRequest({ phase: "synopsis_discuss", promptRef: "v1:synopsis_discuss" })
+    const args = JSON.stringify({ reads: [{ reason: "核对旧站台设定", expectedEvidence: "站台资料", query: {
+      exactKeys: ["旧站台"], sourceKinds: ["reference"],
+    } }] })
+    let body: Record<string, unknown> | undefined
+    const fetchImpl = async (_url: string, init?: { body?: string }) => {
+      body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>
+      if (stream) {
+        const events = [
+          { type: "message_start", message: { id: "msg_read", usage: { input_tokens: 10 } } },
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "我先核对资料。" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "我先核对资料。" } },
+          { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "tool_read", name: "request_read", input: {} } },
+          { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: args } },
+          { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 4 } },
+          { type: "message_stop" },
+        ]
+        const streamBody = new ReadableStream({ start(controller) {
+          for (const event of events) controller.enqueue(new TextEncoder().encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`))
+          controller.close()
+        } })
+        return new Response(streamBody, { status: 200, headers: { "content-type": "text/event-stream" } })
+      }
+      return Response.json({ id: "msg_read", stop_reason: "tool_use", usage: { input_tokens: 10, output_tokens: 4 },
+        content: [{ type: "text", text: "我先核对资料。" }, { type: "tool_use", id: "tool_read", name: "request_read", input: JSON.parse(args) }],
+      })
+    }
+    const adapter = new AnthropicMessagesModelAdapter({
+      ...defaultDeepSeekRuntimeConfig, apiProtocol: "anthropic_messages", baseUrl: "https://api.anthropic.com",
+      model: "claude-sonnet-4-5", maxAttempts: 1, maxSchemaRepairAttempts: 0,
+    }, { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot), fetchImpl)
+    const partial = [] as string[]
+    const execution = await adapter.execute(request, {
+      outputMode: "text",
+      ...(stream ? { onPartial: (event) => { if (event.contentDelta) partial.push(event.contentDelta) } } : {}),
+    })
+    expect((body?.tools as Array<{ name: string }>).map(tool => tool.name)).toEqual(["request_read"])
+    expect(execution.result.outcome).toBe("request_read")
+    expect(execution.result.artifact).toMatchObject({ assistantMessage: "我先核对资料。" })
+    expect(execution.result.requestedReads).toMatchObject([{
+      reason: "核对旧站台设定", expectedEvidence: "站台资料", query: { exactKeys: ["旧站台"], sourceKinds: ["reference"] },
+    }])
+    expect(execution.result.requestedReads[0]?.requestId).toMatch(/^[0-9a-f-]{36}$/i)
+    if (stream) expect(partial.join("")).toBe("我先核对资料。")
+  })
+
   it("createModelFromSelection routes anthropic_messages to Anthropic adapter", () => {
     const adapter = createModelFromSelection(promptRoot, {
       baseUrl: "https://api.anthropic.com",

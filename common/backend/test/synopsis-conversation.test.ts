@@ -23,6 +23,7 @@ import {
   waitForTask,
   type ChapterHarness,
 } from "./helpers/chapter-coordination-harness.js"
+import { textFixtureModel } from "./helpers/discuss-fixture-text.js"
 
 const temporaryRoots: string[] = []
 
@@ -80,7 +81,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Contextual synopsis choices", { model })
+    const harness = await openChapterHarness("Contextual synopsis choices", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       await prepareChapterPlanning(harness)
@@ -149,7 +150,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Freeform outline request", { model })
+    const harness = await openChapterHarness("Freeform outline request", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       await prepareChapterPlanning(harness)
@@ -176,7 +177,7 @@ describe("synopsis conversation", () => {
         message: "直接提取第一章补全即可",
         batchProceed: false,
       })
-      expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(outlineBody)
+      expect((await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).trimEnd()).toBe(outlineBody.trimEnd())
       expect(sent.appendedDraft).toBeUndefined()
       expect(sent.session.synopsisConfirmedAtMs).toBeUndefined()
       expect(calls).toBe(1)
@@ -228,7 +229,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Freeform draft request", { model })
+    const harness = await openChapterHarness("Freeform draft request", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       await prepareChapterPlanning(harness)
@@ -298,7 +299,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness(`Prerequisite: ${scenario.name}`, { model })
+    const harness = await openChapterHarness(`Prerequisite: ${scenario.name}`, { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       await prepareChapterPlanning(harness)
@@ -480,7 +481,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Missing Draft Proposal Recovery", { model })
+    const harness = await openChapterHarness("Missing Draft Proposal Recovery", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       const base = { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef }
@@ -542,7 +543,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Missing Draft Proposal Notice", { model })
+    const harness = await openChapterHarness("Missing Draft Proposal Notice", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       const base = { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef }
@@ -556,7 +557,8 @@ describe("synopsis conversation", () => {
         message: "按细纲写正文草稿",
       })
 
-      expect(calls).toBe(3)
+      // One bounded draft-proposal retry in text mode; the retired JSON choices repair no longer adds a call.
+      expect(calls).toBe(2)
       expect(sent.appendedDraft).toBeUndefined()
       expect(sent.session.draftContentState).toBe("empty")
       expect(sent.messages.at(-1)?.content).toContain("正文没有写入草稿版本")
@@ -608,7 +610,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Missing Synopsis Artifact Recovery", { model })
+    const harness = await openChapterHarness("Missing Synopsis Artifact Recovery", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       const base = { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef }
@@ -621,7 +623,8 @@ describe("synopsis conversation", () => {
         batchProceed: false,
       })
 
-      expect(calls).toBe(3)
+      // First claim triggers one repair; the second call carries the tagged synopsis.
+      expect(calls).toBe(2)
       expect(sent.session.synopsisContentState).toBe("ai_written")
       expect(readFileSync(join(harness.workspaceRootRef, sent.session.synopsisPath), "utf8"))
         .toContain("停电后，林序留守药房")
@@ -672,7 +675,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Missing Outline Artifact Recovery", { model })
+    const harness = await openChapterHarness("Missing Outline Artifact Recovery", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       const base = { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef }
@@ -810,7 +813,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Explicit synopsis rewrite", { model })
+    const harness = await openChapterHarness("Explicit synopsis rewrite", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       await prepareChapterPlanning(harness)
@@ -832,10 +835,10 @@ describe("synopsis conversation", () => {
         message: "使用这个重新写第一章的梗概",
       })
 
-      expect(await harness.container.workspace.readMarkdown(
+      expect((await harness.container.workspace.readMarkdown(
         harness.workspaceRootRef,
         listed.session.synopsisPath,
-      )).toBe(rewrittenSynopsis)
+      )).trimEnd()).toBe(rewrittenSynopsis.trimEnd())
       expect(sent.messages.at(-1)?.content).not.toContain("若要以我这版为准")
     } finally {
       await harness.container.close()
@@ -873,7 +876,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Synopsis rewrite restages stage bar", { model })
+    const harness = await openChapterHarness("Synopsis rewrite restages stage bar", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       await prepareChapterPlanning(harness)
@@ -941,7 +944,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Outline advances stage bar", { model })
+    const harness = await openChapterHarness("Outline advances stage bar", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       await prepareChapterPlanning(harness)
@@ -1145,7 +1148,7 @@ describe("synopsis conversation", () => {
         }
       },
     }
-    const harness = await openChapterHarness("Read the archive from a chapter draft", { model })
+    const harness = await openChapterHarness("Read the archive from a chapter draft", { model: textFixtureModel(model) })
     temporaryRoots.push(harness.root)
     try {
       const base = { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef }

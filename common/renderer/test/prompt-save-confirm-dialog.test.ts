@@ -17,7 +17,7 @@ function renderDialog(path: string): string {
 
 describe("PromptSaveConfirmDialog", () => {
   it("explains the global prompt-library impact and offers confirm/cancel", () => {
-    const html = renderDialog("提示词/系统规则/写作基调.md")
+    const html = renderDialog("提示词/基础规则/系统提示词/写作基调.md")
 
     expect(html).toContain('role="dialog"')
     expect(html).toContain('aria-modal="true"')
@@ -25,8 +25,8 @@ describe("PromptSaveConfirmDialog", () => {
     expect(html).toContain(PROMPT_SAVE_CONFIRM_MESSAGE)
     expect(html).toContain("保存并生效")
     expect(html).toContain("取消")
-    expect(html).toContain("提示词/系统规则/写作基调.md")
-    expect(html).toContain("全局提示词库 · 系统规则")
+    expect(html).toContain("提示词/基础规则/系统提示词/写作基调.md")
+    expect(html).toContain("全局提示词库 · 基础规则 · 系统提示词")
     expect(html).toContain('data-testid="prompt-save-confirm"')
     expect(html).toContain('data-testid="prompt-save-cancel"')
   })

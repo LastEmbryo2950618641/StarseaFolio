@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import {
+  displayGateAuto,
+  displayStageForProceedStage,
   loadCustomProceedGates,
   loadProceedMode,
   persistCustomProceedGates,
   persistProceedMode,
+  PROCEED_DISPLAY_STAGE_LABELS,
   PROCEED_MODE_OPTIONS,
 } from "../src/features/editor/proceed-mode.js"
 
@@ -71,5 +74,33 @@ describe("creation-desk proceed mode storage", () => {
       draft_discuss: false,
       body_discuss: true,
     })
+  })
+
+  it("merges synopsis, outline and draft into one 构思 display gate", () => {
+    expect(displayStageForProceedStage("synopsis_discuss")).toBe("compose_discuss")
+    expect(displayStageForProceedStage("outline_discuss")).toBe("compose_discuss")
+    expect(displayStageForProceedStage("draft_discuss")).toBe("body_discuss")
+    expect(PROCEED_DISPLAY_STAGE_LABELS.compose_discuss).toBe("构思")
+    expect(PROCEED_MODE_OPTIONS.find((option) => option.value === "precise")?.hint).toContain("草稿")
+    expect(PROCEED_MODE_OPTIONS.find((option) => option.value === "single")?.hint).toContain("草稿")
+    expect(PROCEED_MODE_OPTIONS.find((option) => option.value === "custom")?.hint).toContain("三个节点")
+  })
+
+  it("auto-advances the merged compose gate only when all three materials are automatic", () => {
+    expect(displayGateAuto({ stage: "compose_discuss", mode: "single" })).toBe(true)
+    expect(displayGateAuto({ stage: "compose_discuss", mode: "precise" })).toBe(false)
+    expect(displayGateAuto({ stage: "compose_discuss", mode: "batch" })).toBe(true)
+    const base = {
+      chapter_requirements: true,
+      synopsis_discuss: true,
+      outline_discuss: true,
+      draft_discuss: true,
+      body_discuss: false,
+    }
+    expect(displayGateAuto({ stage: "compose_discuss", mode: "custom", customGates: base })).toBe(true)
+    expect(displayGateAuto({
+      stage: "compose_discuss", mode: "custom",
+      customGates: { ...base, draft_discuss: false },
+    })).toBe(false)
   })
 })

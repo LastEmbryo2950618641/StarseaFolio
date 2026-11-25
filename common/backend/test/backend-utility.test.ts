@@ -150,11 +150,19 @@ describe("backend utility runtime", () => {
           thinkingModeEnabled: true,
           reasoningEffort: "low",
           jsonModeEnabled: false,
+        }, {
+          id: "custom",
+          name: "自定义服务",
+          baseUrl: "https://example.test/v1",
+          model: "manual-model-id",
+          credentialRef: "model-profile:custom",
+          apiProtocol: "openai_responses",
+          contextWindowTokens: 3_000_000,
         }],
-        activeProfileId: "deepseek-primary",
+        activeProfileId: "custom",
       },
     })
-    expect(saved.ok).toBe(true)
+    expect(saved.ok, saved.ok ? undefined : JSON.stringify(saved.error)).toBe(true)
     await firstFacade.close()
 
     const reopenedFacade = new BackendFacade(await BackendContainer.open({
@@ -184,8 +192,21 @@ describe("backend utility runtime", () => {
         jsonModeEnabled: false,
         disableResponseStorage: true,
         serviceTier: "auto",
+      }, {
+        id: "custom",
+        name: "自定义服务",
+        baseUrl: "https://example.test/v1",
+        model: "manual-model-id",
+        credentialRef: "model-profile:custom",
+        apiProtocol: "openai_responses",
+        contextWindowTokens: 3_000_000,
+        thinkingModeEnabled: true,
+        reasoningEffort: "high",
+        jsonModeEnabled: true,
+        disableResponseStorage: true,
+        serviceTier: "auto",
       }],
-      activeProfileId: "deepseek-primary",
+      activeProfileId: "custom",
     })
   })
 

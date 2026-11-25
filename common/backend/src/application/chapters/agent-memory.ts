@@ -1,6 +1,6 @@
 /** Codex-style progressive agent memory under the project workspace. */
 
-export const AGENT_MEMORY_ROOT = "世界推演规则/Agent记忆" as const
+export const AGENT_MEMORY_ROOT = "提示词/系统记忆/系统提示词" as const
 export const AGENT_MEMORY_INDEX_PATH = `${AGENT_MEMORY_ROOT}/MEMORY.md` as const
 
 /** Match Codex MEMORY.md startup budget: first 200 lines or 25KB. */

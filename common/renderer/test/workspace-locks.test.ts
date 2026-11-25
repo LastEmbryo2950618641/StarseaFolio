@@ -36,10 +36,10 @@ describe("workspace locks", () => {
     expect(canCreateFolderInDirectory("章节正文")).toBe(true)
     expect(canCreateFolderInDirectory("章节正文/第一卷 测试")).toBe(false)
     expect(canCreateMarkdownInDirectory("世界推演规则/基础规则")).toBe(false)
-    expect(resolveWorkspaceLockKind("世界推演规则/Agent记忆")).toBe("immutable_scaffold")
-    expect(resolveWorkspaceLockKind("世界推演规则/Agent记忆/MEMORY.md")).toBe("immutable_scaffold")
-    expect(canCreateMarkdownInDirectory("世界推演规则/Agent记忆")).toBe(true)
-    expect(canCreateFolderInDirectory("世界推演规则/Agent记忆")).toBe(false)
+    expect(resolveWorkspaceLockKind("提示词/系统记忆/系统提示词")).toBeUndefined()
+    expect(resolveWorkspaceLockKind("提示词/系统记忆/系统提示词/MEMORY.md")).toBeUndefined()
+    expect(canCreateMarkdownInDirectory("提示词/系统记忆/系统提示词")).toBe(true)
+    expect(canCreateFolderInDirectory("提示词/系统记忆/系统提示词")).toBe(true)
     expect(resolveCreateDestination("设定集/人物/顾青衡.md")).toBe("设定集/人物")
     expect(resolveCreateDestination("世界推演规则/基础规则/base-rules.md")).toBe("设定集")
     expect(resolveCreateDestination("表现输出/笔风规则")).toBe("表现输出/笔风规则")
@@ -47,19 +47,19 @@ describe("workspace locks", () => {
 
   it("treats the prompt library as editable but keeps prompt files from being deleted", () => {
     expect(resolveWorkspaceLockKind("提示词")).toBeUndefined()
-    expect(resolveWorkspaceLockKind("提示词/系统规则")).toBeUndefined()
-    expect(resolveWorkspaceLockKind("提示词/系统规则/写作基调.md")).toBeUndefined()
+    expect(resolveWorkspaceLockKind("提示词/基础规则/系统提示词")).toBeUndefined()
+    expect(resolveWorkspaceLockKind("提示词/基础规则/系统提示词/写作基调.md")).toBeUndefined()
     expect(resolveWorkspaceLockKind("世界推演规则/总览.md")).toBe("immutable_scaffold")
     expect(resolveWorkspaceLockKind("世界推演规则/基础规则")).toBe("immutable_scaffold")
     expect(canCreateMarkdownInDirectory("提示词")).toBe(false)
-    expect(canCreateMarkdownInDirectory("提示词/系统规则")).toBe(false)
+    expect(canCreateMarkdownInDirectory("提示词/基础规则/系统提示词")).toBe(false)
     expect(canCreateFolderInDirectory("提示词")).toBe(false)
-    expect(canCreateFolderInDirectory("提示词/运行时提示")).toBe(false)
+    expect(canCreateFolderInDirectory("提示词/用户规则/阶段提示词/梗概阶段")).toBe(false)
     expect(canCreateMarkdownInDirectory("世界推演规则/基础规则")).toBe(false)
-    expect(canDeleteWorkspacePath("提示词/系统规则/写作基调.md")).toBe(false)
+    expect(canDeleteWorkspacePath("提示词/基础规则/系统提示词/写作基调.md")).toBe(false)
     expect(canDeleteWorkspacePath("世界推演规则/基础规则/base-rules.md")).toBe(false)
     expect(canDeleteWorkspacePath("世界推演规则/总览.md")).toBe(false)
-    expect(resolveCreateDestination("提示词/系统规则/写作基调.md")).toBe("设定集")
+    expect(resolveCreateDestination("提示词/基础规则/系统提示词/写作基调.md")).toBe("设定集")
     expect(resolveCreateDestination("提示词")).toBe("设定集")
   })
 
@@ -111,10 +111,10 @@ describe("workspace locks", () => {
         { path: "世界推演规则/基础规则", kind: "directory" },
         { path: "世界推演规则/基础规则/base-rules.md", kind: "file" },
         { path: "提示词", kind: "directory" },
-        { path: "提示词/系统规则", kind: "directory" },
-        { path: "提示词/系统规则/写作基调.md", kind: "file" },
+        { path: "提示词/基础规则/系统提示词", kind: "directory" },
+        { path: "提示词/基础规则/系统提示词/写作基调.md", kind: "file" },
       ],
-      selectedPath: "提示词/系统规则/写作基调.md",
+      selectedPath: "提示词/基础规则/系统提示词/写作基调.md",
       onSelect: () => {},
       onSelectLineage: () => {},
       onRefresh: () => {},
@@ -124,8 +124,8 @@ describe("workspace locks", () => {
     }))
     expect(html).not.toContain("平台只读")
     expect(html).not.toContain("tree-row-lock")
-    expect(html).toContain('aria-label="写作基调.md（提示词）"')
-    expect(html).not.toContain('aria-label="在 系统规则 下新建 Markdown"')
+    expect(html).toContain('aria-label="写作基调.md（系统）"')
+    expect(html).not.toContain('aria-label="在 系统提示词 下新建 Markdown"')
     expect(html).not.toContain('aria-label="在 提示词 下新建文件夹"')
     expect(html).not.toContain('aria-label="删除 写作基调.md"')
   })

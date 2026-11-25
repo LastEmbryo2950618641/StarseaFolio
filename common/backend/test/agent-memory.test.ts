@@ -14,14 +14,14 @@ describe("agent memory helpers", () => {
   it("recognizes Agent记忆 paths", () => {
     expect(isAgentMemoryPath(AGENT_MEMORY_INDEX_PATH)).toBe(true)
     expect(isAgentMemoryIndexPath(AGENT_MEMORY_INDEX_PATH)).toBe(true)
-    expect(isAgentMemoryPath("世界推演规则/Agent记忆/preferences.md")).toBe(true)
+    expect(isAgentMemoryPath("提示词/系统记忆/系统提示词/preferences.md")).toBe(true)
     expect(isAgentMemoryPath("设定集/readme.md")).toBe(false)
   })
 
   it("resolves topic filenames under Agent记忆", () => {
-    expect(resolveAgentMemoryTopicPath("preferences.md")).toBe("世界推演规则/Agent记忆/preferences.md")
-    expect(resolveAgentMemoryTopicPath("世界推演规则/Agent记忆/纠错.md"))
-      .toBe("世界推演规则/Agent记忆/纠错.md")
+    expect(resolveAgentMemoryTopicPath("preferences.md")).toBe("提示词/系统记忆/系统提示词/preferences.md")
+    expect(resolveAgentMemoryTopicPath("提示词/系统记忆/系统提示词/纠错.md"))
+      .toBe("提示词/系统记忆/系统提示词/纠错.md")
     expect(() => resolveAgentMemoryTopicPath("MEMORY.md")).toThrow(/不能覆盖 MEMORY/)
     expect(() => resolveAgentMemoryTopicPath("../逃逸.md")).toThrow()
     expect(() => resolveAgentMemoryTopicPath("nested/file.md")).toThrow(/单层/)

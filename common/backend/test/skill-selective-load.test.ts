@@ -32,7 +32,7 @@ describe("skill selective loading", () => {
     expect(overview.text).toContain("你负责虚构小说的创作与续写")
     expect(system.text).not.toContain("平台 Skill 索引")
     expect(discussSystem.text).toContain("平台 Skill 索引")
-    expect(system.text).not.toContain("# 去 AI 味（deslop）")
+    expect(system.text).toContain("# 去 AI 味（deslop）")
     expect(system.text).toContain("不得把明确意思改写成抽象概念、象征或口号")
     expect(system.text).toContain("使用现代中文，不擅自转成古白话、文言句法或仿古腔")
     expect(system.text).toContain("把人变成规矩")
@@ -66,7 +66,7 @@ describe("skill selective loading", () => {
     }
 
     const draftPack = await adapter.loadDefaultSkillPack("draft")
-    expect(defaultSkillIdsForPhase("draft")).toEqual(["webnovel-deslop", "webnovel-dialogue", "outline-to-draft"])
+    expect(defaultSkillIdsForPhase("draft")).toEqual(["outline-to-draft"])
     for (const id of defaultSkillIdsForPhase("draft")) {
       expect(draftPack.text).toContain(`【skill:${id}】`)
     }
