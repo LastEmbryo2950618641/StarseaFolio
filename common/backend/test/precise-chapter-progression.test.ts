@@ -264,12 +264,12 @@ describe("precise chapter progression", () => {
     }
   })
 
-  it("still allows precise ordinary text to revise an existing draft in place", async () => {
+  it.each([false, true])("revises an existing draft in place even when routing also requests synopsis (extra=%s)", async (extra) => {
     const classifyCalls: string[] = []
     const discussCalls: DiscussCall[] = []
     let replies = 0
     const model = createPreciseModel({
-      classifier: () => ({ draft: "write" }),
+      classifier: () => extra ? { synopsis: "rewrite", draft: "write" } : { draft: "write" },
       classifyCalls,
       discussCalls,
       reply: () => {

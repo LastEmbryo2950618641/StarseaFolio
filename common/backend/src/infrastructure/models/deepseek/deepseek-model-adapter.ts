@@ -693,16 +693,23 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
             ...(readTools.length === 0 ? {} : { tools: readTools, tool_choice: "auto" as const }),
           } as OpenAI.Responses.ResponseCreateParamsNonStreaming
           const requestOptions = input.signal === undefined ? undefined : { signal: input.signal }
-          if (readTools.length > 0 && input.onPartial !== undefined) {
+          if (input.onPartial !== undefined) {
             const stream = await client.responses.create({ ...body, stream: true }, requestOptions)
+            const eventCounts = new Map<string, number>()
             for await (const event of stream) {
+              eventCounts.set(event.type, (eventCounts.get(event.type) ?? 0) + 1)
               if (event.type === "response.output_text.delta") {
                 input.onPartial({ contentDelta: event.delta })
               } else if (event.type === "response.reasoning_summary_text.delta") {
                 input.onPartial({ reasoningDelta: event.delta })
+              } else if (String(event.type) === "response.reasoning_text.delta") {
+                // DeepSeek sends raw reasoning using an extension absent from the OpenAI SDK union.
+                const delta = asRecord(event).delta
+                if (typeof delta === "string" && delta.length > 0) input.onPartial({ reasoningDelta: delta })
               } else if (event.type === "response.completed") {
                 // The terminal response includes the fully assembled function arguments for every output item.
-                return readResponsesCompletion(event.response, true)
+                runtimeLog("debug", "deepseek-model", "responses.stream_events", { eventCounts: Object.fromEntries(eventCounts) })
+                return readResponsesCompletion(event.response, readTools.length > 0)
               } else if (event.type === "error" || event.type === "response.failed" || event.type === "response.incomplete") {
                 throw new Error(`OpenAI Responses stream ended with ${event.type}`)
               }

@@ -1391,9 +1391,10 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
   })()
   const processSummary = summarizeAgentProcess(processSegments, { compacting, chapterIngest })
   const backgroundActive = compacting || chapterIngest !== undefined
-  const processActive = processSummary.active || backgroundActive
-  const showProcessPanel = processSegments.length > 0 || (streaming && backgroundActive)
-  const showThinkingPlaceholder = !hasAny && streaming && !backgroundActive
+  const thinkingLive = streaming && discussPhase === "generating" && !backgroundActive
+  const processActive = processSummary.active || backgroundActive || thinkingLive
+  const showProcessPanel = processSegments.length > 0 || processActive
+  const showThinkingPlaceholder = thinkingLive && lastThinkingIndex < 0
   return <div className="agent-structured-body">
     {showProcessPanel
       ? <LazyOpenDetails
@@ -1417,9 +1418,12 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
               segment,
               index,
               streaming,
-              lastThinkingIndex,
+              lastThinkingIndex: thinkingLive ? lastThinkingIndex : -1,
               ...(onOpenSettingsLineage === undefined ? {} : { onOpenSettingsLineage }),
             }))}
+            {showThinkingPlaceholder
+              ? <div className="agent-stream-block thinking muted"><span>thinking</span><p className="creation-desk-pending">深度思考中…</p></div>
+              : null}
             {renderBackgroundActivityBlocks({ compacting, chapterIngest })}
           </div>
         </LazyOpenDetails>
@@ -1467,24 +1471,7 @@ const AgentStructuredBody = memo(function AgentStructuredBody({
           : null}
       </div>
     })}
-    {showThinkingPlaceholder
-      ? <>
-          <LazyOpenDetails
-            className="agent-stream-activity is-live"
-            testId="agent-stream-activity"
-            summary={<>
-              <ChevronRight size={14} aria-hidden="true" />
-              <span className="agent-stream-activity-title">思考与工具</span>
-              <em>进行中</em>
-            </>}
-          >
-            <div className="agent-stream-activity-body">
-              <div className="agent-stream-block thinking muted"><span>thinking</span><p className="creation-desk-pending">深度思考中…</p></div>
-            </div>
-          </LazyOpenDetails>
-          <p className="creation-desk-pending">正在生成正式回复…</p>
-        </>
-      : null}
+    {showThinkingPlaceholder ? <p className="creation-desk-pending">正在生成正式回复…</p> : null}
     {!hasAny && streaming && backgroundActive && discussPhase !== "idle" && discussPhase !== "finalizing"
       ? <p className="creation-desk-pending">后台任务进行中；正式回复稍后给出…</p>
       : null}
@@ -1725,9 +1712,7 @@ function buildLiveTimeline(
     searching: stream.searching,
     toolRuns: stream.toolRuns,
     editing: stream.editing,
-    content: contentPreview ?? extractAssistantPreview(stream.content) ?? (stream.content.trimStart().startsWith("{")
-      ? undefined
-      : stream.content),
+    content: contentPreview,
   })
   const progress = inspectDiscussStreamPayload(stream.content)
   const showResulting = discussPhase !== "idle" && (
@@ -1915,12 +1900,22 @@ function extractJsonStringField(raw: string, field: string): string | undefined 
   }
 }
 
+function stripDiscussPreviewProtocol(raw: string): string {
+  // These blocks are processed by the host after the reply completes. Hide an
+  // open block and partial tags too, as a snapshot can end inside either one.
+  return raw
+    .replace(/<(goal-proposals|creative-choices|tool-request|work-title|work-description)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gu, "")
+    .replace(/<\/?(?:goal-proposals|creative-choices|tool-request|compose-intent|work-title|work-description|continue-turn)\b[^>]*(?:>|$)/gu, "")
+    .replace(/<\/?[a-z][a-z-]*$/iu, "")
+}
+
 function extractAssistantPreview(raw: string | undefined): string | undefined {
   if (raw === undefined || raw.trim().length === 0) return undefined
   const match = raw.match(/"assistantMessage"\s*:\s*"((?:\\.|[^"\\])*)"/u)
   if (match?.[1] === undefined) {
     if (raw.trimStart().startsWith("{")) return undefined
-    return raw
+    const preview = stripDiscussPreviewProtocol(raw)
+    return preview.trim().length === 0 ? undefined : preview
   }
   try {
     return JSON.parse(`"${match[1]}"`) as string

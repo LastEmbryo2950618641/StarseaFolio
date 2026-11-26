@@ -440,6 +440,20 @@ describe("renderer workbench UI contract", () => {
     expect(html).not.toMatch(/agent-stream-activity[^>]*\sopen/)
   })
 
+  it("hides completed and partially streamed protocol blocks from the discussion preview", () => {
+    const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({
+      synopsisBusy: true,
+      synopsisStream: {
+        status: "running", thinking: "", thinkingRounds: [], searching: [], editing: [],
+        toolRuns: [], todos: [], compacting: false, updatedAtMs: 1,
+        content: "可见预览\n<goal-proposals>内部目标数据</goal-proposals>\n<creative-choices>流式内部选项",
+      },
+    })))
+
+    expect(html).toContain("可见预览")
+    expect(html).not.toMatch(/goal-proposals|creative-choices|内部目标数据|流式内部选项/u)
+  })
+
   it("renders a searchable chapter focus bar on the creation desk", () => {
     const html = renderToStaticMarkup(React.createElement(EditorArea, editorDefaults({
       synopsisSession: {

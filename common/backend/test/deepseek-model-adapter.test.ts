@@ -1836,6 +1836,62 @@ describe("DeepSeekAiModelAdapter", () => {
     }
   })
 
+  it("forwards Responses reasoning deltas before completion without read tools", async () => {
+    const phaseRequest = createRequest()
+    const fake = await new FakeAiModelAdapter(randomUUID).execute(phaseRequest)
+    const outputText = JSON.stringify(toModelResult(fake.result))
+    let streamed = false
+    let finish: (() => void) | undefined
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = []
+      request.on("data", (chunk: Buffer) => { chunks.push(chunk) })
+      request.on("end", () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>
+        streamed = body.stream === true && body.tools === undefined
+        const completed = { id: "resp_stream", status: "completed", output_text: outputText }
+        if (body.stream !== true) {
+          response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(completed))
+          return
+        }
+        response.writeHead(200, { "content-type": "text/event-stream" })
+        const emit = (event: { type: string; delta?: string; response?: typeof completed }) => {
+          response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+        }
+        finish = () => {
+          emit({ type: "response.reasoning_text.delta", delta: "第二段" })
+          emit({ type: "response.output_text.delta", delta: outputText })
+          emit({ type: "response.completed", response: completed })
+          response.end()
+        }
+        emit({ type: "response.reasoning_summary_text.delta", delta: "第一段" })
+      })
+    })
+    await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve) })
+    const { port } = server.address() as AddressInfo
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, apiProtocol: "openai_responses", baseUrl: `http://127.0.0.1:${String(port)}`, maxAttempts: 1 },
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot),
+    )
+    const onPartial = vi.fn()
+    const abort = new AbortController()
+    const pending = adapter.execute(phaseRequest, { onPartial, signal: abort.signal })
+    void pending.catch(() => undefined)
+    try {
+      await vi.waitFor(() => { expect(onPartial).toHaveBeenCalledWith({ reasoningDelta: "第一段" }) })
+      expect(streamed).toBe(true)
+      expect(onPartial.mock.calls).toEqual([[{ reasoningDelta: "第一段" }]])
+      finish?.()
+      await pending
+      expect(onPartial.mock.calls).toEqual([
+        [{ reasoningDelta: "第一段" }], [{ reasoningDelta: "第二段" }], [{ contentDelta: outputText }],
+      ])
+    } finally {
+      abort.abort()
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
+    }
+  })
+
   it("uses the OpenAI Responses protocol with vendor-default storage and service tier", async () => {
     const phaseRequest = createRequest()
     const fake = await new FakeAiModelAdapter(randomUUID).execute(phaseRequest)

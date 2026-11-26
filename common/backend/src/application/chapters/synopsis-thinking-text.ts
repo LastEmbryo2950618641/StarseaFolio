@@ -35,7 +35,8 @@ function extractThinkingFieldsFromPartialJson(raw: string): string | undefined {
 }
 
 function extractJsonStringField(raw: string, field: string): string | undefined {
-  const match = raw.match(new RegExp(`"${field}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "u"))
+  // Render the string as it grows, while withholding an incomplete JSON escape.
+  const match = raw.match(new RegExp(`"${field}"\\s*:\\s*"((?:\\\\u[0-9a-fA-F]{4}|\\\\["\\\\/bfnrt]|[^"\\\\])*)(?:"|\\\\(?:u[0-9a-fA-F]{0,3})?$|$)`, "u"))
   if (match?.[1] === undefined) return undefined
   try {
     const value = JSON.parse(`"${match[1]}"`) as string

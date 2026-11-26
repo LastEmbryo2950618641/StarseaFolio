@@ -7711,7 +7711,6 @@ function buildSynopsisDiscussFallbackReturn(input: Readonly<{
 }>): Readonly<{ content: string; reasoningContent?: string }> {
   const streamed = normalizeThinkingDisplayText(input.streamedContent.trim())
   const content = (streamed !== undefined && !streamed.trimStart().startsWith("{") ? streamed : undefined)
-    ?? (input.accumulatedReasoning.length > 0 ? input.accumulatedReasoning.slice(0, 4_000) : undefined)
     ?? "本轮讨论与检索轮次较多，已先停在本阶段。你可以继续发送更具体的指令，我会基于已有上下文接着推进。"
   return input.accumulatedReasoning.length === 0
     ? { content }
@@ -7877,8 +7876,12 @@ function restrictPreciseInStageScope(
   scope: DiscussTurnWriteScope,
   materials: Readonly<{ synopsisReady: boolean; outlineReady: boolean; draftReady: boolean }>,
 ): DiscussTurnWriteScope {
+  // A synopsis rewrite requires all three artifacts. A mixed route that omits the
+  // outline must not give the model an impossible compose contract or expand its scope.
+  const completeCompose = scope.synopsis === "rewrite" && scope.outline === "rewrite"
+    && scope.draft === "write" && materials.synopsisReady && materials.outlineReady && materials.draftReady
   return {
-    ...(scope.synopsis !== undefined && materials.synopsisReady ? { synopsis: scope.synopsis } : {}),
+    ...(completeCompose ? { synopsis: "rewrite" as const } : {}),
     ...(scope.outline !== undefined && materials.outlineReady ? { outline: scope.outline } : {}),
     ...(scope.draft === "write" && materials.draftReady ? { draft: "write" as const } : {}),
     ...(scope.chapterTitle === true ? { chapterTitle: true as const } : {}),

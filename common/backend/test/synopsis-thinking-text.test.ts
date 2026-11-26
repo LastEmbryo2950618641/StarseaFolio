@@ -25,7 +25,8 @@ describe("normalizeThinkingDisplayText", () => {
 
   it("extracts fields from partial streamed JSON", () => {
     const partial = '{"outcome":"continue","reason":"先收窄基调","selfReview":"暂未写'
-    expect(normalizeThinkingDisplayText(partial)).toBe("先收窄基调")
+    expect(normalizeThinkingDisplayText(partial)).toBe("先收窄基调\n\n暂未写")
+    expect(normalizeThinkingDisplayText('{"reason":"第一段\\u4e')).toBe("第一段")
   })
 
   it("hides raw JSON when no readable fields exist", () => {
