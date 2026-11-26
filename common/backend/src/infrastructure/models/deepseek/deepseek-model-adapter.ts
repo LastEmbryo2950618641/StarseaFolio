@@ -197,7 +197,8 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       if (usage.cacheMissInputTokens !== undefined) cacheMissInputTokens = (cacheMissInputTokens ?? 0) + usage.cacheMissInputTokens
       const content = (response.content ?? "").trim().replace(/^```(?:json)?\s*|\s*```$/giu, "")
       const parsed = parseDiscussScope(content)
-      if (parsed.success && response.finishReason !== "length" && response.finishReason !== "content_filter") {
+      if (parsed.success && response.finishReason !== "length" && response.finishReason !== "max_output_tokens"
+        && response.finishReason !== "content_filter") {
         return {
           scope: parsed.data,
           usage: {
@@ -689,7 +690,9 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
             ...(input.maxTokens === undefined ? {} : { max_output_tokens: input.maxTokens }),
             ...(input.thinking?.type === "enabled"
               ? { reasoning: { effort: input.reasoningEffort, summary: "detailed" as const } }
-              : {}),
+              : input.thinking?.type === "disabled"
+                ? { reasoning: { effort: "none" as const } }
+                : {}),
             ...(readTools.length === 0 ? {} : { tools: readTools, tool_choice: "auto" as const }),
           } as OpenAI.Responses.ResponseCreateParamsNonStreaming
           const requestOptions = input.signal === undefined ? undefined : { signal: input.signal }

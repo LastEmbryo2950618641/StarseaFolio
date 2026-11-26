@@ -1892,6 +1892,39 @@ describe("DeepSeekAiModelAdapter", () => {
     }
   })
 
+  it("explicitly disables Responses reasoning for write-scope classification", async () => {
+    let received: Record<string, unknown> = {}
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = []
+      request.on("data", (chunk: Buffer) => { chunks.push(chunk) })
+      request.on("end", () => {
+        received = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>
+        const disabled = (received.reasoning as { effort?: string } | undefined)?.effort === "none"
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(disabled
+          ? { status: "completed", output_text: '{"draft":"write"}' }
+          : { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output_text: "" }))
+      })
+    })
+    await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve) })
+    const { port } = server.address() as AddressInfo
+    const adapter = new DeepSeekAiModelAdapter(
+      { ...defaultDeepSeekRuntimeConfig, apiProtocol: "openai_responses", baseUrl: `http://127.0.0.1:${String(port)}`, maxAttempts: 1 },
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot),
+    )
+    try {
+      const result = await adapter.classifyDiscussTurn({
+        message: "只改草稿结尾。", recentMessages: [], chapterSequence: 28, focusKind: "plot_synopsis",
+        synopsisReady: true, outlineReady: true, proceedMode: "precise", chapterAutomation: false,
+      })
+      expect(received.reasoning).toEqual({ effort: "none" })
+      expect(result.scope).toEqual({ draft: "write" })
+      expect(result.usage.modelCalls).toBe(1)
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
+    }
+  })
+
   it("uses the OpenAI Responses protocol with vendor-default storage and service tier", async () => {
     const phaseRequest = createRequest()
     const fake = await new FakeAiModelAdapter(randomUUID).execute(phaseRequest)
