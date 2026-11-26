@@ -960,7 +960,21 @@ export class SynopsisConversationService {
           : scope
         const parsedScope = discussTurnWriteScopeSchema.safeParse(normalizedScope)
         if (parsedScope.success) {
-          writeScope = parsedScope.data
+          const routed = parsedScope.data
+          // A chapter synopsis write starts a complete composition. The router from
+          // older prompt libraries may still authorize just the first artifact.
+          if (routed.synopsis !== undefined && Object.keys(routed).every((key) =>
+            ["synopsis", "outline", "draft", "chapterTitle", "advance"].includes(key))) {
+            const { advance: _advance, ...composeScope } = routed
+            writeScope = {
+              ...composeScope,
+              synopsis: synopsisReady ? "rewrite" : "create",
+              outline: outlineReadyAtStart ? "rewrite" : "create",
+              draft: "write",
+            }
+          } else {
+            writeScope = routed
+          }
           runtimeLog("info", "synopsis-conversation", "planning_write_scope.resolved", {
             projectId: input.projectId, sessionId: session.sessionId, chapterSequence: session.chapterSequence, scope: writeScope,
           })
@@ -1067,6 +1081,15 @@ export class SynopsisConversationService {
       const draftReadyAtStart = session.draftVersionId !== undefined
         && session.draftContentState !== "empty"
         && (latestDraftMarkdown?.trim().length ?? 0) > 0
+      if (writeScope?.advance === true && Object.keys(writeScope).length === 1
+        && (!synopsisReady || !outlineReadyAtStart || !draftReadyAtStart)
+        && (chapterBodyMarkdown?.trim().length ?? 0) === 0) {
+        writeScope = {
+          ...(!synopsisReady ? { synopsis: "create" as const } : {}),
+          ...(!synopsisReady || !outlineReadyAtStart ? { outline: outlineReadyAtStart ? "rewrite" as const : "create" as const } : {}),
+          draft: "write",
+        }
+      }
       const chapterPublishedAtStart = (chapterBodyMarkdown?.trim().length ?? 0) > 0
       const pipelineStageAtStart = resolveDiscussPipelineStage({
         synopsisReady,
@@ -1249,6 +1272,18 @@ export class SynopsisConversationService {
           ].includes(choice.action))
         }
       }
+      const completeComposition = assist.synopsisBody !== undefined && assist.outlineBody !== undefined
+        && assist.chapterDraftProposal !== undefined
+      if (completeComposition) {
+        const outlinePathBeforeWrite = siblingPlanningMarkdownPath(synopsisPath, "outline") ?? outlinePathForRead
+        const [currentSynopsis, currentOutline] = await Promise.all([
+          this.readSynopsisFile(input.workspaceRootRef, synopsisPath),
+          this.readSynopsisFile(input.workspaceRootRef, outlinePathBeforeWrite),
+        ])
+        if (digest(currentSynopsis) !== synopsisDigest || digest(currentOutline) !== digest(outlineMarkdown)) {
+          throw new SynopsisInvalidStateError("生成期间梗概或细纲已变更，本轮构思未写入。")
+        }
+      }
       const synopsisChangedWhileRunning = assist.synopsisBody !== undefined
         && digest(await this.readSynopsisFile(input.workspaceRootRef, synopsisPath)) !== synopsisDigest
       if (synopsisChangedWhileRunning) {
@@ -1261,7 +1296,7 @@ export class SynopsisConversationService {
         // (materials-only resolve would otherwise stay on 草稿 while old 细纲/草稿 remain).
         const rewriteSynopsis = planningWriteIntent?.synopsis === "rewrite"
           || writeScope?.synopsis === "rewrite"
-        if (rewriteSynopsis) {
+        if (rewriteSynopsis && !completeComposition) {
           try {
             await this.dependencies.chapterSynopsis.restageChapter({
               projectId: input.projectId,
@@ -1733,7 +1768,7 @@ export class SynopsisConversationService {
             summary: "未落盘：你刚改过细纲文件",
           })
         } else {
-          if (planningWriteIntent?.outline === "rewrite" || writeScope?.outline === "rewrite") {
+          if (!completeComposition && (planningWriteIntent?.outline === "rewrite" || writeScope?.outline === "rewrite")) {
             await this.dependencies.chapterSynopsis.restageChapter({
               projectId: input.projectId,
               workspaceRootRef: input.workspaceRootRef,
@@ -3641,6 +3676,7 @@ export class SynopsisConversationService {
           // Expose the tool when writeScope allows restage, or when rewrite of an earlier
           // stage is in scope (so the model can demote if host rewrite path is skipped).
           ...(!allowChapterWorkflowTools || this.dependencies.restageChapter === undefined
+            || (scopedComposeIntent(input.writeScope)?.synopsis !== undefined && input.writeScope?.draft === "write")
             || (input.writeScope !== undefined
               && input.writeScope.restage !== true
               && input.writeScope.synopsis !== "rewrite"
@@ -3896,7 +3932,6 @@ export class SynopsisConversationService {
           : []),
       ]
       let streamedReasoning = ""
-      let streamedContent = ""
       const thinkingRound = attempt + 1
       let compactedEstimate: number | undefined
       let execution
@@ -4034,7 +4069,6 @@ export class SynopsisConversationService {
                 streamedReasoning += partial.reasoningDelta
                 if (streamedReasoning.trimStart().startsWith("{")) {
                   const display = normalizeThinkingDisplayText(streamedReasoning)
-                    ?? normalizeThinkingDisplayText(streamedContent)
                   if (display !== undefined) {
                     synopsisConversationStreamHub.setThinking(input.projectId, display, stamp)
                   }
@@ -4043,7 +4077,6 @@ export class SynopsisConversationService {
                 }
               }
               if (partial.contentDelta !== undefined) {
-                streamedContent += partial.contentDelta
                 if (composeParser !== undefined) {
                   for (const event of composeParser.push(partial.contentDelta)) {
                     if (event.type === "section_delta" || event.type === "text") {
@@ -4056,13 +4089,6 @@ export class SynopsisConversationService {
                   }
                 } else {
                   synopsisConversationStreamHub.appendContent(input.projectId, partial.contentDelta, stamp)
-                }
-                if (streamedReasoning.length === 0 || streamedReasoning.trimStart().startsWith("{")) {
-                  const display = normalizeThinkingDisplayText(streamedReasoning)
-                    ?? normalizeThinkingDisplayText(streamedContent)
-                  if (display !== undefined) {
-                    synopsisConversationStreamHub.setThinking(input.projectId, display, stamp)
-                  }
                 }
               }
             },
@@ -4365,14 +4391,8 @@ export class SynopsisConversationService {
           strippedKeys: strippedByGate,
         })
       }
-      const reasoningChunk = execution.usage.reasoningContent?.trim()
-      const envelopeThinking = [parsedResult.reason, parsedResult.selfReview]
-        .map((part) => part.trim())
-        .filter((part) => part.length > 0)
-        .join("\n\n")
-      const displayThinking = normalizeThinkingDisplayText(reasoningChunk)
-        ?? (envelopeThinking.length === 0 ? undefined : envelopeThinking)
-        ?? normalizeThinkingDisplayText(streamedContent)
+      const displayThinking = normalizeThinkingDisplayText(execution.usage.reasoningContent)
+        ?? normalizeThinkingDisplayText(streamedReasoning)
       if (displayThinking !== undefined && displayThinking.length > 0) {
         accumulatedReasoning = displayThinking
         synopsisConversationStreamHub.setThinking(input.projectId, accumulatedReasoning, this.dependencies.now())
@@ -4813,6 +4833,11 @@ export class SynopsisConversationService {
           && artifact.data.focusChange?.chapterSequence !== input.chapterSequence
         const scopeIssues = input.writeScope === undefined || switchingAtUserRequest || input.volumePlanning?.ready === false
           ? [] : assessDiscussWriteScope(input.writeScope, artifact.data, input.chapterSequence, latestToolDraft !== undefined, input.volumePlanning)
+        if (input.model.classifyDiscussTurn !== undefined && allowChapterWorkflowTools
+          && input.volumePlanning?.ready !== false && artifact.data.synopsisBody !== undefined
+          && (artifact.data.outlineBody === undefined || artifact.data.chapterDraftProposal === undefined)) {
+          scopeIssues.push("完整构思必须在同一回复交齐梗概、细纲和当前章草稿")
+        }
         if (scopeIssues.length > 0) {
           const message = scopeIssues.join("；")
           if (writeScopeRetries >= 1 || remainingCalls <= 0 || budgetGraceUsed) {
@@ -7723,8 +7748,9 @@ function isVolumeComposeScope(scope: DiscussTurnWriteScope | undefined): boolean
 }
 
 function scopedComposeIntent(scope: DiscussTurnWriteScope | undefined): Parameters<typeof composeArtifactFromText>[1] {
-  if (scope === undefined || Object.keys(scope).length === 0 || scope.outline === "patch"
-    || Object.keys(scope).some((key) => key !== "synopsis" && key !== "outline" && key !== "draft")) return undefined
+  if (scope === undefined || scope.outline === "patch"
+    || (scope.synopsis === undefined && scope.outline === undefined && scope.draft === undefined)
+    || Object.keys(scope).some((key) => key !== "synopsis" && key !== "outline" && key !== "draft" && key !== "chapterTitle")) return undefined
   return {
     ...(scope.synopsis === undefined ? {} : { synopsis: scope.synopsis }),
     ...(scope.outline === undefined ? {} : { outline: scope.outline }),

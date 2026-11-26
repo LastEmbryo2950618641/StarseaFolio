@@ -236,23 +236,28 @@ describe("discuss stage skill injection", () => {
     }
   })
 
-  it("injects user-to-synopsis when the router authorizes a synopsis write", async () => {
+  it("injects both planning guides when the router authorizes a synopsis write", async () => {
     const captures: DiscussCapture[] = []
     const model = createDiscussModel({
       captures,
       classifyScope: () => ({ synopsis: "rewrite" }),
       artifact: () => ({
-        assistantMessage: `${COMPOSE_TAGS.synopsisStart}\n${synopsis}\n${COMPOSE_TAGS.synopsisEnd}`,
+        assistantMessage: [
+          COMPOSE_TAGS.synopsisStart, synopsis, COMPOSE_TAGS.synopsisEnd,
+          COMPOSE_TAGS.outlineStart, "- 林烬追上末班车。", COMPOSE_TAGS.outlineEnd,
+          COMPOSE_TAGS.draftStart, "林烬攥紧车票，跃上末班车。", COMPOSE_TAGS.draftEnd,
+        ].join("\n"),
       }),
     })
     const harness = await openChapterHarness("Discuss synopsis write skill", { model })
     try {
       await prepareChapterPlanning(harness)
-      await send(harness, "把梗概改成他赶上末班车。")
+      const result = await send(harness, "把梗概改成他赶上末班车。")
       const capture = captures[0]
       expect(capture).toBeDefined()
       expectBaseSkillPack(capture!)
-      expectPhaseSkillIds(harness, capture!, ["user-to-synopsis"])
+      expectPhaseSkillIds(harness, capture!, ["user-to-synopsis", "synopsis-to-outline"])
+      expect(result.appendedDraft).toBeDefined()
     } finally {
       await harness.container.close()
       rmSync(harness.root, { recursive: true, force: true })
@@ -384,7 +389,7 @@ describe("discuss stage skill injection", () => {
     model.execute = async (request, options) => {
       if (request.phase === "synopsis_discuss") {
         expect(options?.outputMode).toBe("text")
-        expect(options?.phasePrompt?.text).toContain("本轮已获准连写")
+        expect(options?.phasePrompt?.text).toContain("一次生成并交齐梗概、细纲和草稿")
         expect(options?.phasePrompt?.text).not.toContain("输出 JSON：顶层含")
         expect(options?.onSchemaRepair).toBeUndefined()
         for (const chunk of [full.slice(0, 20), full.slice(20)]) options?.onPartial?.({ contentDelta: chunk })

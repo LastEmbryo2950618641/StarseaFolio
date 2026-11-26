@@ -213,8 +213,18 @@ describe("outline bodyEdits integration", () => {
       },
       async execute(request, options) {
         const result = await delegate.execute(request, options)
-        if (request.phase !== "synopsis_discuss" || !options?.phasePrompt?.text.startsWith("只提交一个 <compose-outline-patch>")
-          || result.result.outcome === "request_read") return result
+        if (request.phase !== "synopsis_discuss" || result.result.outcome === "request_read") return result
+        if (options?.phasePrompt?.text.includes("一次生成并交齐梗概、细纲和草稿")) {
+          return {
+            ...result,
+            result: { ...result.result, artifact: { assistantMessage: [
+              "<compose-synopsis>\n林序到站台追查名单。\n</compose-synopsis>",
+              "<compose-outline>\n场1：林序进站；场2：他找到名单。\n</compose-outline>",
+              "<compose-draft>\n雨水打在站牌上，林序攥紧了手里的车票。\n</compose-draft>",
+            ].join("\n") } },
+          }
+        }
+        if (!options?.phasePrompt?.text.startsWith("只提交一个 <compose-outline-patch>")) return result
         expect(options.outputMode).toBe("text")
         return {
           ...result,
@@ -236,17 +246,13 @@ describe("outline bodyEdits integration", () => {
         workspaceRootRef: harness.workspaceRootRef,
       }
       await invoke(harness, "synopsis.conversation.start", base)
-      await invoke(harness, "synopsis.conversation.send", {
-        ...base,
-        message: "雨夜站台，林序追查名单",
-      })
-      const confirmed = await invoke<{
+      const composed = await invoke<{
         session: { synopsisPath: string }
       }>(harness, "synopsis.conversation.send", {
         ...base,
-        message: "用这份梗概写细纲",
+        message: "雨夜站台，林序追查名单",
       })
-      const outlineRel = outlinePathFromSynopsis(confirmed.session.synopsisPath)
+      const outlineRel = outlinePathFromSynopsis(composed.session.synopsisPath)
       const outlineAbs = join(harness.workspaceRootRef, outlineRel)
       const handEdited = `${readFileSync(outlineAbs, "utf8").trim()}\n\n> 作者手改标记\n`
       writeFileSync(outlineAbs, handEdited, "utf8")

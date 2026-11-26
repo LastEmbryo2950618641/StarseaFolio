@@ -1678,6 +1678,27 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(onSchemaRepair).not.toHaveBeenCalled()
   })
 
+  it("preserves provider thinking for a pure-text discussion response", async () => {
+    const onPartial = vi.fn()
+    const client: DeepSeekCompletionClient = {
+      complete: async (input) => {
+        input.onPartial?.({ reasoningDelta: "先检查已有材料。" })
+        input.onPartial?.({ contentDelta: "构思结果。" })
+        return { content: "构思结果。", reasoningContent: "先检查已有材料。", finishReason: "stop" }
+      },
+    }
+    const adapter = new DeepSeekAiModelAdapter(
+      defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") },
+      new NodePromptResourceAdapter(promptRoot),
+      client,
+    )
+    const execution = await adapter.execute(createRequest({ phase: "synopsis_discuss" }), { outputMode: "text", onPartial })
+    expect(onPartial).toHaveBeenCalledWith({ reasoningDelta: "先检查已有材料。" })
+    expect(execution.usage).toMatchObject({ reasoningContent: "先检查已有材料。", reasoningKind: "provider_reasoning" })
+    expect(execution.result.artifact).toMatchObject({ assistantMessage: "构思结果。" })
+  })
+
   it("rejects truncated text even when the provider returned closed compose tags", async () => {
     const complete = vi.fn<DeepSeekCompletionClient["complete"]>().mockResolvedValue({
       content: "<compose-synopsis>梗概</compose-synopsis><compose-outline>细纲</compose-outline><compose-draft>草稿</compose-draft>",

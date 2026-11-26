@@ -1267,7 +1267,7 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
       reasoningContent: resolveThinkingDisplay(message.reasoningContent),
       thinkingRounds: message.thinkingRounds?.map((round) => ({
         round: round.round,
-        text: resolveThinkingDisplay(round.text) ?? round.text,
+        text: resolveThinkingDisplay(round.text) ?? "",
       })),
     })
   }, [
@@ -1698,10 +1698,10 @@ function buildLiveTimeline(
   const thinkingRounds = stream.thinkingRounds
     .map((round) => ({
       round: round.round,
-      text: resolveThinkingDisplay(round.text) ?? round.text,
+      text: resolveThinkingDisplay(round.text) ?? "",
     }))
     .filter((round) => round.text.trim().length > 0)
-  const liveThinking = resolveThinkingDisplay(stream.thinking, stream.content)
+  const liveThinking = resolveThinkingDisplay(stream.thinking)
   const segments = toAgentTimeline({
     thinking: liveThinking,
     thinkingRounds: thinkingRounds.length > 0
@@ -1869,8 +1869,14 @@ function ProceedStageBar(props: Readonly<{
   )
 }
 
-function resolveThinkingDisplay(thinking: string | undefined, phaseJson?: string): string | undefined {
-  return normalizeThinkingDisplayText(thinking) ?? normalizeThinkingDisplayText(phaseJson)
+function resolveThinkingDisplay(thinking: string | undefined): string | undefined {
+  const text = normalizeThinkingDisplayText(thinking)
+  const normalized = text?.trim().replace(/\s+/gu, " ")
+  if (normalized === "Pure-text compose response Protocol tags are parsed by the host before persistence."
+    || normalized === "Native request_read tool requested additional evidence. The host will execute the requested reads before the next phase turn.") {
+    return undefined
+  }
+  return text
 }
 
 /** Keep in sync with common/backend/.../synopsis-thinking-text.ts */

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { existsSync, rmSync } from "node:fs"
+import { rmSync } from "node:fs"
 import { join } from "node:path"
 import Database from "better-sqlite3"
 import { describe, expect, it } from "vitest"
@@ -148,11 +148,12 @@ describe("discussion authorizes and verifies current-turn writes", () => {
         expect(pack?.[0]?.content).not.toContain("【skill:user-to-synopsis】")
         expect(options?.phasePrompt?.text).toContain("【skill:user-to-synopsis】")
         expect(options?.phasePrompt?.text).toContain("通读并抽正典清单")
-        expect(options?.phasePrompt?.text).not.toContain("【skill:synopsis-to-outline】")
+        expect(options?.phasePrompt?.text).toContain("【skill:synopsis-to-outline】")
+        expect(options?.phasePrompt?.text).toContain("一次生成并交齐梗概、细纲和草稿")
         rewriteCalls += 1
         return Promise.resolve(modelReply(request, rewriteCalls === 1
           ? { assistantMessage: tagged("outline", outline) }
-          : { assistantMessage: tagged("synopsis", synopsis) }))
+          : { assistantMessage: [tagged("synopsis", synopsis), tagged("outline", outline), tagged("draft", "林烬捏紧车票，冲向即将关闭的车门。")].join("\n") }))
       },
     } satisfies AIModelPort
     const harness = await openChapterHarness("Sticky synopsis scope", { model })
@@ -174,10 +175,10 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       expect(result).toMatchObject({ ok: true })
       expect(rewriteCalls).toBe(2)
       expect(await harness.workspace.readMarkdown(harness.workspaceRootRef, path)).toContain("带着车票上了末班车")
-      // Synopsis rewrite demotes the chapter: old outline must not keep the proceed bar ahead.
-      expect(existsSync(join(harness.workspaceRootRef, outlinePath))).toBe(false)
-      expect((result.data as SynopsisConversationSendResult).messages.at(-1)?.content)
-        .toMatch(/回退到梗概/)
+      expect(await harness.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toContain("熟悉的身影")
+      const composed = result.data as SynopsisConversationSendResult
+      expect(composed.appendedDraft).toBeDefined()
+      expect(composed.messages.at(-1)?.content).not.toMatch(/回退到梗概/)
     } finally {
       await harness.container.close()
       rmSync(harness.root, { recursive: true, force: true })
@@ -224,7 +225,7 @@ describe("discussion authorizes and verifies current-turn writes", () => {
     }
   })
 
-  it("does not present an older draft as ready to publish after a synopsis-only rewrite", async () => {
+  it("rejects an incomplete composition without clearing the existing draft", async () => {
     const model = {
       classifyDiscussTurn() {
         return Promise.resolve({
@@ -251,14 +252,17 @@ describe("discussion authorizes and verifies current-turn writes", () => {
         heading: "第一章 雨夜旧站台", body: "林烬把车票留在窗台，转身离开。",
         volumeFolderName: "第一卷 待命名", source: "agent",
       })
+      const original = await harness.facade.handle({
+        protocolVersion: PROTOCOL_VERSION, requestId: randomUUID(), method: "synopsis.conversation.list",
+        payload: { projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef },
+      })
+      if (!original.ok) throw new Error(original.error.message)
+      const path = (original.data as SynopsisConversationSendResult).session.synopsisPath
+      const outlinePath = path.replace("[剧情梗概].md", "[剧情细纲].md")
+      const previousOutline = await harness.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)
       const result = await send(harness, "重写梗概，这次让林烬赶上末班车。")
-      if (!result.ok) throw new Error(result.error.message)
-      const data = result.data as SynopsisConversationSendResult
-      const reply = data.messages.at(-1)
-      expect(reply?.content).not.toContain("草稿已经写好")
-      expect(reply?.choices?.map((choice) => choice.action)).toEqual(["confirm_synopsis"])
-      expect(data.proceedProgress).toEqual({ stage: "synopsis_discuss", status: "done" })
-      expect(data.appendedDraft).toBeUndefined()
+      expect(result).toMatchObject({ ok: false, error: { message: expect.stringContaining("本次响应不会写入") } })
+      expect(await harness.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toBe(previousOutline)
       expect((await revisions.listDraftVersions(oldDraft.revisionTaskId)).versions.map((draft) => draft.versionId))
         .toEqual([oldDraft.versionId])
     } finally {

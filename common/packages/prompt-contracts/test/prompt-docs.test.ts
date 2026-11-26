@@ -42,7 +42,12 @@ describe("canonical compose stage", () => {
       const legacy = readResource(`resources/v1/prompt-docs/stages/${filename}`)
       for (const id of skills) {
         expect(stagePromptDocForSkill(id)?.resourcePath).toBe(composePath)
-        expect(extractPromptDocSection(document, `skill:${id}`)).toBe(extractPromptDocSection(legacy, `skill:${id}`))
+        const section = extractPromptDocSection(document, `skill:${id}`)
+        if (["plot-synopsis", "user-to-synopsis", "synopsis-to-outline"].includes(id)) {
+          expect(section).toMatch(/完整构思[^\n]*同一回复/u)
+        } else {
+          expect(section).toBe(extractPromptDocSection(legacy, `skill:${id}`))
+        }
       }
     }
   })

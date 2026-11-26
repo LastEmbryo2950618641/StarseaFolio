@@ -409,6 +409,12 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         cacheMissInputTokens += usage.cacheMissInputTokens
         hasCacheMiss = true
       }
+      const reasoningContent = nonEmptyReasoning(response.reasoningContent)
+      const providerReasoning = reasoningContent === undefined ? {} : {
+        reasoningContent,
+        reasoningKind: response.reasoningKind
+          ?? (this.config.apiProtocol === "openai_responses" ? "provider_summary" : "provider_reasoning"),
+      } as const
       try {
         if (textOutput) {
           if (response.finishReason === "length" || response.finishReason === "content_filter") {
@@ -490,6 +496,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
               ...(hasCacheMiss ? { cacheMissInputTokens } : {}),
               provider: "deepseek",
               model: this.config.model,
+              ...providerReasoning,
             },
           }
         }
@@ -543,7 +550,6 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
           requestedReadCount: result.requestedReads.length,
           citedReadCount: result.citedReadIds.length,
         })
-        const reasoningContent = nonEmptyReasoning(response.reasoningContent)
         return {
           result,
           ...(schemaRepairs.length === 0 ? {} : { schemaRepairs }),
@@ -568,13 +574,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
             ...(hasCacheMiss ? { cacheMissInputTokens } : {}),
             provider: "deepseek",
             model: this.config.model,
-            ...(reasoningContent === undefined
-              ? {}
-              : {
-                  reasoningContent,
-                  reasoningKind: response.reasoningKind
-                    ?? (this.config.apiProtocol === "openai_responses" ? "provider_summary" : "provider_reasoning"),
-                }),
+            ...providerReasoning,
           },
         }
       } catch (error) {

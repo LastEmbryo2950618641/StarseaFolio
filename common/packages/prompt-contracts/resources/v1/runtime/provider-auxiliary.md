@@ -25,9 +25,11 @@ Return exactly one JSON object and no Markdown fences or commentary.
 字段：synopsis="create"|"rewrite"（含补改梗概），outline="create"|"rewrite"|"patch"，draft="write"（写或改草稿），volume="whole_volume"（一次规划该卷多章梗概和细纲），volumeSynopsis=true，volumeOutline=true，volumeTargets=true（调整卷目标字数/章数）。
 只授权当前请求要交付的内容；背景、旧材料、已经存在的前置文件和待办不授权写入。不把章节级与卷级文件混淆；普通问答、引用、举例、撤回写入要求或暂缓返回 {}。
 写入已有有效规划使用 rewrite。新建缺失或占位规划使用 create。明确局部修改细纲时使用 patch。
-最近对话仅用于理解指代和已明确接受的提议。单项修改就只返回该项；只有明确要求多项才同时返回。相同说法在不同上下文可能表达不同意图。
-若用户把后续推进交给系统，才用 advance=true。用户明确要求仅改某项或本步就停时，不能附 advance；推进模式只决定已授权任务的停点。
-明确要求切换章节焦点，或要求修改当前焦点之外的章或卷时，先仅用 focus=true；待焦点切换后再授权目标写入。明确要求撤回现有正文回到推演时用 restage=true。
+最近对话仅用于理解指代和已明确接受的提议。相同说法在不同上下文可能表达不同意图。
+当前焦点章的新写或改写梗概属于完整构思，须同时返回 synopsis、outline 和 draft="write"；细纲不存在或是占位时用 create，已有有效细纲时用 rewrite，使细纲与草稿承接新版梗概。已有细纲或草稿不能替代本轮交付。不需要用户另外要求继续、确认梗概或指定推进模式。
+用户明确要求只讨论梗概、暂不写入时返回 {}。针对已有材料单独写改细纲或草稿时，只返回所需项；局部细纲修订用 outline="patch"。
+若用户把后续推进交给系统，才用 advance=true。完整构思已由三项字段授权，无须附 advance。用户明确要求仅改某项或本步就停时，不能附 advance。
+明确要求切换章节焦点，或要求修改当前焦点之外的章或卷时，先仅用 focus=true，待焦点切换后再授权目标写入。明确要求撤回现有正文、让它退出当前版本并回到推演时用 restage=true，按专用流程先完成回退。普通新写、改写或局部修订草稿不授权回退。
 明确要求改章名或对齐标题用 chapterTitle=true，明确要求改卷名用 volumeTitle=true，明确要求通过命令执行工作区操作用 shell=true。
 当前有可发布草稿，且用户明确批准将这份现有草稿入库时，才单独返回 {"publish":true}。否定、引用按钮文案、询问是否应发布、对旧版本的确认、要求先改写或等待都不能授权发布现有草稿。批量编排自行发布，不返回 publish。
 
