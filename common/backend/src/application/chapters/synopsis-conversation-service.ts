@@ -987,9 +987,20 @@ export class SynopsisConversationService {
       }
       // 精准模式在首个完整草稿出现前完全跳过 classifier：普通文本按只读讨论处理，
       // 避免 router 的 JSON/契约故障挡住「开始构思」按钮；有可发布草稿后才允许分类修订。
-      const preciseFirstCompleteDraft = preciseMode
+      const preciseExistingDraft = preciseMode
         ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
         : undefined
+      const precisePlanningRecovery = preciseExistingDraft !== undefined && (!synopsisReady || !outlineReadyAtStart)
+      if (precisePlanningRecovery && preciseHostAction === undefined && workStyleGateReadyAtStart && volumePlanningGateWasReady) {
+        return await this.runPreciseDiscussOnly({
+          projectId: input.projectId,
+          workspaceRootRef: input.workspaceRootRef,
+          session,
+          message: input.message,
+          recovery: true,
+        })
+      }
+      const preciseFirstCompleteDraft = precisePlanningRecovery ? undefined : preciseExistingDraft
       if (preciseMode && preciseHostAction === undefined
         && (preciseFirstCompleteDraft === undefined || input.model.classifyDiscussTurn === undefined)) {
         writeScope = {}
@@ -1403,6 +1414,7 @@ export class SynopsisConversationService {
         writeNotices.push("生成期间梗概文件已发生变更，本轮保留最新版本。")
       } else if (assist.synopsisBody !== undefined
         && (!userEditedSinceAgent
+          || (preciseHostAction === "start_compose" && !synopsisReady)
           || planningWriteIntent?.synopsis === "rewrite"
           || writeScope?.synopsis === "rewrite")) {
         // Rewrite invalidates downstream materials so the stage bar returns to 梗概
@@ -1869,6 +1881,7 @@ export class SynopsisConversationService {
             path: outlinePath, kind: "outline", status: "failed", summary: "未落盘：细纲已变化",
           })
         } else if (!restagedToSynopsisThisTurn && userEditedOutlineSinceAgent
+          && hasPlanningContent(currentOutline, false)
           && planningWriteIntent?.outline !== "rewrite"
           && writeScope?.outline !== "rewrite") {
           writeNotices.push(planningWriteIntent?.outline === "patch"
@@ -2460,6 +2473,7 @@ export class SynopsisConversationService {
       const focusedPublishableDraft = batchAutomation
         ? undefined
         : await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
+      const precisePublishableDraft = synopsisReadyForOutline && hasOutlineOnDisk ? focusedPublishableDraft : undefined
       const publishableDraft = savedDraft === undefined ? undefined : focusedPublishableDraft
       if (publishableDraft !== undefined && publishableDraft.draftVersionId === savedDraft?.draftVersionId) {
         persistedChoices = withDraftConfirmationChoice(persistedChoices, publishableDraft)
@@ -2486,7 +2500,13 @@ export class SynopsisConversationService {
         && !coldStartStyleNeedsChoice
         && appliedFocusSequence === undefined
       if (preciseHostControlsEnabled) {
-        persistedChoices = buildPreciseHostChoices(focusedPublishableDraft, session.chapterSequence)
+        persistedChoices = buildPreciseHostChoices(precisePublishableDraft, session.chapterSequence)
+        if (precisePlanningRecovery && precisePublishableDraft === undefined) {
+          const recoveryNotice = "当前章有旧草稿，但梗概或细纲缺失。请点「开始构思」，同一回复生成梗概、细纲和草稿。"
+          assistantContent = preciseHostAction === "start_compose"
+            ? [recoveryNotice, ...writeNotices].join("\n\n")
+            : `${recoveryNotice}\n\n${assistantContent}`
+        }
       }
       if (pipelineAuto) {
         const fingerprint = await this.readDiscussProgressFingerprint({
@@ -4191,7 +4211,7 @@ export class SynopsisConversationService {
               const headings = { synopsis: "梗概", outline: "细纲", draft: "草稿" } as const
               const protocol = sections.length === 0
                 ? "用普通文本回复讨论。需要资料时调用原生读取工具；需要 Todo、正文推演等工具时，只输出 <tool-request> 文本块（name、action，invoke 时再加一行 arguments 单行 JSON），不要自造其他标签。"
-                : [sections.length === 3 ? "本轮执行完整构思，一次生成并交齐梗概、细纲和草稿。后两段直接承接本次回复中的前置产物。" : "本轮仅可交付下列获准产物。",
+                : [sections.length === 3 ? "本轮执行完整构思，一次生成并交齐梗概、细纲和草稿。即使当前文件缺少梗概或细纲，也直接用本次回复中的前置产物完成后两段。宿主校验三段后按顺序写入。生成期间不要声称已保存或已发布。" : "本轮仅可交付下列获准产物。",
                     "需要资料时先调用原生读取工具；需要 Todo 等非读取工具时，另起一个 <tool-request> 块（name、action，invoke 时加一行 arguments 单行 JSON），工具请求不能与下列构思写入同回。资料齐全后，在同一回复中按下列顺序交付完整 Markdown。",
                     ...sections.map((section) => `<compose-${section}>\n${headings[section]}\n</compose-${section}>`),
                   ].join("\n")
@@ -6531,6 +6551,7 @@ export class SynopsisConversationService {
     workspaceRootRef: string
     session: Awaited<ReturnType<SynopsisConversationService["ensureActiveSession"]>>
     message: string
+    recovery?: boolean
   }>): Promise<SynopsisConversationSendResult> {
     const nowMs = this.dependencies.now()
     await this.dependencies.conversation.appendMessage({
@@ -6541,8 +6562,13 @@ export class SynopsisConversationService {
       content: input.message,
       createdAtMs: nowMs,
     })
-    const publishableDraft = await this.findPublishableFocusDraft(input.projectId, input.session.chapterSequence)
-    const content = "已进入仅讨论模式：本轮不会写入梗概、细纲或正文。直接输入你的想法即可；需要一次生成或重写「梗概+细纲+草稿」时，点「开始构思」，确认草稿后再点「发布正文」。"
+    const planningReady = await this.hasCompleteFocusedPlanning(input.workspaceRootRef, input.session)
+    const publishableDraft = planningReady
+      ? await this.findPublishableFocusDraft(input.projectId, input.session.chapterSequence)
+      : undefined
+    const content = input.recovery === true
+      ? "当前章有旧草稿，但梗概或细纲缺失。本轮要求已记录。请点「开始构思」，同一回复生成梗概、细纲和草稿。"
+      : "已进入仅讨论模式：本轮不会写入梗概、细纲或正文。直接输入你的想法即可；需要一次生成或重写「梗概+细纲+草稿」时，点「开始构思」，确认草稿后再点「发布正文」。"
     await this.dependencies.conversation.appendMessage({
       messageId: this.dependencies.createId(),
       projectId: input.projectId,
@@ -6587,6 +6613,9 @@ export class SynopsisConversationService {
     signal?: AbortSignal
   }>): Promise<SynopsisConversationSendResult> {
     if (this.dependencies.publishDraft === undefined) throw new SynopsisInvalidStateError("正文发布服务不可用。")
+    if (input.hostChoices === true && !await this.hasCompleteFocusedPlanning(input.workspaceRootRef, input.session)) {
+      throw new SynopsisInvalidStateError("当前章的构思材料缺失，请先通过「开始构思」一次生成梗概、细纲和草稿。")
+    }
     const draft = await this.findPublishableFocusDraft(input.projectId, input.session.chapterSequence)
     if (draft?.draftVersionId !== input.draftVersionId) {
       throw new SynopsisInvalidStateError("这份草稿已变更或不可发布，请核对当前版本后重新确认。")
@@ -6753,6 +6782,17 @@ export class SynopsisConversationService {
       this.dependencies.now(),
     )
     return progress
+  }
+
+  private async hasCompleteFocusedPlanning(workspaceRootRef: string, session: SynopsisConversationSession): Promise<boolean> {
+    const outlinePath = siblingPlanningMarkdownPath(session.synopsisPath, "outline")
+      ?? deriveOutlineMarkdownPath(session.chapterSequence, session.title,
+        extractVolumeFolderNameFromPath(session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME)
+    const [synopsis, outline] = await Promise.all([
+      this.readSynopsisFile(workspaceRootRef, session.synopsisPath),
+      this.readSynopsisFile(workspaceRootRef, outlinePath),
+    ])
+    return hasPlanningContent(synopsis, true) && hasPlanningContent(outline, false)
   }
 
   private async findPublishableFocusDraft(

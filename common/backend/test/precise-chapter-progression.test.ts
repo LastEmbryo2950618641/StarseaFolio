@@ -300,6 +300,49 @@ describe("precise chapter progression", () => {
     }
   })
 
+  it.each(["outline", "both"] as const)("recovers missing planning from an old draft through complete composition (%s)", async (missing) => {
+    const classifyCalls: string[] = []
+    let draft = composeDraft
+    const discussCalls: DiscussCall[] = []
+    const model = createPreciseModel({
+      classifyCalls,
+      discussCalls,
+      classifier: () => ({ draft: "write" }),
+      reply: ({ prompt }) => prompt.includes("一次生成并交齐")
+        ? composeText({ synopsis: composeSynopsis, outline: composeOutline, draft })
+        : "我们先核对本章的构思要求。",
+    })
+    const harness = await openChapterHarness("Precise legacy planning recovery", { model })
+    try {
+      await prepareChapterPlanning(harness)
+      const first = await send(harness, { message: "开始构思", proceedMode: "precise", preciseAction: "start_compose" })
+      const oldVersion = first.appendedDraft?.draftVersionId
+      expect(oldVersion).toBeDefined()
+      const outlinePath = first.session.synopsisPath.replace("[剧情梗概].md", "[剧情细纲].md")
+      await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, outlinePath, EMPTY_OUTLINE)
+      if (missing === "both") {
+        await harness.container.workspace.saveSynopsisMarkdown(harness.workspaceRootRef, first.session.synopsisPath, EMPTY_SYNOPSIS)
+      }
+      const callsBeforeRecovery = discussCalls.length
+      const recovery = await send(harness, { message: "只改草稿结尾", proceedMode: "precise" })
+      expect(discussCalls).toHaveLength(callsBeforeRecovery)
+      expect(recovery.appendedDraft).toBeUndefined()
+      expect(recovery.messages.filter((message) => message.role === "assistant").at(-1)?.choices?.map((choice) => choice.action))
+        .toEqual(["start_compose", "discuss_only"])
+      expect(classifyCalls).toEqual([])
+      await expectSendRejects(harness, { message: "发布正文", proceedMode: "precise", preciseAction: "publish", publishDraftVersionId: oldVersion }, /构思材料缺失/u)
+      draft = revisedDraft
+      const recovered = await send(harness, { message: "复原本章", proceedMode: "precise", preciseAction: "start_compose" })
+      expect(recovered.appendedDraft?.draftVersionId, recovered.messages.at(-1)?.content).toBeTruthy()
+      expect(recovered.appendedDraft?.draftVersionId).not.toBe(oldVersion)
+      expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, outlinePath)).toContain("林烬发现车票背面有字")
+      expect(recovered.messages.filter((message) => message.role === "assistant").at(-1)?.choices?.[0]?.publishDraftVersionId)
+        .toBe(recovered.appendedDraft?.draftVersionId)
+    } finally {
+      await closeHarness(harness)
+    }
+  })
+
   it("keeps 只讨论 as a local acknowledgment with host controls and no model call", async () => {
     const classifyCalls: string[] = []
     const discussCalls: DiscussCall[] = []
