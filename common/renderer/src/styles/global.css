@@ -351,11 +351,36 @@ html, body, #root, .app-chrome, .app-shell, .launcher {
   gap: 10px;
   padding: 16px;
 }
-.work-name-prompt-body label {
+.work-name-prompt-body label,
+.workspace-name-prompt-type {
   display: grid;
   gap: 6px;
   font-size: 12px;
   color: #b5bac1;
+}
+.work-name-prompt-dialog[data-testid="workspace-name-dialog"] {
+  overflow: visible;
+}
+.work-name-prompt-dialog[data-testid="workspace-name-dialog"] > header {
+  border-radius: 9px 9px 0 0;
+}
+.work-name-prompt-dialog[data-testid="workspace-name-dialog"] > footer {
+  border-radius: 0 0 9px 9px;
+}
+.workspace-name-prompt-type .creation-desk-focus-trigger {
+  height: 34px;
+  padding-inline: 10px;
+  font-size: inherit;
+}
+.workspace-name-prompt-type .creation-desk-focus-menu {
+  top: calc(100% + 4px);
+  bottom: auto;
+  gap: 2px;
+  max-height: 35vh;
+  overflow: auto;
+}
+.workspace-name-prompt-type .creation-desk-focus-menu button {
+  font-size: inherit;
 }
 .work-name-prompt-body input {
   height: 34px;
@@ -6766,24 +6791,33 @@ a.project-rail-download {
   padding: 0 10px;
   white-space: nowrap;
 }
-.creation-desk-focus-stack .creation-desk-volume-progress {
-  padding: 4px 0;
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.creation-desk-focus-stack {
+  display: grid;
+  gap: 4px;
   min-width: 0;
-  overflow: visible;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
-.creation-desk-volume-progress > span:first-child {
-  overflow: hidden;
+.creation-desk-proceed-mode.creation-desk-volume-focus {
+  width: clamp(90px, 19%, 140px);
+  max-width: none;
   text-overflow: ellipsis;
 }
-.creation-desk-volume-progress > span:not(:first-child) {
+.creation-desk-proceed-stages.creation-desk-volume-stages {
+  overflow-x: auto;
+  padding: 2px;
+  scrollbar-width: thin;
+}
+.creation-desk-volume-stages .creation-desk-proceed-step {
+  flex: 1 0 auto;
+}
+.creation-desk-volume-stages .creation-desk-proceed-stage {
+  padding-inline: 4px;
+  white-space: nowrap;
+}
+.creation-desk-volume-count {
   flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 .creation-desk-focus-combobox {
   position: relative;

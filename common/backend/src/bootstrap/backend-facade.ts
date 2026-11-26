@@ -402,7 +402,7 @@ export class BackendFacade {
         const payload = workspaceSavePayloadSchema.parse(request.payload)
         const runtime = await this.container.getRuntime(payload.projectId, payload.workspaceRootRef)
         await runtime.ensureWritableHistoryBranch(this.container.now())
-        await runtime.saveMarkdown(payload.relativePath, payload.content)
+        await runtime.saveMarkdown(payload.relativePath, payload.content, payload.createOnly === true)
         return { relativePath: payload.relativePath, saved: true }
       }
       case "workspace.character.update": {

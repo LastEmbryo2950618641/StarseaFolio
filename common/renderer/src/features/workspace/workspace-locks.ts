@@ -10,7 +10,7 @@ import {
   isChapterPlanningMarkdownPath,
   isSynopsisMarkdownPath,
 } from "../editor/synopsis-path.js"
-import { isPromptAuthoringDirectory, isPromptPath, normalizeWorkspacePath } from "./prompt-paths.js"
+import { isPromptPath, normalizeWorkspacePath, userPromptCategory } from "./prompt-paths.js"
 
 export { isSynopsisMarkdownPath, normalizeWorkspacePath }
 
@@ -162,7 +162,7 @@ function isUnderRoot(path: string, root: string): boolean {
 
 export function canCreateMarkdownInDirectory(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
-  if (normalized.startsWith("提示词/")) return isPromptAuthoringDirectory(normalized)
+  if (isPromptPath(normalized)) return userPromptCategory(normalized) !== undefined
   if (normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) return false
   if (normalized === "章节正文" || normalized.startsWith("章节正文/")) return false
   return USER_WRITABLE_CREATE_ROOTS.some((root) => isUnderRoot(normalized, root))
@@ -170,10 +170,7 @@ export function canCreateMarkdownInDirectory(path: string): boolean {
 
 export function canCreateFolderInDirectory(path: string): boolean {
   const normalized = normalizeWorkspacePath(path)
-  if (normalized.startsWith("提示词/")) {
-    return normalized === "提示词/用户规则/系统提示词"
-      || normalized === "提示词/系统记忆/系统提示词"
-  }
+  if (isPromptPath(normalized)) return false
   if (normalized === CHARACTER_DIRECTORY || normalized.startsWith(`${CHARACTER_DIRECTORY}/`)) return false
   // Volume folders are created directly under 章节正文 with「第N卷 标题」names.
   if (normalized === "章节正文") return true

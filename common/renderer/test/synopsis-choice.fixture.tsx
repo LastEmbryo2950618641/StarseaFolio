@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { createRoot } from "react-dom/client"
-import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
+import { buildVolumeLifecycle, type SynopsisConversationChoice, type SynopsisConversationMessage } from "@starseafolio/contracts"
 
 import { SynopsisConversationComposer } from "../src/features/editor/SynopsisConversationComposer.js"
 import "../src/styles/global.css"
@@ -54,6 +54,8 @@ function Fixture(): React.JSX.Element {
     projectId: "project-1", sessionId: "session-1", messageId: "message-2", questionId: "question-1",
     busy: false, running: false, emptyChoices: false, focusLocked: false, chapterWorkflowEnabled: true,
   })
+  const [chapterSequence, setChapterSequence] = useState(1)
+  const volumeName = chapterSequence === 1 ? "第一卷 雨夜" : "第二卷 启程"
   const [draftRestore, setDraftRestore] = useState<{ text: string; token: number }>()
   window.choiceFixture.configure = (patch) => { setContext((current) => ({ ...current, ...patch })) }
   window.choiceFixture.restore = (text) => { setDraftRestore((current) => ({ text, token: (current?.token ?? 0) + 1 })) }
@@ -65,10 +67,15 @@ function Fixture(): React.JSX.Element {
     })),
   }
   return <SynopsisConversationComposer
-    layout="rail" projectId={context.projectId} workspaceRootRef={undefined}
+    layout={new URLSearchParams(window.location.search).has("desk") ? "desk" : "rail"}
+    projectId={context.projectId} workspaceRootRef={undefined}
     session={{
-      sessionId: context.sessionId, projectId: context.projectId, chapterSequence: 1, title: "测试",
+      sessionId: context.sessionId, projectId: context.projectId, chapterSequence, title: "测试",
       synopsisPath: "测试梗概.md", focusKind: "plot_synopsis", status: "active", createdAtMs: 1, updatedAtMs: 1,
+      volumeLifecycle: { ...buildVolumeLifecycle({
+        started: chapterSequence === 1, styleReady: false, protagonistReady: false,
+        conceptionReady: false, chapterCount: 0, chapterLimit: 0,
+      }), volumeFolderName: volumeName },
       synopsisContentState: "empty", outlineContentState: "empty", draftContentState: "empty",
     }}
     messages={[{ ...message, messageId: "message-1", choices: context.emptyChoices ? [] : choices }, message]}
@@ -79,7 +86,12 @@ function Fixture(): React.JSX.Element {
     onPromoteStaging={() => { window.choiceFixture.actions.push("promote-staging"); return Promise.resolve() }}
     onRejectStagingPromote={() => { window.choiceFixture.actions.push("reject-staging"); return Promise.resolve() }}
     onPromoteDraftToBody={() => { window.choiceFixture.actions.push("promote-draft"); return Promise.resolve() }}
-    onSetFocus={() => { window.choiceFixture.actions.push("focus") }}
+    focusChapters={[
+      { sequence: 1, label: "第一章 雨夜", volumeFolderName: "第一卷 雨夜" },
+      { sequence: 4, label: "第四章 启程", volumeFolderName: "第二卷 启程" },
+      { sequence: 3, label: "第三章 渡口", volumeFolderName: "第二卷 启程" },
+    ]}
+    onSetFocus={(sequence) => { window.choiceFixture.actions.push("focus"); setChapterSequence(sequence) }}
     onRefreshChoices={() => { window.choiceFixture.actions.push("refresh"); return Promise.resolve() }}
     descriptionRule="" proseRule="" novelMajorCategoryRulePath="" novelSubcategoryRulePath=""
     minimumWordCount="2000" maximumWordCount="3000" wordCountValid

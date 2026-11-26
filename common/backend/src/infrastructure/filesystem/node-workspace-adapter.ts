@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { WORLD_RULES_OVERVIEW_PATH } from "@starseafolio/contracts"
 import { CHARACTER_DIRECTORY, CHARACTER_RULE_PATH, isCharacterProfilePath, characterUpdateSchema, emptyCharacterProfile, parseCharacterProfile, formatCharacterProfile, applyCharacterFieldOperations, type CharacterUpdate } from "@starseafolio/contracts"
 import { constants } from "node:fs"
@@ -59,6 +59,26 @@ import type {
 const BATCH_VOLUME_GUIDE_RESOURCE = "resources/v1/guides/batch-volume-deduction-plan.md"
 const CHARACTER_GUIDE_RESOURCE = "resources/v1/guides/character-profiles.md"
 const WORK_STYLE_SEED_RESOURCE = "resources/v1/workspace/work-style-seed.md"
+const BASE_IDEATION_PROMPT_PATH = "提示词/基础规则/阶段提示词/02-构思阶段.md"
+const IDEATION_PROMPT_RESOURCE = "resources/v1/prompt-docs/stages/02-compose.md"
+const PROJECT_STAGE_SCOPES = ["用户规则", "系统记忆"] as const
+const LEGACY_IDEATION_STAGES = [
+  {
+    stage: "梗概阶段",
+    baseFilename: "02-梗概阶段.md",
+    seedHash: "4231ed5080bef37b511685713aca3229a873d62f98894d7cbff341485795accb",
+  },
+  {
+    stage: "细纲阶段",
+    baseFilename: "细纲阶段.md",
+    seedHash: undefined,
+  },
+  {
+    stage: "草稿阶段",
+    baseFilename: "03-草稿阶段.md",
+    seedHash: "4b4107f3eac33469aea39f973d0188e0c8767412655cf3443c30c68be6c8d417",
+  },
+] as const
 
 export class NodeWorkspaceAdapter implements WorkspacePort {
   public constructor(private readonly sharedPresentationRoot?: string) {}
@@ -198,9 +218,13 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
       encoding: "utf8",
       flag: "wx",
     })
+    await Promise.all(PROJECT_STAGE_SCOPES.map((scope) => (
+      ensurePromptFile(root, `提示词/${scope}/阶段提示词/构思阶段.md`, "")
+    )))
     await Promise.all((defaults.promptLibraryFiles ?? []).map((file) => (
       ensurePromptFile(root, file.relativePath, file.markdown)
     )))
+    await ensureBaseIdeationPrompt(root)
     return this.validate(root)
   }
   public async ensurePlatformDocuments(
@@ -258,8 +282,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     const promptCategories = [
       "系统提示词",
       "阶段提示词",
-      "消息前后/用户消息前",
-      "消息前后/用户消息后",
+      "消息前后",
     ]
     for (const scope of promptScopes) {
       for (const category of promptCategories) {
@@ -268,25 +291,18 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     }
     await migrateLegacyPromptScope(root, "世界推演规则/用户规则", "提示词/用户规则/系统提示词")
     await migrateLegacyPromptScope(root, "世界推演规则/Agent记忆", "提示词/系统记忆/系统提示词")
+    await migrateProjectIdeationPrompts(root)
     await migrateFlatStagePromptFolders(root)
-    // Migration may create parent directories after the main scaffold pass; ensure all leaf folders exist.
-    for (const scope of promptScopes) {
-      for (const category of promptCategories) {
-        await mkdir(resolveInside(root, `提示词/${scope}/${category}`), { recursive: true })
-      }
-    }
     const emptyProjectPromptDocs = [
       "用户规则/系统提示词/用户规则.md",
       "用户规则/阶段提示词/新章节阶段.md",
-      "用户规则/阶段提示词/梗概阶段.md",
-      "用户规则/阶段提示词/草稿阶段.md",
+      "用户规则/阶段提示词/构思阶段.md",
       "用户规则/阶段提示词/章节入库阶段.md",
       "用户规则/消息前后/用户消息前.md",
       "用户规则/消息前后/用户消息后.md",
       "系统记忆/系统提示词/系统记忆.md",
       "系统记忆/阶段提示词/新章节阶段.md",
-      "系统记忆/阶段提示词/梗概阶段.md",
-      "系统记忆/阶段提示词/草稿阶段.md",
+      "系统记忆/阶段提示词/构思阶段.md",
       "系统记忆/阶段提示词/章节入库阶段.md",
       "系统记忆/消息前后/用户消息前.md",
       "系统记忆/消息前后/用户消息后.md",
@@ -297,6 +313,8 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     await Promise.all((defaults.promptLibraryFiles ?? []).map((file) => (
       refreshPromptFile(root, file.relativePath, file.markdown)
     )))
+    await ensureBaseIdeationPrompt(root)
+    await migrateFlatMessagePromptFolders(root)
     await migrateLegacyWorldPlanFolder(root)
   }
 
@@ -348,16 +366,21 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     return readFile(path, "utf8")
   }
 
-  public async saveUserMarkdown(workspaceRootRef: string, relativePath: string, content: string): Promise<void> {
+  public async saveUserMarkdown(workspaceRootRef: string, relativePath: string, content: string, createOnly = false): Promise<void> {
     const root = await this.documentRoot(workspaceRootRef, relativePath)
-    const normalized = assertWorkspaceMutationAllowed(relativePath, "file", "user")
+    const normalized = createOnly ? assertUserCanCreateMarkdown(relativePath) : assertWorkspaceMutationAllowed(relativePath, "file", "user")
     if (normalized === "设定集/作品简介.md" && content.replace(/^\s*#\s*作品简介\s*/u, "").trim().length > 300) {
       throw new Error("作品简介不能超过 300 字")
     }
     const path = resolveInside(root, normalized)
     await assertParentChainContainsNoLinks(root, path)
     await mkdir(resolve(path, ".."), { recursive: true })
-    await writeFile(path, content, { encoding: "utf8" })
+    try {
+      await writeFile(path, content, { encoding: "utf8", flag: createOnly ? "wx" : "w" })
+    } catch (error) {
+      if (createOnly && isAlreadyExistsError(error)) throw new Error(`文件已存在：${normalized}`)
+      throw error
+    }
   }
 
   /** Platform-owned prompt mirror: bypass user read-only rules, still validate path shape. */
@@ -779,6 +802,7 @@ async function ensurePromptFile(root: string, relativePath: string, markdown: st
 
 async function refreshPromptFile(root: string, relativePath: string, markdown: string): Promise<void> {
   const path = resolveInside(root, relativePath)
+  await assertParentChainContainsNoLinks(root, path)
   await mkdir(resolve(path, ".."), { recursive: true })
   await refreshPlatformRule(root, relativePath, markdown)
 }
@@ -823,25 +847,112 @@ async function migrateLegacyPromptScope(root: string, sourcePath: string, target
   }
 }
 
-async function migrateFlatStagePromptFolders(root: string): Promise<void> {
-  const stages = ["新章节阶段", "梗概阶段", "草稿阶段", "章节入库阶段"]
-  for (const scope of ["基础规则", "用户规则", "系统记忆"]) {
-    const category = resolveInside(root, `提示词/${scope}/阶段提示词`)
-    for (const stage of stages) {
-      const legacy = join(category, stage)
-      try {
-        const entries = await readdir(legacy, { withFileTypes: true })
-        for (const entry of entries) {
-          if (!entry.isFile() || !entry.name.endsWith(".md")) continue
-          const flatName = entry.name.includes(stage) ? entry.name : `${stage}-${entry.name}`
-          const target = join(category, flatName)
-          try { await lstat(target) } catch { await copyFile(join(legacy, entry.name), target) }
-        }
-        await rm(legacy, { recursive: true, force: true })
-      } catch {
-        // Legacy folder absent.
+async function readRegularPromptIfPresent(root: string, relativePath: string): Promise<string | undefined> {
+  const path = resolveInside(root, relativePath)
+  await assertParentChainContainsNoLinks(root, path)
+  try {
+    const info = await lstat(path)
+    if (!info.isFile()) throw new Error(`Prompt migration requires a regular file: ${relativePath}`)
+    return await readFile(path, "utf8")
+  } catch (error) {
+    if (isNotFoundError(error)) return undefined
+    throw error
+  }
+}
+
+async function ensureBaseIdeationPrompt(root: string): Promise<void> {
+  if (await readRegularPromptIfPresent(root, BASE_IDEATION_PROMPT_PATH) === undefined) {
+    const markdown = await readBundledPromptMarkdown(IDEATION_PROMPT_RESOURCE)
+    await ensurePromptFile(root, BASE_IDEATION_PROMPT_PATH, markdown)
+  }
+}
+
+async function migrateProjectIdeationPrompts(root: string): Promise<void> {
+  const base = "提示词/基础规则/阶段提示词"
+  for (const { stage, baseFilename, seedHash } of LEGACY_IDEATION_STAGES) {
+    const names = new Set([baseFilename, `${stage}.md`])
+    for (const source of [...names].flatMap((name) => [`${base}/${name}`, `${base}/${stage}/${name}`])) {
+      const markdown = await readRegularPromptIfPresent(root, source)
+      if (markdown === undefined) continue
+      const normalized = markdown.replaceAll("\r\n", "\n").trimEnd() + "\n"
+      if (createHash("sha256").update(normalized).digest("hex") !== seedHash) {
+        // The visible base document mirrors the global library. Keep possible project-only edits locally.
+        const backup = JSON.stringify({ path: source, markdown }, null, 2) + "\n"
+        const hash = createHash("sha256").update(backup).digest("hex")
+        await refreshPromptFile(root, `.folio/prompt-migration/${baseFilename}.${hash}.json`, backup)
+      }
+      await unlink(resolveInside(root, source))
+    }
+  }
+
+  for (const scope of PROJECT_STAGE_SCOPES) {
+    const category = `提示词/${scope}/阶段提示词`
+    const target = `${category}/构思阶段.md`
+    const sources: string[] = []
+    let merged = await readRegularPromptIfPresent(root, target) ?? ""
+    for (const { stage, baseFilename } of LEGACY_IDEATION_STAGES) {
+      const names = new Set([`${stage}.md`, baseFilename])
+      for (const source of [...names].flatMap((name) => [`${category}/${name}`, `${category}/${stage}/${name}`])) {
+        const markdown = await readRegularPromptIfPresent(root, source)
+        if (markdown === undefined) continue
+        sources.push(source)
+        if (!markdown.trim()) continue
+        const section = `## ${stage}（旧版）\n\n${markdown}\n`
+        // A restart after writing the target but before deleting all sources must not duplicate them.
+        if (merged.replaceAll("\r\n", "\n").includes(section.replaceAll("\r\n", "\n"))) continue
+        merged += `${merged ? "\n\n" : ""}${section}`
       }
     }
+    if (sources.length === 0) continue
+    await refreshPlatformRule(root, target, merged)
+    for (const source of sources) await unlink(resolveInside(root, source))
+  }
+}
+
+async function migrateFlatStagePromptFolders(root: string): Promise<void> {
+  const stages = ["新章节阶段", ...LEGACY_IDEATION_STAGES.map(({ stage }) => stage), "章节入库阶段"]
+  for (const scope of ["基础规则", ...PROJECT_STAGE_SCOPES]) {
+    await flattenPromptFolders(root, `提示词/${scope}/阶段提示词`, stages)
+  }
+}
+
+async function migrateFlatMessagePromptFolders(root: string): Promise<void> {
+  for (const scope of ["基础规则", ...PROJECT_STAGE_SCOPES]) {
+    await flattenPromptFolders(root, `提示词/${scope}/消息前后`, ["用户消息前", "用户消息后"])
+  }
+}
+
+async function flattenPromptFolders(root: string, relativeCategory: string, folderNames: readonly string[]): Promise<void> {
+  const category = resolveInside(root, relativeCategory)
+  for (const folder of folderNames) {
+    const legacy = join(category, folder)
+    await assertParentChainContainsNoLinks(root, join(legacy, "placeholder.md"))
+    const entries = await readdir(legacy, { withFileTypes: true }).catch((error: unknown) => {
+      if (isNotFoundError(error)) return undefined
+      throw error
+    })
+    if (entries === undefined) continue
+    for (const entry of entries) {
+      if (!entry.isFile() || extname(entry.name).toLowerCase() !== ".md") continue
+      const source = join(legacy, entry.name)
+      const stem = basename(entry.name, extname(entry.name))
+      const flatStem = stem.includes(folder) ? stem : `${folder}-${stem}`
+      const content = await readFile(source, "utf8")
+      for (let attempt = 0; ; attempt += 1) {
+        const suffix = attempt === 0 ? "" : `-旧版${attempt === 1 ? "" : String(attempt)}`
+        const target = join(category, `${flatStem}${suffix}.md`)
+        try {
+          await copyFile(source, target, constants.COPYFILE_EXCL)
+          break
+        } catch (error) {
+          if (!isAlreadyExistsError(error)) throw error
+        }
+        const stat = await lstat(target)
+        if (stat.isFile() && !stat.isSymbolicLink() && (await readFile(target, "utf8")).replaceAll("\r\n", "\n") === content.replaceAll("\r\n", "\n")) break
+      }
+      await unlink(source)
+    }
+    if ((await readdir(legacy)).length === 0) await rmdir(legacy)
   }
 }
 

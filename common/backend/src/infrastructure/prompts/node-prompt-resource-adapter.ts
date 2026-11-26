@@ -61,15 +61,15 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
   }
 
   public async loadUserToSynopsisGuide(): Promise<PromptResource> {
-    return this.load(USER_TO_SYNOPSIS_GUIDE_RESOURCE)
+    return this.loadStageGuide("user-to-synopsis", USER_TO_SYNOPSIS_GUIDE_RESOURCE)
   }
 
   public async loadSynopsisToOutlineGuide(): Promise<PromptResource> {
-    return this.load(SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE)
+    return this.loadStageGuide("synopsis-to-outline", SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE)
   }
 
   public async loadOutlineToDraftGuide(): Promise<PromptResource> {
-    return this.load(OUTLINE_TO_DRAFT_GUIDE_RESOURCE)
+    return this.loadStageGuide("outline-to-draft", OUTLINE_TO_DRAFT_GUIDE_RESOURCE)
   }
 
   public async loadSettingsQueryGuide(): Promise<PromptResource> {
@@ -195,6 +195,14 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
       digest: digest(text),
       text,
     }
+  }
+
+  private async loadStageGuide(skillId: string, fallbackResource: string): Promise<PromptResource> {
+    const doc = stagePromptDocForSkill(skillId)
+    const marker = STAGE_SKILL_DOCS[skillId]?.marker
+    if (doc === undefined || marker === undefined) return this.load(fallbackResource)
+    const text = normalizePrompt(extractPromptDocSection(await this.readBundledOrOverride(doc.resourcePath), marker))
+    return { ref: `${PROMPT_CONTRACT_VERSION}:${doc.resourcePath}#${marker}`, version: PROMPT_CONTRACT_VERSION, digest: digest(text), text }
   }
 
   private async load(resourcePath: string): Promise<PromptResource> {

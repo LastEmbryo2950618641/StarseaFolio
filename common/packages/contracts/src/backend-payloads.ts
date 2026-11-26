@@ -228,7 +228,7 @@ export const workspaceReadPayloadSchema = z.object({
 })
 export type WorkspaceReadPayload = z.infer<typeof workspaceReadPayloadSchema>
 
-export const workspaceSavePayloadSchema = workspaceReadPayloadSchema.extend({ content: z.string() })
+export const workspaceSavePayloadSchema = workspaceReadPayloadSchema.extend({ content: z.string(), createOnly: z.boolean().optional() })
 export type WorkspaceSavePayload = z.infer<typeof workspaceSavePayloadSchema>
 export const workspaceCharacterUpdatePayloadSchema = characterUpdateSchema.extend({
   projectId: idSchema,

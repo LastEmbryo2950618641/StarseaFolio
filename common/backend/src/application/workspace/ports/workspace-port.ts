@@ -58,7 +58,7 @@ export interface WorkspacePort {
   readMarkdown(workspaceRootRef: string, relativePath: string): Promise<string>
   /** Character files can only be written through field operations. */
   updateCharacter?(workspaceRootRef: string, update: CharacterUpdate): Promise<string>
-  saveUserMarkdown(workspaceRootRef: string, relativePath: string, content: string): Promise<void>
+  saveUserMarkdown(workspaceRootRef: string, relativePath: string, content: string, createOnly?: boolean): Promise<void>
   /** Write a platform-owned prompt mirror, bypassing user read-only rules. */
   savePromptMirror?(workspaceRootRef: string, relativePath: string, content: string): Promise<void>
   createUserDirectory(workspaceRootRef: string, relativePath: string): Promise<void>

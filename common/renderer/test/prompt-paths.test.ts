@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 
 import {
   PROMPT_CATEGORIES,
-  isPromptAuthoringDirectory,
+  userPromptCategory,
+  userPromptTypes,
   isPromptPath,
   normalizeWorkspacePath,
   promptCategoryLabel,
@@ -48,17 +49,21 @@ describe("prompt paths", () => {
     expect(promptTag("提示词/基础规则/消息前后/用户消息前/01-用户消息前.md")).toBe("消息前")
     expect(promptTag("提示词/系统记忆/消息前后/用户消息后/规则.md")).toBe("消息后")
     expect(promptTag("提示词/基础规则/阶段提示词/新章节阶段/01.md")).toBe("新章节阶段")
-    expect(promptTag("提示词/用户规则/阶段提示词/梗概阶段/规则.md")).toBe("梗概阶段")
-    expect(promptTag("提示词/系统记忆/阶段提示词/草稿阶段/规则.md")).toBe("草稿阶段")
+    expect(promptTag("提示词/基础规则/阶段提示词/02-构思阶段.md")).toBe("构思阶段")
+    expect(promptTag("提示词\\用户规则\\阶段提示词\\构思阶段.md")).toBe("构思阶段")
+    expect(promptTag("提示词/系统记忆/阶段提示词/构思阶段.md")).toBe("构思阶段")
+    expect(promptTag("提示词/用户规则/阶段提示词/梗概阶段/规则.md")).toBe("构思阶段")
+    expect(promptTag("提示词/系统记忆/阶段提示词/草稿阶段-旧规则.md")).toBe("构思阶段")
     expect(promptTag("提示词/基础规则/阶段提示词/章节入库阶段/01.md")).toBe("章节入库阶段")
   })
 
-  it("allows authoring only in user/system-memory leaf folders", () => {
-    expect(isPromptAuthoringDirectory("提示词/用户规则/系统提示词")).toBe(true)
-    expect(isPromptAuthoringDirectory("提示词/用户规则/阶段提示词")).toBe(true)
-    expect(isPromptAuthoringDirectory("提示词/系统记忆/消息前后/用户消息后")).toBe(true)
-    expect(isPromptAuthoringDirectory("提示词/基础规则/系统提示词")).toBe(false)
-    expect(isPromptAuthoringDirectory("提示词/基础规则/阶段提示词")).toBe(false)
+  it("recognizes user rule categories and their selectable prompt types", () => {
+    expect(userPromptCategory("提示词/用户规则")).toBeUndefined()
+    expect(userPromptCategory("提示词/用户规则/阶段提示词")).toBe("阶段提示词")
+    expect(userPromptCategory("提示词/系统记忆/消息前后")).toBeUndefined()
+    expect(userPromptTypes("阶段提示词")).toEqual(["新章节阶段", "构思阶段", "章节入库阶段"])
+    expect(userPromptTypes("消息前后")).toEqual(["用户消息前", "用户消息后"])
+    expect(promptTag("提示词/基础规则/消息前后/01-用户消息前.md")).toBe("消息前")
   })
 
   it("normalizes separators and trailing slashes", () => {

@@ -5,6 +5,7 @@ import {
   rmdirSync,
   unlinkSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -63,6 +64,94 @@ afterEach(() => {
 })
 
 describe("Node workspace adapter", () => {
+  it("creates prompt files exclusively inside user rule categories without overwriting", async () => {
+    const root = temporaryDirectory()
+    const adapter = new NodeWorkspaceAdapter()
+    for (const category of ["系统提示词", "阶段提示词", "消息前后"]) {
+      const target = `提示词/用户规则/${category}/自定义.md`
+      await adapter.saveUserMarkdown(root, target, "原文", true)
+      await expect(adapter.saveUserMarkdown(root, target, "覆盖", true)).rejects.toThrow(/已存在/u)
+      expect(await adapter.readMarkdown(root, target)).toBe("原文")
+      await expect(adapter.saveUserMarkdown(root, `提示词/系统记忆/${category}/自定义.md`, "", true)).rejects.toThrow(/用户规则/u)
+    }
+    await expect(adapter.saveUserMarkdown(root, "提示词/用户规则/未分类.md", "", true)).rejects.toThrow(/分类/u)
+    await expect(adapter.createUserDirectory(root, "提示词/用户规则/系统提示词/自定义")).rejects.toThrow(/不能手动新建文件夹/u)
+  })
+
+  it("creates a single ideation prompt in each scope for new projects", async () => {
+    const root = temporaryDirectory()
+    const basePath = "提示词/基础规则/阶段提示词/02-构思阶段.md"
+    const adapter = new NodeWorkspaceAdapter()
+    const report = await adapter.createLayout(root, {
+      ...defaults,
+      promptLibraryFiles: [{ relativePath: basePath, markdown: "# 平台构思规则\n" }],
+    })
+
+    expect(report.issues).toEqual([])
+    expect(await adapter.readMarkdown(root, basePath)).toBe("# 平台构思规则\n")
+    for (const scope of ["用户规则", "系统记忆"]) {
+      const directory = `提示词/${scope}/阶段提示词`
+      expect(readdirSync(join(root, directory))).toEqual(["构思阶段.md"])
+      expect(await adapter.readMarkdown(root, `${directory}/构思阶段.md`)).toBe("")
+    }
+  })
+
+  it("merges old canonical project prompts and retains customized base mirrors in a hidden backup", async () => {
+    const root = temporaryDirectory()
+    const adapter = new NodeWorkspaceAdapter()
+    await adapter.createLayout(root, defaults)
+    const base = "提示词/基础规则/阶段提示词"
+    const user = "提示词/用户规则/阶段提示词"
+    const memory = "提示词/系统记忆/阶段提示词"
+    const customBase = "# 项目单独修改过的基础规则\r\n"
+    mkdirSync(join(root, base), { recursive: true })
+    mkdirSync(join(root, user, "梗概阶段"), { recursive: true })
+    writeFileSync(join(root, base, "02-梗概阶段.md"), customBase)
+    writeFileSync(join(root, base, "03-草稿阶段.md"), "# 项目草稿基础规则\n")
+    writeFileSync(join(root, base, "其他基础规则.md"), "保留基础规则\n")
+    writeFileSync(join(root, user, "构思阶段.md"), "已有的构思规则\n")
+    writeFileSync(join(root, user, "梗概阶段.md"), "旧梗概规则\n")
+    writeFileSync(join(root, user, "草稿阶段.md"), "旧草稿规则\n")
+    writeFileSync(join(root, user, "梗概阶段", "梗概阶段.md"), "旧梗概规则\n")
+    writeFileSync(join(root, user, "梗概阶段", "自定义.md"), "旧目录内的自定义规则\n")
+    writeFileSync(join(root, user, "梗概阶段-自定义.md"), "另一个自定义规则\n")
+    writeFileSync(join(root, memory, "梗概阶段.md"), "")
+    writeFileSync(join(root, memory, "草稿阶段.md"), "旧草稿记忆\n")
+
+    const baseMirror = { relativePath: `${base}/02-构思阶段.md`, markdown: "# 当前全局构思规则\n" }
+    const withBaseMirror = { ...defaults, promptLibraryFiles: [baseMirror] }
+    await adapter.ensurePlatformDocuments(root, withBaseMirror)
+    const mergedUser = await adapter.readMarkdown(root, `${user}/构思阶段.md`)
+    expect(mergedUser).toMatch(/^已有的构思规则\n+## 梗概阶段（旧版）\n\n旧梗概规则\n+## 草稿阶段（旧版）\n\n旧草稿规则\n+$/u)
+    expect(await adapter.readMarkdown(root, `${memory}/构思阶段.md`)).toMatch(/^## 草稿阶段（旧版）\n\n旧草稿记忆\n+$/u)
+    expect(await adapter.readMarkdown(root, baseMirror.relativePath)).toBe(baseMirror.markdown)
+    expect(await adapter.readMarkdown(root, `${base}/其他基础规则.md`)).toBe("保留基础规则\n")
+    expect(await adapter.readMarkdown(root, `${user}/梗概阶段-自定义.md`)).toBe("另一个自定义规则\n")
+    expect(await adapter.readMarkdown(root, `${user}/梗概阶段-自定义-旧版.md`)).toBe("旧目录内的自定义规则\n")
+    const report = await adapter.validate(root)
+    expect(report.issues).toEqual([])
+    for (const path of [
+      `${base}/02-梗概阶段.md`, `${base}/03-草稿阶段.md`, `${user}/梗概阶段`,
+      `${user}/梗概阶段.md`, `${user}/草稿阶段.md`, `${memory}/梗概阶段.md`, `${memory}/草稿阶段.md`,
+    ]) {
+      expect(existsSync(join(root, path))).toBe(false)
+    }
+    expect(report.inventory.some(({ path }) => path.startsWith(".folio/"))).toBe(false)
+    const backupRoot = join(root, ".folio", "prompt-migration")
+    const backups = readdirSync(backupRoot)
+    expect(backups.map((filename): unknown => JSON.parse(readFileSync(join(backupRoot, filename), "utf8")))).toEqual([
+      { path: `${base}/02-梗概阶段.md`, markdown: customBase },
+      { path: `${base}/03-草稿阶段.md`, markdown: "# 项目草稿基础规则\n" },
+    ])
+
+    // Retry with a remaining old source, as if interrupted just after writing the merge.
+    writeFileSync(join(root, user, "草稿阶段.md"), "旧草稿规则\n")
+    await adapter.ensurePlatformDocuments(root, withBaseMirror)
+    expect(await adapter.readMarkdown(root, `${user}/构思阶段.md`)).toBe(mergedUser)
+    expect(existsSync(join(root, user, "草稿阶段.md"))).toBe(false)
+    expect(readdirSync(backupRoot)).toEqual(backups)
+  })
+
   it("creates the fixed Markdown workspace and enforces actor permissions", async () => {
     const root = temporaryDirectory()
     const workspaceRoot = join(root, "workspace")
@@ -72,6 +161,8 @@ describe("Node workspace adapter", () => {
     expect(report.issues).toEqual([])
     expect(report.inventory.filter((entry) => !entry.path.includes("/") && entry.kind === "directory"))
       .toHaveLength(8)
+    expect(await adapter.readMarkdown(workspaceRoot, "提示词/基础规则/阶段提示词/02-构思阶段.md"))
+      .toContain("# 构思阶段")
     expect(await adapter.readMarkdown(workspaceRoot, "世界推演规则/基础规则/base-rules.md"))
       .toBe(defaults.baseRules)
     expect(await adapter.readMarkdown(workspaceRoot, "世界推演规则/基础规则/batch-volume-deduction-plan.md"))
@@ -276,14 +367,17 @@ describe("project lifecycle", () => {
       nowMs: 100,
     })
 
+    const registered = await new SqliteProjectRegistryRepository(registryDatabase).findById(projectId)
+    if (registered === undefined) throw new Error("Missing project registration")
     const store = await new NodeInternalStoreAdapter(appDataRoot).inspectProject(
       projectId,
       workspaceRoot,
-      (await new SqliteProjectRegistryRepository(registryDatabase).findById(projectId))!.internalStoreRef,
+      registered.internalStoreRef,
     )
     const session = await new SqliteProjectRepositoryFactory().open(store, workspaceRoot)
     try {
-      const manifest = (await session.repository.readManifest(projectId))!
+      const manifest = await session.repository.readManifest(projectId)
+      if (manifest === undefined) throw new Error("Missing project manifest")
       const legacyFixedEntries = manifest.fixedEntries.filter((entry) => (
         entry.key !== "world-rules-overview"
         && entry.key !== "content-handling"

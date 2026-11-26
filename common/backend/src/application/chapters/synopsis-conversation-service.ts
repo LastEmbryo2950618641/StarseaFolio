@@ -4016,7 +4016,7 @@ export class SynopsisConversationService {
               const headings = { synopsis: "梗概", outline: "细纲", draft: "草稿" } as const
               const protocol = sections.length === 0
                 ? "用普通文本回复讨论。需要资料时调用原生读取工具；需要 Todo、正文推演等工具时，只输出 <tool-request> 文本块（name、action，invoke 时再加一行 arguments 单行 JSON），不要自造其他标签。"
-                : [sections.length === 3 ? "本轮已获准连写。" : "本轮仅可交付下列获准产物。",
+                : [sections.length === 3 ? "本轮执行完整构思，一次生成并交齐梗概、细纲和草稿。后两段直接承接本次回复中的前置产物。" : "本轮仅可交付下列获准产物。",
                     "需要资料时先调用原生读取工具；需要 Todo 等非读取工具时，另起一个 <tool-request> 块（name、action，invoke 时加一行 arguments 单行 JSON），工具请求不能与下列构思写入同回。资料齐全后，在同一回复中按下列顺序交付完整 Markdown。",
                     ...sections.map((section) => `<compose-${section}>\n${headings[section]}\n</compose-${section}>`),
                   ].join("\n")

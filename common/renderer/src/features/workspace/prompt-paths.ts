@@ -3,7 +3,7 @@
  *
  * 目标结构：
  * 提示词/{基础规则,用户规则,系统记忆}/{系统提示词,阶段提示词,消息前后}
- * 阶段/消息文件夹内再按阶段/前后分目录；标签由目录确定。
+ * 阶段提示词和消息前后直接存放 Markdown；标签由文件名确定。
  */
 import { CHARACTER_RULE_PATH, WORLD_RULES_OVERVIEW_PATH } from "@starseafolio/contracts"
 
@@ -14,7 +14,8 @@ export const PROMPT_CATEGORIES = ["系统提示词", "阶段提示词", "消息�
 
 export type PromptScope = (typeof PROMPT_SCOPES)[number]
 export type PromptCategory = (typeof PROMPT_CATEGORIES)[number]
-export type PromptTag = "系统" | "消息前" | "消息后" | "新章节阶段" | "梗概阶段" | "草稿阶段" | "章节入库阶段"
+const STAGE_PROMPT_TYPES = ["新章节阶段", "构思阶段", "章节入库阶段"] as const
+export type PromptTag = "系统" | "消息前" | "消息后" | (typeof STAGE_PROMPT_TYPES)[number]
 
 export const PLATFORM_PROMPT_MIRROR_PREFIX = "世界推演规则/基础规则"
 
@@ -58,22 +59,26 @@ function segments(path: string): readonly string[] {
 
 function stageTag(value: string): PromptTag | undefined {
   if (value.includes("新章节")) return "新章节阶段"
-  if (value.includes("梗概")) return "梗概阶段"
-  if (value.includes("草稿")) return "草稿阶段"
+  if (value.includes("构思") || value.includes("梗概") || value.includes("细纲") || value.includes("草稿")) return "构思阶段"
   if (value.includes("章节入库")) return "章节入库阶段"
   return undefined
 }
 
-/** User/AI may author prompt files only in user/system-memory scopes. */
-export function isPromptAuthoringDirectory(path: string): boolean {
+export const USER_PROMPT_ROOT = `${PROMPT_DIRECTORY}/用户规则`
+
+const USER_PROMPT_TYPES: Record<PromptCategory, readonly string[]> = {
+  系统提示词: ["系统提示词"],
+  阶段提示词: STAGE_PROMPT_TYPES,
+  消息前后: ["用户消息前", "用户消息后"],
+}
+
+export function userPromptCategory(path: string): PromptCategory | undefined {
   const normalized = normalizeWorkspacePath(path)
-  if (!normalized.startsWith(`${PROMPT_DIRECTORY}/`)) return false
-  const [scope, category, stage] = segments(normalized)
-  if (scope !== "用户规则" && scope !== "系统记忆") return false
-  if (category === "系统提示词") return true
-  if (category === "阶段提示词") return true
-  if (category === "消息前后") return stage === "用户消息前" || stage === "用户消息后"
-  return false
+  return PROMPT_CATEGORIES.find((category) => normalized === `${USER_PROMPT_ROOT}/${category}`)
+}
+
+export function userPromptTypes(category: PromptCategory): readonly string[] {
+  return USER_PROMPT_TYPES[category]
 }
 
 /** 文件标签：系统 / 消息前 / 消息后 / xx阶段。 */
@@ -105,8 +110,9 @@ export function promptCategoryLabel(path: string): string | undefined {
   const normalized = normalizeWorkspacePath(path)
   if (normalized.startsWith(`${PROMPT_DIRECTORY}/`)) {
     const [scope, category] = segments(normalized)
-    return (PROMPT_SCOPES as readonly string[]).includes(scope ?? "")
-      && (PROMPT_CATEGORIES as readonly string[]).includes(category ?? "")
+    return scope !== undefined && category !== undefined
+      && (PROMPT_SCOPES as readonly string[]).includes(scope)
+      && (PROMPT_CATEGORIES as readonly string[]).includes(category)
       ? `${scope} · ${category}`
       : undefined
   }

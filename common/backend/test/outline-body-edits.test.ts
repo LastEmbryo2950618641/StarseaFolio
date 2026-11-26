@@ -213,7 +213,7 @@ describe("outline bodyEdits integration", () => {
       },
       async execute(request, options) {
         const result = await delegate.execute(request, options)
-        if (request.phase !== "synopsis_discuss" || !options?.phasePrompt?.text.includes("<compose-outline-patch>")
+        if (request.phase !== "synopsis_discuss" || !options?.phasePrompt?.text.startsWith("只提交一个 <compose-outline-patch>")
           || result.result.outcome === "request_read") return result
         expect(options.outputMode).toBe("text")
         return {

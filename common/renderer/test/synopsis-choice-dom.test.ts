@@ -37,7 +37,7 @@ describe.skipIf(executable === undefined)("synopsis choice DOM fixture", () => {
         configureServer(vite) {
           vite.middlewares.use((request, response, next) => {
             if (request.url === "/favicon.ico") { response.statusCode = 204; response.end(); return }
-            if (request.url !== "/choice-fixture") { next(); return }
+            if (request.url?.split("?")[0] !== "/choice-fixture") { next(); return }
             response.setHeader("Content-Type", "text/html")
             response.end(`<html><head><title>StarseaFolio choice fixture</title></head><body><div id="root" style="height:100vh"></div><script type="module" src="/@fs/${fixturePath}"></script></body></html>`)
           })
@@ -80,6 +80,19 @@ describe.skipIf(executable === undefined)("synopsis choice DOM fixture", () => {
   const selected = (label: string) => latest().getByRole("button", { name: label, exact: true })
   const edit = (label: string) => latest().getByRole("button", { name: `编辑选项：${label}`, exact: true })
   const sent = () => page.evaluate(() => window.choiceFixture.sent)
+
+  it("switches the discussion to the first chapter in the selected volume and updates the stage row", async () => {
+    await page.goto(`${url}?desk`)
+    const volume = page.getByRole("combobox", { name: "当前讨论焦点卷" })
+    await volume.waitFor()
+    const stages = page.locator(".creation-desk-volume-stages")
+    expect(await stages.locator("li").count()).toBe(9)
+    expect(await stages.locator('[aria-current="step"]').textContent()).toBe("风格选择")
+    await volume.selectOption("第二卷 启程")
+    expect(await volume.inputValue()).toBe("第二卷 启程")
+    expect(await page.getByRole("button", { name: "当前讨论焦点章节" }).textContent()).toContain("第三章 渡口")
+    expect(await stages.locator('[aria-current="step"]').textContent()).toBe("卷始")
+  })
 
   it("multi-selects every action as draft text, preserving manual text without executing or sending", async () => {
     await draft().fill("方向 A（这是手写的）")

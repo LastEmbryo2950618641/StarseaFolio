@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
 import { buildTree, WorkspaceTree } from "../src/features/workspace/WorkspaceTree.js"
+import { WorkspaceNameDialog } from "../src/features/workspace/WorkspaceNameDialog.js"
 import {
   canCreateFolderInDirectory,
   canCreateMarkdownInDirectory,
@@ -38,8 +39,12 @@ describe("workspace locks", () => {
     expect(canCreateMarkdownInDirectory("世界推演规则/基础规则")).toBe(false)
     expect(resolveWorkspaceLockKind("提示词/系统记忆/系统提示词")).toBeUndefined()
     expect(resolveWorkspaceLockKind("提示词/系统记忆/系统提示词/MEMORY.md")).toBeUndefined()
-    expect(canCreateMarkdownInDirectory("提示词/系统记忆/系统提示词")).toBe(true)
-    expect(canCreateFolderInDirectory("提示词/系统记忆/系统提示词")).toBe(true)
+    expect(canCreateMarkdownInDirectory("提示词/系统记忆/系统提示词")).toBe(false)
+    expect(canCreateFolderInDirectory("提示词/系统记忆/系统提示词")).toBe(false)
+    expect(canCreateMarkdownInDirectory("提示词/用户规则/阶段提示词")).toBe(true)
+    expect(canCreateMarkdownInDirectory("提示词/用户规则")).toBe(false)
+    expect(canCreateFolderInDirectory("提示词/用户规则/系统提示词")).toBe(false)
+    expect(canCreateFolderInDirectory("提示词/用户规则")).toBe(false)
     expect(resolveCreateDestination("设定集/人物/顾青衡.md")).toBe("设定集/人物")
     expect(resolveCreateDestination("世界推演规则/基础规则/base-rules.md")).toBe("设定集")
     expect(resolveCreateDestination("表现输出/笔风规则")).toBe("表现输出/笔风规则")
@@ -128,6 +133,27 @@ describe("workspace locks", () => {
     expect(html).not.toContain('aria-label="在 系统提示词 下新建 Markdown"')
     expect(html).not.toContain('aria-label="在 提示词 下新建文件夹"')
     expect(html).not.toContain('aria-label="删除 写作基调.md"')
+  })
+
+  it("shows file creation on user rule categories and requires a prompt type before naming", () => {
+    const html = renderToStaticMarkup(React.createElement(WorkspaceTree, {
+      entries: [{ path: "提示词/用户规则/阶段提示词", kind: "directory" }, { path: "提示词/系统记忆/系统提示词", kind: "directory" }],
+      selectedPath: "提示词/用户规则/阶段提示词/草稿阶段.md",
+      onSelect: () => {}, onSelectLineage: () => {}, onRefresh: () => {},
+      onCreateMarkdown: () => {}, onCreateDirectory: () => {},
+    }))
+    expect(html).not.toContain('aria-label="在 用户规则 下新建文件夹"')
+    expect(html).toContain('aria-label="在 阶段提示词 下新建 Markdown"')
+    expect(html).not.toContain('aria-label="在 阶段提示词 下新建文件夹"')
+    const dialog = renderToStaticMarkup(React.createElement(WorkspaceNameDialog, {
+      kind: "file", parentPath: "提示词/用户规则/阶段提示词", onConfirm: () => {}, onCancel: () => {},
+    }))
+    expect(dialog).toContain("请选择提示词类型")
+    expect(dialog).toContain('class="creation-desk-focus-trigger"')
+    expect(dialog).toContain('aria-haspopup="listbox"')
+    expect(dialog).not.toContain("<select")
+    expect(dialog).not.toContain("<input")
+    expect(dialog).toMatch(/data-testid="workspace-name-confirm" disabled/)
   })
 
   it("orders 提示词 right after 世界推演规则", () => {

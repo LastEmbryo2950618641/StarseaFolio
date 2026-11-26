@@ -48,16 +48,16 @@ describe("prompt library", () => {
   it("seeds the fixed system/stage/dynamic prompt documents once", async () => {
     const library = await temporaryLibrary()
     await library.ensureSeeded()
-    expect(library.entries).toHaveLength(12)
+    expect(library.entries).toHaveLength(11)
     expect(library.entries.some((entry) => entry.libraryPath === "基础规则/系统提示词/03-去AI味与写作声音.md")).toBe(true)
-    expect(library.entries.some((entry) => entry.libraryPath === "基础规则/阶段提示词/02-梗概阶段.md")).toBe(true)
-    expect(library.entries.some((entry) => entry.libraryPath === "基础规则/消息前后/用户消息后/02-用户消息后.md")).toBe(true)
+    expect(library.entries.some((entry) => entry.libraryPath === "基础规则/阶段提示词/02-构思阶段.md")).toBe(true)
+    expect(library.entries.some((entry) => entry.libraryPath === "基础规则/消息前后/02-用户消息后.md")).toBe(true)
 
     const files = await library.buildWorkspaceMirrorFiles()
     const byPath = new Map(files.map((file) => [file.relativePath, file.markdown]))
     expect(byPath.has("提示词/基础规则/系统提示词/03-去AI味与写作声音.md")).toBe(true)
-    expect(byPath.has("提示词/基础规则/阶段提示词/02-梗概阶段.md")).toBe(true)
-    expect(byPath.has("提示词/基础规则/消息前后/用户消息后/02-用户消息后.md")).toBe(true)
+    expect(byPath.has("提示词/基础规则/阶段提示词/02-构思阶段.md")).toBe(true)
+    expect(byPath.has("提示词/基础规则/消息前后/02-用户消息后.md")).toBe(true)
   })
 
   it("prefers a global override for a system prompt document", async () => {
@@ -76,11 +76,26 @@ describe("prompt library", () => {
   it("maps new prompt document paths back to one library entry", async () => {
     const library = await temporaryLibrary()
     await library.ensureSeeded()
-    expect(library.resolveWorkspacePath("提示词/基础规则/阶段提示词/02-梗概阶段.md")?.entry.libraryPath)
-      .toBe("基础规则/阶段提示词/02-梗概阶段.md")
+    expect(library.resolveWorkspacePath("提示词/基础规则/阶段提示词/02-构思阶段.md")?.entry.libraryPath)
+      .toBe("基础规则/阶段提示词/02-构思阶段.md")
     expect(library.resolveWorkspacePath("提示词/基础规则/消息前后/用户消息前/01-用户消息前.md")?.entry.libraryPath)
-      .toBe("基础规则/消息前后/用户消息前/01-用户消息前.md")
+      .toBe("基础规则/消息前后/01-用户消息前.md")
     expect(library.resolveWorkspacePath("设定集/人物/主角.json")).toBeUndefined()
+  })
+
+  it("preserves a customized message prompt when moving it to the flat library", async () => {
+    const library = await temporaryLibrary()
+    const legacyDirectory = join(library.libraryRoot, "基础规则/消息前后/用户消息前")
+    const resource = "resources/v1/prompt-docs/dynamic/01-before-user-message.md"
+    await mkdir(legacyDirectory, { recursive: true })
+    await writeFile(join(legacyDirectory, "01-用户消息前.md"), "自定义消息前提示词\n")
+
+    await library.ensureSeeded()
+    await library.ensureSeeded()
+
+    expect(await library.readEffective(resource)).toBe("自定义消息前提示词\n")
+    expect(await readFile(join(library.libraryRoot, "基础规则/消息前后/01-用户消息前.md"), "utf8"))
+      .toBe("自定义消息前提示词\n")
   })
 
   it("materializes the prompt documents on project open", async () => {
@@ -88,7 +103,12 @@ describe("prompt library", () => {
     await library.ensureSeeded()
     const root = await mkdtemp(join(tmpdir(), "worldseed-prompt-workspace-"))
     temporaryDirectories.push(root)
-    await mkdir(join(root, "提示词"), { recursive: true })
+    const oldBase = join(root, "提示词/基础规则/消息前后/用户消息前")
+    const oldUser = join(root, "提示词/用户规则/消息前后/用户消息后")
+    await mkdir(oldBase, { recursive: true })
+    await mkdir(oldUser, { recursive: true })
+    await writeFile(join(oldBase, "01-用户消息前.md"), "# 消息前\r\n")
+    await writeFile(join(oldUser, "规则.md"), "自定义消息后规则\n")
     await new NodeWorkspaceAdapter().ensurePlatformDocuments(root, {
       worldRulesOverview: "# 总览\n",
       baseRules: "# 规则\n",
@@ -113,12 +133,16 @@ describe("prompt library", () => {
       stagingPromoteIndex: "",
       promptLibraryFiles: [
         { relativePath: "提示词/基础规则/系统提示词/01-世界与基础规则.md", markdown: "# 规则\n" },
-        { relativePath: "提示词/基础规则/阶段提示词/02-梗概阶段.md", markdown: "# 梗概阶段\n" },
+        { relativePath: "提示词/基础规则/阶段提示词/02-构思阶段.md", markdown: "# 构思阶段\n" },
+        { relativePath: "提示词/基础规则/消息前后/01-用户消息前.md", markdown: "# 消息前\n" },
       ],
     })
     const adapter = new NodeWorkspaceAdapter()
     expect(await adapter.readMarkdown(root, "提示词/基础规则/系统提示词/01-世界与基础规则.md")).toBe("# 规则\n")
-    expect(await adapter.readMarkdown(root, "提示词/基础规则/阶段提示词/02-梗概阶段.md")).toBe("# 梗概阶段\n")
+    expect(await adapter.readMarkdown(root, "提示词/基础规则/阶段提示词/02-构思阶段.md")).toBe("# 构思阶段\n")
+    expect(await readdir(join(root, "提示词/基础规则/消息前后"))).toEqual(["01-用户消息前.md"])
+    expect(await adapter.readMarkdown(root, "提示词/用户规则/消息前后/用户消息后-规则.md")).toBe("自定义消息后规则\n")
+    await expect(readdir(oldUser)).rejects.toMatchObject({ code: "ENOENT" })
   })
 
   it("records every seed digest and keeps user edits", async () => {
@@ -144,7 +168,7 @@ describe("prompt library", () => {
   it("updates a document whose file still matches the recorded seed digest", async () => {
     const library = await temporaryLibrary()
     await library.ensureSeeded()
-    const targetPath = "基础规则/阶段提示词/03-草稿阶段.md"
+    const targetPath = "基础规则/阶段提示词/02-构思阶段.md"
     const previousSeed = "# 旧版阶段提示词\n\nOLD-SEED-CONTENT\n"
     await writeFile(join(library.libraryRoot, targetPath), previousSeed, "utf8")
     const manifest = await readSeedManifest(library)
@@ -155,9 +179,22 @@ describe("prompt library", () => {
     )
 
     await library.ensureSeeded()
-    const bundled = await bundledMarkdown({ resourcePath: "resources/v1/prompt-docs/stages/03-draft.md" })
+    const bundled = await bundledMarkdown({ resourcePath: "resources/v1/prompt-docs/stages/02-compose.md" })
     expect(await readFile(join(library.libraryRoot, targetPath), "utf8")).toBe(bundled)
     expect((await readSeedManifest(library)).seeds[targetPath]).toBe(seedDigest(bundled))
+  })
+
+  it("loads old custom rules from the merged compose document", async () => {
+    const library = await temporaryLibrary()
+    const directory = join(library.libraryRoot, "基础规则/阶段提示词")
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, "细纲阶段.md"), "我的旧细纲规则\n")
+    const draft = await bundledMarkdown({ resourcePath: "resources/v1/prompt-docs/stages/03-draft.md" })
+    await writeFile(join(directory, "03-草稿阶段.md"), draft.replace("<!-- /skill:outline-to-draft -->", "我的旧草稿规则\n\n<!-- /skill:outline-to-draft -->"))
+    await library.ensureSeeded()
+    const adapter = new NodePromptResourceAdapter(packageRoot, library)
+    expect((await adapter.loadPhase("synopsis_discuss")).text).toContain("我的旧细纲规则")
+    expect((await adapter.loadOutlineToDraftGuide()).text).toContain("我的旧草稿规则")
   })
 
   it("serializes concurrent seeding without leaving temp files", async () => {

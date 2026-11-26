@@ -93,7 +93,7 @@ export function WorkspaceTree({
             {showSceneCards ? <Eye size={15} /> : <EyeOff size={15} />}
           </button>
         </UiTooltip>
-        <UiTooltip label={selectedPath === CHARACTER_DIRECTORY || isCharacterProfilePath(selectedPath ?? "") ? "新增人物" : "新建 Markdown（相对当前选中位置）"}>
+        {!isPromptPath(selectedPath ?? "") && <UiTooltip label={selectedPath === CHARACTER_DIRECTORY || isCharacterProfilePath(selectedPath ?? "") ? "新增人物" : "新建 Markdown（相对当前选中位置）"}>
           <button
             type="button"
             aria-label={selectedPath === CHARACTER_DIRECTORY || isCharacterProfilePath(selectedPath ?? "") ? "新增人物" : "新建 Markdown"}
@@ -102,8 +102,8 @@ export function WorkspaceTree({
           >
             <FilePlus2 size={15} />
           </button>
-        </UiTooltip>
-        <UiTooltip label="新建文件夹（相对当前选中位置）">
+        </UiTooltip>}
+        {!isPromptPath(selectedPath ?? "") && <UiTooltip label="新建文件夹（相对当前选中位置）">
           <button
             type="button"
             aria-label="新建文件夹"
@@ -112,7 +112,7 @@ export function WorkspaceTree({
           >
             <FolderPlus size={15} />
           </button>
-        </UiTooltip>
+        </UiTooltip>}
         <UiTooltip label="刷新"><button type="button" aria-label="刷新" onClick={() => { onRefresh(); }}><RefreshCw size={15} /></button></UiTooltip>
       </div>
     </div>

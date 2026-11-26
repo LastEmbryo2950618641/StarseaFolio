@@ -52,6 +52,7 @@ import { rememberWorkName } from "../features/projects/work-name-history.js"
 import { useAppUpdate } from "../hooks/useAppUpdate.js"
 import { WorkspaceTree } from "../features/workspace/WorkspaceTree.js"
 import { WorkspaceNameDialog } from "../features/workspace/WorkspaceNameDialog.js"
+import { userPromptCategory, userPromptTypes } from "../features/workspace/prompt-paths.js"
 import { isSharedPresentationRulePath, resolveWorkspaceAbsolutePath } from "../features/workspace/workspace-paths.js"
 import { AUTO_DESCRIPTION_RULE_PATH, canCreateFolderInDirectory, findDuplicateVolumeSequence, isValidVolumeFolderName, isChapterVolumeContainerPath, isVolumeDirectoryPath, resolveCreateDestination } from "../features/workspace/workspace-locks.js"
 import { EditorArea } from "../features/editor/EditorArea.js"
@@ -1504,9 +1505,11 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
     })
   }
 
-  const confirmWorkspaceCreate = async (rawName: string): Promise<void> => {
+  const confirmWorkspaceCreate = async (rawName: string, promptType?: string): Promise<void> => {
     if (project === undefined || workspaceCreatePrompt === undefined) return
     const { kind, parentPath } = workspaceCreatePrompt
+    const category = kind === "file" ? userPromptCategory(parentPath) : undefined
+    if (category !== undefined && (promptType === undefined || !userPromptTypes(category).includes(promptType))) return
     setWorkspaceCreatePrompt(undefined)
     setError(undefined)
     try {
@@ -1529,12 +1532,15 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           : trimmed.toLowerCase().endsWith(".md")
             ? trimmed
             : `${trimmed}.md`
-        const relativePath = `${parentPath}/${filename}`
+        const typedFilename = category !== undefined && category !== "系统提示词" && promptType !== undefined
+          && !filename.startsWith(`${promptType}-`) ? `${promptType}-${filename}` : filename
+        const relativePath = `${parentPath}/${typedFilename}`
         await invokeBackend("workspace.save", {
           projectId: project.projectId,
           workspaceRootRef: project.workspaceRootRef,
           relativePath,
           content: `# ${filename.replace(/\.md$/iu, "")}\n\n`,
+          ...(category === undefined ? {} : { createOnly: true }),
         })
         await refreshWorkspace()
         await openFile(relativePath)
@@ -3529,7 +3535,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           kind={workspaceCreatePrompt.kind}
           parentPath={workspaceCreatePrompt.parentPath}
           onCancel={() => { setWorkspaceCreatePrompt(undefined) }}
-          onConfirm={(name) => { void confirmWorkspaceCreate(name) }}
+          onConfirm={(name, category) => { void confirmWorkspaceCreate(name, category) }}
         />}
     {promptSaveRequest === undefined
       ? null

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, FileText } from "lucide-react"
-import { VOLUME_LIFECYCLE_LABELS, type DiscussFocusKind, type SynopsisConversationSession, type VolumeLifecycle } from "@starseafolio/contracts"
+import { VOLUME_LIFECYCLE_LABELS, VOLUME_LIFECYCLE_PHASES, type DiscussFocusKind, type SynopsisConversationSession } from "@starseafolio/contracts"
 
 import {
   discussFocusOpenLabel,
+  extractVolumeFolderNameFromChapterPath,
+  groupChaptersByVolume,
   resolveDiscussFocusKindForChapter,
   resolveDiscussFocusOpenPath,
   type DiscussFocusChapterOption,
@@ -14,8 +16,6 @@ type Props = Readonly<{
   chapters: readonly DiscussFocusChapterOption[]
   /** Target chapter count for the active volume plan; omit to show only the in-volume index. */
   volumeTargetChapterCount?: number
-  /** Backend-owned lifecycle for the current volume, when available. */
-  volumeLifecycle?: VolumeLifecycle & Readonly<{ volumeFolderName?: string }>
   onSelectChapter(sequence: number, focusKind: DiscussFocusKind): void
   onOpenFile(path: string): void
 }>
@@ -79,7 +79,13 @@ export function CreationDeskFocusBar(props: Props): React.JSX.Element {
   }, [open])
 
   const lifecycle = props.session.volumeLifecycle
-  const volumeName = lifecycle?.volumeFolderName ?? selected?.volumeFolderName ?? "当前卷"
+  const volumeName = lifecycle?.volumeFolderName ?? selected?.volumeFolderName
+    ?? extractVolumeFolderNameFromChapterPath(props.session.synopsisPath) ?? "当前卷"
+  const volumes = useMemo(() => groupChaptersByVolume(props.chapters.map((chapter) => {
+    const path = chapter.synopsisPath ?? chapter.outlinePath ?? chapter.bodyPath
+    const folder = chapter.volumeFolderName ?? (path === undefined ? undefined : extractVolumeFolderNameFromChapterPath(path))
+    return folder === undefined ? chapter : { ...chapter, volumeFolderName: folder }
+  })), [props.chapters])
   return <div className="creation-desk-focus-stack" ref={rootRef} data-testid="creation-desk-focus-bar">
     <div className="creation-desk-session-bar">
     <FileText size={13} aria-hidden="true" />
@@ -156,15 +162,42 @@ export function CreationDeskFocusBar(props: Props): React.JSX.Element {
           {discussFocusOpenLabel(focusKind)}
         </button>}
     </div>
-    <div className="creation-desk-volume-progress" data-testid="creation-desk-volume-progress" title="当前卷进度">
-      <span data-testid="creation-desk-volume-name">{volumeName}</span>
-      {lifecycle === undefined ? <span>{volumeProgressLabel}</span> : <>
-        <span data-testid="creation-desk-volume-stage">{lifecycle.phase === "volume_end" && !lifecycle.ended
-          ? "待标记卷末" : VOLUME_LIFECYCLE_LABELS[lifecycle.phase]}</span>
-        {lifecycle.phase === "writing"
-          ? <span data-testid="creation-desk-volume-writing-count">待写入 {Math.min(lifecycle.chapterCount + 1, lifecycle.chapterLimit)}/{lifecycle.chapterLimit}</span>
-          : lifecycle.chapterLimit > 0 ? <span>{lifecycle.chapterCount}/{lifecycle.chapterLimit} 章</span> : null}
-      </>}
+    <div className="creation-desk-proceed-panel creation-desk-volume-progress" data-testid="creation-desk-volume-progress">
+      <select
+        className="creation-desk-proceed-mode creation-desk-volume-focus"
+        aria-label="当前讨论焦点卷"
+        title={volumeName}
+        value={volumeName}
+        onChange={(event) => {
+          const volume = volumes.find((group) => group.volumeFolderName === event.target.value)
+          const chapter = volume?.chapters.reduce<DiscussFocusChapterOption | undefined>(
+            (first, item) => first === undefined || item.sequence < first.sequence ? item : first, undefined,
+          )
+          if (chapter !== undefined) props.onSelectChapter(chapter.sequence, resolveDiscussFocusKindForChapter(chapter, focusKind))
+        }}
+      >
+        {!volumes.some((group) => group.volumeFolderName === volumeName) && <option value={volumeName}>{volumeName}</option>}
+        {volumes.map((group) => <option key={group.volumeFolderName} value={group.volumeFolderName}>{group.volumeFolderName}</option>)}
+      </select>
+      <ol className="creation-desk-proceed-stages creation-desk-volume-stages" aria-label="卷阶段">
+        {VOLUME_LIFECYCLE_PHASES.map((phase, index) => {
+          const status = lifecycle?.stages.find((stage) => stage.phase === phase)?.status ?? "pending"
+          const waitingForEnd = phase === "volume_end" && status === "current" && lifecycle?.ended === false
+          const writingCount = phase === "writing" && status === "current" && lifecycle !== undefined && lifecycle.chapterLimit > 0
+            ? `待写入 ${Math.min(lifecycle.chapterCount + 1, lifecycle.chapterLimit)}/${lifecycle.chapterLimit}` : undefined
+          const detail = writingCount ?? (waitingForEnd ? "待标记" : undefined)
+          const stepClass = status === "done" ? "is-done" : status === "current" ? "is-active status-waiting" : ""
+          const label = VOLUME_LIFECYCLE_LABELS[phase]
+          return <li key={phase} className={`creation-desk-proceed-step ${stepClass}`} aria-current={status === "current" ? "step" : undefined}>
+            {index > 0 && <span className="creation-desk-proceed-connector" aria-hidden="true" />}
+            <span className="creation-desk-proceed-stage" title={detail === undefined ? label : `${label} · ${detail}`} data-testid={`creation-desk-volume-stage-${phase}`}>
+              <span className="creation-desk-proceed-stage-label">{label}</span>
+              {detail !== undefined && <span className="creation-desk-proceed-stage-gate">{detail}</span>}
+            </span>
+          </li>
+        })}
+      </ol>
+      {lifecycle === undefined && <span className="creation-desk-volume-count">{volumeProgressLabel}</span>}
     </div>
   </div>
 }

@@ -15,13 +15,12 @@ export const AFTER_USER_MESSAGE_PROMPT_DOC = "resources/v1/prompt-docs/dynamic/0
 export type PromptDocDefinition = Readonly<{
   id: string
   resourcePath: string
-  tag: "系统" | "消息前" | "消息后" | "新章节阶段" | "梗概阶段" | "草稿阶段" | "章节入库阶段"
+  tag: "系统" | "消息前" | "消息后" | "新章节阶段" | "构思阶段" | "章节入库阶段"
 }>
 
 export const STAGE_PROMPT_DOCS = Object.freeze([
   { id: "new-chapter", resourcePath: "resources/v1/prompt-docs/stages/01-new-chapter.md", tag: "新章节阶段" },
-  { id: "synopsis", resourcePath: "resources/v1/prompt-docs/stages/02-synopsis.md", tag: "梗概阶段" },
-  { id: "draft", resourcePath: "resources/v1/prompt-docs/stages/03-draft.md", tag: "草稿阶段" },
+  { id: "compose", resourcePath: "resources/v1/prompt-docs/stages/02-compose.md", tag: "构思阶段" },
   { id: "ingestion", resourcePath: "resources/v1/prompt-docs/stages/04-ingestion.md", tag: "章节入库阶段" },
 ] as const satisfies readonly PromptDocDefinition[])
 
@@ -49,10 +48,10 @@ const INGESTION_PHASES = [
   "revision_review",
 ] as const
 
-const STAGE_BY_PHASE: Record<string, "new-chapter" | "synopsis" | "draft" | "ingestion"> = {
+const STAGE_BY_PHASE: Record<string, (typeof STAGE_PROMPT_DOCS)[number]["id"]> = {
   ...Object.fromEntries(NEW_CHAPTER_PHASES.map((phase) => [phase, "new-chapter"])),
-  synopsis_discuss: "synopsis",
-  draft: "draft",
+  synopsis_discuss: "compose",
+  draft: "compose",
   ...Object.fromEntries(INGESTION_PHASES.map((phase) => [phase, "ingestion"])),
 }
 
@@ -71,13 +70,13 @@ export function stagePromptDocForPhase(phase: AIPhase): PromptDocDefinition | un
 }
 
 export const STAGE_SKILL_DOCS: Readonly<Record<string, Readonly<{ doc: string; marker: string }>>> = Object.freeze({
-  "plot-synopsis": { doc: "synopsis", marker: "skill:plot-synopsis" },
-  "discuss-workflow": { doc: "synopsis", marker: "skill:discuss-workflow" },
-  "starsea-writing": { doc: "synopsis", marker: "skill:starsea-writing" },
-  "user-to-synopsis": { doc: "synopsis", marker: "skill:user-to-synopsis" },
-  "synopsis-to-outline": { doc: "synopsis", marker: "skill:synopsis-to-outline" },
-  "book-cold-start": { doc: "synopsis", marker: "skill:book-cold-start" },
-  "outline-to-draft": { doc: "draft", marker: "skill:outline-to-draft" },
+  "plot-synopsis": { doc: "compose", marker: "skill:plot-synopsis" },
+  "discuss-workflow": { doc: "compose", marker: "skill:discuss-workflow" },
+  "starsea-writing": { doc: "compose", marker: "skill:starsea-writing" },
+  "user-to-synopsis": { doc: "compose", marker: "skill:user-to-synopsis" },
+  "synopsis-to-outline": { doc: "compose", marker: "skill:synopsis-to-outline" },
+  "book-cold-start": { doc: "compose", marker: "skill:book-cold-start" },
+  "outline-to-draft": { doc: "compose", marker: "skill:outline-to-draft" },
   "settings-revision": { doc: "ingestion", marker: "skill:settings-revision" },
 })
 

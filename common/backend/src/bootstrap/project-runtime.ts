@@ -1138,8 +1138,14 @@ export class ProjectRuntime {
     return content
   }
 
-  public async saveMarkdown(relativePath: string, content: string): Promise<void> {
+  public async saveMarkdown(relativePath: string, content: string, createOnly = false): Promise<void> {
     assertVolumeLifecycleDocumentReadOnly(relativePath)
+    const normalizedPromptPath = relativePath.replaceAll("\\", "/").replace(/^\.\//u, "")
+    if (createOnly) {
+      if (!normalizedPromptPath.startsWith("提示词/")) throw new Error("此入口仅用于新建用户提示词")
+      await this.workspace.saveUserMarkdown(this.workspaceRootRef, relativePath, content, true)
+      return
+    }
     const promptTarget = this.promptLibrary.resolveWorkspacePath(relativePath)
     if (promptTarget !== undefined) {
       const saveMirror = this.workspace.savePromptMirror
@@ -1150,8 +1156,15 @@ export class ProjectRuntime {
       }
       return
     }
-    const normalizedPromptPath = relativePath.replaceAll("\\", "/").replace(/^\.\//u, "")
     if (normalizedPromptPath === "提示词" || normalizedPromptPath.startsWith("提示词/")) {
+      try {
+        await this.workspace.readMarkdown(this.workspaceRootRef, normalizedPromptPath)
+      } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+          throw new Error("提示词目录下不能手动新建文件")
+        }
+        throw error
+      }
       await this.workspace.saveUserMarkdown(this.workspaceRootRef, relativePath, content)
       return
     }

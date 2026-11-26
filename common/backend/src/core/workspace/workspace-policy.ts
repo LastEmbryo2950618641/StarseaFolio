@@ -206,32 +206,14 @@ export function assertUserCanEditContent(path: string): string {
   return assertWorkspaceMutationAllowed(path, "file", "user")
 }
 
-/** User/AI may author prompt files only in user/system-memory scopes. */
-export function isPromptAuthoringDirectory(path: string): boolean {
-  const normalized = normalizeWorkspacePath(path)
-  if (!normalized.startsWith("提示词/")) return false
-  const [scope, category, stage] = normalized.slice("提示词/".length).split("/")
-  if (scope !== "用户规则" && scope !== "系统记忆") return false
-  if (category === "系统提示词") return true
-  if (category === "阶段提示词") return true
-  if (category === "消息前后") return stage === "用户消息前" || stage === "用户消息后"
-  return false
-}
-
 /** User may create a new markdown file at this path. */
 export function assertUserCanCreateMarkdown(path: string): string {
   const normalized = normalizeWorkspacePath(path)
   if (isPromptLibraryPath(normalized)) {
-    const parent = normalized.slice(0, normalized.lastIndexOf("/"))
-    if (isPromptAuthoringDirectory(parent)) {
-      const fileName = normalized.slice(normalized.lastIndexOf("/") + 1)
-      if (parent.endsWith("/阶段提示词")
-        && !["新章节阶段", "梗概阶段", "草稿阶段", "章节入库阶段"].some((stage) => fileName.includes(stage))) {
-        throw new WorkspacePolicyError("阶段提示词文件名必须包含阶段：新章节阶段/梗概阶段/草稿阶段/章节入库阶段")
-      }
-      return normalized
+    if (!/^提示词\/用户规则\/(?:系统提示词|阶段提示词|消息前后)\/[^/]+\.md$/iu.test(normalized)) {
+      throw new WorkspacePolicyError("只能在用户规则的提示词分类下新建 Markdown 文件")
     }
-    throw new WorkspacePolicyError("提示词文件必须创建在 用户规则 或 系统记忆 的 系统提示词/阶段提示词/消息前后 对应目录下")
+    return assertWorkspaceMutationAllowed(normalized, "file", "user")
   }
   if (isPathImmutable(normalized)) {
     throw new WorkspacePolicyError(`不能覆盖固定脚手架文件：${normalized}`)
@@ -243,8 +225,7 @@ export function assertUserCanCreateMarkdown(path: string): string {
 export function assertUserCanCreateDirectory(path: string): string {
   const normalized = normalizeWorkspacePath(path)
   if (isPromptLibraryPath(normalized)) {
-    if (isPromptAuthoringDirectory(normalized)) return normalized
-    throw new WorkspacePolicyError("提示词目录只能建在 用户规则 或 系统记忆 的系统提示词分类下")
+    throw new WorkspacePolicyError("提示词目录下不能手动新建文件夹")
   }
   if (isPathImmutable(normalized)) {
     throw new WorkspacePolicyError(`不能创建或覆盖固定脚手架目录：${normalized}`)

@@ -18,6 +18,13 @@ export const PROMPT_LIBRARY_CATEGORIES = ["基础规则", "用户规则", "系�
 /** Seed digest manifest living at the prompt library root. */
 export const PROMPT_LIBRARY_SEED_MANIFEST = ".seed-manifest.json"
 
+const COMPOSE_RESOURCE = "resources/v1/prompt-docs/stages/02-compose.md"
+const LEGACY_COMPOSE_DOCS = [
+  ["02-梗概阶段.md", "resources/v1/prompt-docs/stages/02-synopsis.md"],
+  ["03-草稿阶段.md", "resources/v1/prompt-docs/stages/03-draft.md"],
+  ["细纲阶段.md", "resources/v1/synopsis-to-outline-guide.md"],
+] as const
+
 const SEED_MANIFEST_VERSION = 1
 const SEED_DIGEST_PATTERN = /^[0-9a-f]{64}$/u
 
@@ -31,6 +38,8 @@ export type PromptLibraryEntry = Readonly<{
   resourcePath: string
   /** Library-relative path, e.g. `阶段提示/draft.md`. */
   libraryPath: string
+  /** Previous location used by builds with nested message prompt folders. */
+  legacyLibraryPath?: string
   /** Platform rule projections in the project workspace. */
   workspaceMirrors: readonly string[]
 }>
@@ -128,11 +137,10 @@ export function createPromptLibraryEntries(promptPackageRoot: string): readonly 
     { resourcePath: "resources/v1/prompt-docs/system/04-query-facts.md", libraryPath: "基础规则/系统提示词/04-查询事实规则.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/system/05-revision-audit.md", libraryPath: "基础规则/系统提示词/05-修订审核规则.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/system/06-discuss-skill-index.md", libraryPath: "基础规则/系统提示词/06-讨论技能索引.md", workspaceMirrors: [] },
-    { resourcePath: "resources/v1/prompt-docs/dynamic/01-before-user-message.md", libraryPath: "基础规则/消息前后/用户消息前/01-用户消息前.md", workspaceMirrors: [] },
-    { resourcePath: "resources/v1/prompt-docs/dynamic/02-after-user-message.md", libraryPath: "基础规则/消息前后/用户消息后/02-用户消息后.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/dynamic/01-before-user-message.md", libraryPath: "基础规则/消息前后/01-用户消息前.md", legacyLibraryPath: "基础规则/消息前后/用户消息前/01-用户消息前.md", workspaceMirrors: [] },
+    { resourcePath: "resources/v1/prompt-docs/dynamic/02-after-user-message.md", libraryPath: "基础规则/消息前后/02-用户消息后.md", legacyLibraryPath: "基础规则/消息前后/用户消息后/02-用户消息后.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/stages/01-new-chapter.md", libraryPath: "基础规则/阶段提示词/01-新章节阶段.md", workspaceMirrors: [] },
-    { resourcePath: "resources/v1/prompt-docs/stages/02-synopsis.md", libraryPath: "基础规则/阶段提示词/02-梗概阶段.md", workspaceMirrors: [] },
-    { resourcePath: "resources/v1/prompt-docs/stages/03-draft.md", libraryPath: "基础规则/阶段提示词/03-草稿阶段.md", workspaceMirrors: [] },
+    { resourcePath: COMPOSE_RESOURCE, libraryPath: "基础规则/阶段提示词/02-构思阶段.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/stages/04-ingestion.md", libraryPath: "基础规则/阶段提示词/04-章节入库阶段.md", workspaceMirrors: [] },
   ]
 }
@@ -167,6 +175,9 @@ export class PromptLibraryService {
       }
       this.resolvedByResourcePath.set(normalizePath(entry.resourcePath), resolved)
       this.resolvedByLibraryPath.set(normalizePath(entry.libraryPath), resolved)
+      if (entry.legacyLibraryPath !== undefined) {
+        this.resolvedByWorkspacePath.set(`${PROMPT_LIBRARY_ROOT}/${entry.legacyLibraryPath}`, resolved)
+      }
       for (const workspacePath of this.workspacePaths(entry)) {
         this.resolvedByWorkspacePath.set(normalizePath(workspacePath), resolved)
       }
@@ -200,9 +211,20 @@ export class PromptLibraryService {
         const target = join(this.libraryRoot, entry.libraryPath)
         const bundledDigest = seedDigest(markdown)
         const current = await readTextIfPresent(target)
-        if (current === undefined) {
-          await writeTextAtomically(target, markdown)
+        if (current === undefined && entry.resourcePath === COMPOSE_RESOURCE) {
+          const merged = await this.migrateComposeMarkdown(markdown, seeds)
+          await writeTextAtomically(target, merged)
           seeds.set(key, bundledDigest)
+          changed = true
+          continue
+        }
+        if (current === undefined) {
+          const legacyPath = entry.legacyLibraryPath
+          const legacy = legacyPath === undefined ? undefined : await readTextIfPresent(join(this.libraryRoot, legacyPath))
+          const previousSeed = legacyPath === undefined ? undefined : seeds.get(legacyPath)
+          const edited = legacy !== undefined && seedDigest(legacy) !== (previousSeed ?? bundledDigest)
+          await writeTextAtomically(target, edited ? legacy : markdown)
+          seeds.set(key, edited ? previousSeed ?? bundledDigest : bundledDigest)
           changed = true
           continue
         }
@@ -247,6 +269,33 @@ export class PromptLibraryService {
         await writeTextAtomically(this.seedManifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`)
       }
     })
+  }
+
+  private async migrateComposeMarkdown(markdown: string, seeds: ReadonlyMap<string, string>): Promise<string> {
+    let merged = markdown
+    const supplemental: string[] = []
+    const blocks = /<!-- ((?:phase|skill):[\w-]+) -->[\s\S]*?<!-- \/\1 -->/gu
+    for (const [name, resourcePath] of LEGACY_COMPOSE_DOCS) {
+      const key = `基础规则/阶段提示词/${name}`
+      const legacy = await readTextIfPresent(join(this.libraryRoot, key))
+      if (legacy === undefined) continue
+      const baseline = await this.readBundled(resourcePath)
+      if (seedDigest(legacy) === (seeds.get(key) ?? seedDigest(baseline))) continue
+      const originalBlocks = new Map(Array.from(baseline.matchAll(blocks), (match) => [match[1], match[0]]))
+      let recognized = false
+      for (const match of normalizeMarkdown(legacy).matchAll(blocks)) {
+        const marker = match[1]
+        const currentBlock = Array.from(merged.matchAll(blocks)).find((block) => block[1] === marker)
+        if (currentBlock === undefined) continue
+        recognized = true
+        if (originalBlocks.get(marker) !== match[0]) merged = merged.replace(currentBlock[0], () => match[0])
+      }
+      if (!recognized) supplemental.push(`## 迁移自 ${name}\n\n${legacy.trim()}`)
+    }
+    if (supplemental.length > 0) {
+      merged = merged.replace("<!-- /phase:synopsis-discuss -->", () => `${supplemental.join("\n\n")}\n\n<!-- /phase:synopsis-discuss -->`)
+    }
+    return normalizeMarkdown(merged)
   }
 
   public async readOverride(resourcePath: string): Promise<string | undefined> {
