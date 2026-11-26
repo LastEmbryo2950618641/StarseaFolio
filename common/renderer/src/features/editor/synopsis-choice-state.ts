@@ -1,4 +1,39 @@
 import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
+import type { ProceedMode } from "./proceed-mode.js"
+
+export type DirectSynopsisChoiceOptions = Readonly<
+  | { preciseAction: "start_compose" | "discuss_only"; chapterSequence: number }
+  | { preciseAction?: "publish"; publishDraftVersionId: string; chapterSequence?: number }
+>
+
+export function isDirectSynopsisChoice(choice: SynopsisConversationChoice): boolean {
+  return choice.action === "start_compose" || choice.action === "discuss_only"
+    || choice.action === "promote_draft_to_body"
+}
+
+export function directSynopsisChoiceOptions(
+  choice: SynopsisConversationChoice,
+  mode: ProceedMode,
+): DirectSynopsisChoiceOptions | undefined {
+  const { action, chapterSequence, publishDraftVersionId } = choice
+  if (action === "promote_draft_to_body" && publishDraftVersionId !== undefined) {
+    return {
+      ...(mode === "precise" ? { preciseAction: "publish" } : {}),
+      publishDraftVersionId,
+      ...(chapterSequence === undefined ? {} : { chapterSequence }),
+    }
+  }
+  if (mode === "precise" && chapterSequence !== undefined && (action === "start_compose" || action === "discuss_only")) {
+    return { preciseAction: action, chapterSequence }
+  }
+  return undefined
+}
+
+export function isLegacyPreciseShortcut(choice: SynopsisConversationChoice): boolean {
+  return choice.action === "confirm_synopsis" || choice.action === "start_turn" || choice.action === "set_focus"
+    || (choice.action === "continue_discuss"
+      && /^(?:用这份梗概写细纲|按细纲写正文|按章推演|开始批量推演|批量推演本卷)$/u.test(choice.label.trim()))
+}
 
 export type ChoiceVariant = Readonly<{
   original: string
@@ -24,7 +59,8 @@ export function choiceIdentity(
         choice.workStyleSelection.novelSubcategoryRulePath,
         choice.workStyleSelection.proseStyleRulePath,
       ],
-      (choice as SynopsisConversationChoice & { setupQuestionId?: string }).setupQuestionId ?? null,
+      choice.setupQuestionId ?? null,
+      ...(choice.publishDraftVersionId === undefined ? [] : [choice.publishDraftVersionId]),
     ],
     occurrence,
   ])
@@ -63,13 +99,12 @@ export function formatChoiceStyle(selection: SynopsisConversationChoice["workSty
   return `我选择的风格组合是：小说大类规则「${selection.novelMajorCategoryRulePath}」、小说次大类规则「${selection.novelSubcategoryRulePath}」、笔风规则「${selection.proseStyleRulePath}」。请按这三份规则继续。`
 }
 
-/** These are draft contributions; no choice is permitted to execute a callback. */
+/** Text contributed by an editable, non-direct choice. */
 export function choiceContribution(choice: SynopsisConversationChoice): string {
   if (choice.workStyleSelection !== undefined) return formatChoiceStyle(choice.workStyleSelection)
   if (choice.action === "confirm_synopsis") return "用这份梗概写细纲"
   if (choice.action === "start_turn") return "按细纲写正文"
-  if (choice.action === "promote_draft_to_body") return choice.publishDraftVersionId === undefined
-    ? "草稿可以，发布正文" : choice.label
+  if (choice.action === "promote_draft_to_body") return "草稿可以，发布正文"
   return choice.label
 }
 

@@ -98,7 +98,6 @@ async function send(harness: ChapterHarness, message: string): Promise<SynopsisC
       projectId: harness.projectId,
       workspaceRootRef: harness.workspaceRootRef,
       message,
-      proceedMode: "precise",
       maxModelCalls: 12,
     },
   })

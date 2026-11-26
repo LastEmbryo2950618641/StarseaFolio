@@ -63,6 +63,32 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(result.scope).toEqual({ outline: "patch" })
   })
 
+  it.each([null, '{"synopsis":', '{"draft":"invalid"}'])("retries invalid write-scope output %s", async (content) => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>()
+      .mockResolvedValueOnce({ content, usage: { prompt_tokens: 10, completion_tokens: 2 } })
+      .mockResolvedValueOnce({ content: '{"synopsis":"rewrite","outline":"rewrite","draft":"write"}', usage: { prompt_tokens: 12, completion_tokens: 8 } })
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot), { complete })
+    const result = await adapter.classifyDiscussTurn({
+      message: "重写本章梗概。", recentMessages: [], chapterSequence: 1, focusKind: "plot_synopsis",
+      synopsisReady: true, outlineReady: true, proceedMode: "precise", chapterAutomation: false,
+    })
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(result.scope).toEqual({ synopsis: "rewrite", outline: "rewrite", draft: "write" })
+    expect(result.usage).toMatchObject({ modelCalls: 2, inputTokens: 22, outputTokens: 10 })
+  })
+
+  it.each([1, 2])("reports a write-scope error within a budget of %s calls", async (maxModelCalls) => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>().mockResolvedValue({ content: "", finishReason: "length" })
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot), { complete })
+    await expect(adapter.classifyDiscussTurn({
+      message: "继续构思。", recentMessages: [], chapterSequence: 1, focusKind: "plot_synopsis",
+      synopsisReady: false, outlineReady: false, proceedMode: "precise", chapterAutomation: false, maxModelCalls,
+    })).rejects.toThrow("写入范围判断失败")
+    expect(complete).toHaveBeenCalledTimes(maxModelCalls)
+  })
+
   it("sends the base and proposed chapter prose to the revision reviewer", async () => {
     const revision = { chapterId: randomUUID(), baseSourceId: randomUUID(), proposedSourceId: randomUUID(),
       baseContent: "旧站台亮着灯。", proposedContent: "旧站台的灯熄灭了，他取出手电。" }

@@ -366,6 +366,8 @@ export type SynopsisConversationAutomation = z.infer<typeof synopsisConversation
 export const synopsisConversationSendPayloadSchema = projectSettingsReadPayloadSchema.extend({
   message: z.string().trim().min(1).max(8_000),
   publishDraftVersionId: idSchema.optional(),
+  preciseAction: z.enum(["start_compose", "discuss_only", "publish"]).optional(),
+  chapterSequence: z.number().int().positive().optional(),
   setupAnswerTo: z.string().min(1).max(100).optional(),
   presentation: turnStartPayloadSchema.shape.presentation,
   chapterIntent: chapterNarrativeIntentSchema.optional(),

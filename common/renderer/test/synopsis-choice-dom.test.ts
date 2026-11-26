@@ -94,6 +94,23 @@ describe.skipIf(executable === undefined)("synopsis choice DOM fixture", () => {
     expect(await stages.locator('[aria-current="step"]').textContent()).toBe("卷始")
   })
 
+  it.each([
+    ["compose", "开始构思", { preciseAction: "start_compose", chapterSequence: 1 }],
+    ["compose", "只讨论", { preciseAction: "discuss_only", chapterSequence: 1 }],
+    ["publish", "发布正文", { preciseAction: "publish", chapterSequence: 1, publishDraftVersionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }],
+  ] as const)("runs %s action %s without touching the editor", async (stage, label, options) => {
+    await page.goto(`${url}?desk&precise=${stage}`)
+    await draft().fill("保留未发送的文字")
+    expect(await page.getByRole("combobox", { name: "推进模式" }).locator("option").allTextContents()).toEqual(["精准推进", "批量推进"])
+    const action = page.getByRole("button", { name: label, exact: true })
+    expect(await action.count()).toBe(1)
+    await action.click()
+    expect(await sent()).toMatchObject([{ message: label, options }])
+    expect(await draft().inputValue()).toBe("保留未发送的文字")
+    await page.getByRole("combobox", { name: "当前讨论焦点卷" }).selectOption("第二卷 启程")
+    await action.waitFor({ state: "hidden" })
+  })
+
   it("multi-selects every action as draft text, preserving manual text without executing or sending", async () => {
     await draft().fill("方向 A（这是手写的）")
     const labels = ["方向 A", "方向 B", "确认梗概", "确认卷规划", "调用正文推演工具", "确认落盘", "暂不落盘", "确认用草稿经图治理覆盖正式正文", "切换到第2章"]

@@ -625,6 +625,8 @@ export class BackendFacade {
           projectId: payload.projectId,
           workspaceRootRef: payload.workspaceRootRef,
           message: payload.message,
+          ...(payload.preciseAction === undefined ? {} : { preciseAction: payload.preciseAction }),
+          ...(payload.chapterSequence === undefined ? {} : { chapterSequence: payload.chapterSequence }),
           ...(payload.publishDraftVersionId === undefined ? {} : { publishDraftVersionId: payload.publishDraftVersionId }),
           ...(payload.setupAnswerTo === undefined ? {} : { setupAnswerTo: payload.setupAnswerTo }),
           model: this.resolveModel(payload.model),

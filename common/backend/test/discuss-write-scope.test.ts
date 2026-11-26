@@ -25,7 +25,7 @@ async function send(harness: ChapterHarness, message: string, extra = {}) {
     method: "synopsis.conversation.send",
     payload: {
       projectId: harness.projectId, workspaceRootRef: harness.workspaceRootRef,
-      message, proceedMode: "precise", maxModelCalls: 12, ...extra,
+      message, maxModelCalls: 12, ...extra,
     },
   })
 }

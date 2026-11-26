@@ -166,6 +166,8 @@ type Props = Readonly<{
     noProgressGuardLimit?: number
     setupAnswerTo?: string
     publishDraftVersionId?: string
+    preciseAction?: "start_compose" | "discuss_only" | "publish"
+    chapterSequence?: number
   }>): Promise<void>
   onSynopsisStop?(): Promise<void>
   onSynopsisRefreshChoices(messageId: string): Promise<void>

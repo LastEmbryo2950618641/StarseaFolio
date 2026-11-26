@@ -436,16 +436,16 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
     })
   })
 
-  it("keeps 构思 atomic in precise mode: a synopsis write still continues to outline/draft", async () => {
+  it("continues from a synopsis write in the legacy single-chapter mode", async () => {
     const synopsisBody = "# 第一章 雨夜旧站台 剧情梗概\n主角在旧站台发现一封来自失踪者的信，并决定追查信件来源。"
     await withScript((call, request) => {
       expect(call).toBe(1)
-      expect((request.input as TurnPhaseInput).synopsisDiscuss).toMatchObject({ batchProceed: false })
+      expect((request.input as TurnPhaseInput).synopsisDiscuss).toMatchObject({ batchProceed: true })
       synopsisConversationStreamHub.setTodos(request.projectId, todos.map((todo) => ({ ...todo, status: "completed" })), Date.now())
       return { synopsisBody }
     }, async (harness, send) => {
       await clearChapterPlanningMaterials(harness)
-      const sent = await send({ message: "先写这一章的剧情梗概", proceedMode: "precise" })
+      const sent = await send({ message: "先写这一章的剧情梗概", proceedMode: "single" })
       expect(sent.proceedProgress?.stage).toBe("synopsis_discuss")
       expect(sent.autoContinue?.message).toContain("进入构思阶段")
       expect(sent.autoContinue?.message).toContain("连续完成细纲与草稿")

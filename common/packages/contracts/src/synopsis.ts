@@ -40,6 +40,8 @@ export const synopsisConversationChoiceSchema = z.object({
     "confirm_synopsis",
     "set_focus",
     "promote_draft_to_body",
+    "start_compose",
+    "discuss_only",
   ]),
   chapterSequence: z.number().int().positive().optional(),
 })

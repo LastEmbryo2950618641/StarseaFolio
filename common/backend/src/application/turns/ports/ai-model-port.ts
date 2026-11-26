@@ -89,6 +89,7 @@ export type DiscussTurnClassificationInput = Readonly<{
   proceedMode: string
   chapterAutomation: boolean
   publishableDraftLabel?: string
+  maxModelCalls?: number
   signal?: AbortSignal
 }>
 

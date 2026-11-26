@@ -186,6 +186,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       autoContinued?: boolean
       setupAnswerTo?: string
       publishDraftVersionId?: string
+      preciseAction?: "start_compose" | "discuss_only" | "publish"
+      chapterSequence?: number
     }>,
   ) => Promise<boolean>) | undefined>(undefined)
   const batchCancelRef = useRef(false)
@@ -1709,15 +1711,17 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       autoContinued?: boolean
       setupAnswerTo?: string
       publishDraftVersionId?: string
+      preciseAction?: "start_compose" | "discuss_only" | "publish"
+      chapterSequence?: number
     }>,
   ): Promise<boolean> => {
     if (options?.autoContinued !== true) synopsisAutoContinueCountRef.current = 0
     const trimmedChoice = message.trim()
-    if (options?.automation === undefined && /开始批量推演|批量推演本卷/u.test(trimmedChoice)) {
+    if (options?.automation === undefined && options?.proceedMode !== "precise" && options?.preciseAction === undefined && /开始批量推演|批量推演本卷/u.test(trimmedChoice)) {
       startBatchDeduction({ mode: "volume_batch" })
       return true
     }
-    if (options?.automation === undefined && /按章推演/u.test(trimmedChoice) && !/批量/u.test(trimmedChoice)) {
+    if (options?.automation === undefined && options?.proceedMode !== "precise" && options?.preciseAction === undefined && /按章推演/u.test(trimmedChoice) && !/批量/u.test(trimmedChoice)) {
       startChapterOnceDeduction()
       return true
     }
@@ -1748,7 +1752,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
       messages: [...current.messages, optimisticMessage],
     }))
     setSynopsisConversationBusy(true)
-    synopsisStopDraftRef.current = message
+    synopsisStopDraftRef.current = options?.preciseAction === undefined ? message : ""
     setSynopsisStream((previous) => ({
       status: "running",
       thinking: "",
@@ -1878,6 +1882,8 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
           ? {}
           : { writePermissionMode: options.writePermissionMode }),
         ...(options?.publishDraftVersionId === undefined ? {} : { publishDraftVersionId: options.publishDraftVersionId }),
+        ...(options?.preciseAction === undefined ? {} : { preciseAction: options.preciseAction }),
+        ...(options?.chapterSequence === undefined ? {} : { chapterSequence: options.chapterSequence }),
         ...(options?.automationStep === undefined ? {} : { automationStep: options.automationStep }),
         ...(options?.setupAnswerTo === undefined || options?.autoContinued === true || options?.automation !== undefined
           ? {} : { setupAnswerTo: options.setupAnswerTo }),
@@ -1968,7 +1974,7 @@ export function App({ mobileLayout = false }: Readonly<{ mobileLayout?: boolean 
         synopsisAutoContinueCountRef.current += 1
         return await sendSynopsisMessageRef.current?.(sent.autoContinue.message, { ...options, autoContinued: true }) ?? false
       }
-      const willAutoContinue = options?.automation === undefined && sent.awaitingSetupInput === undefined
+      const willAutoContinue = options?.automation === undefined && options?.preciseAction === undefined && sent.awaitingSetupInput === undefined
         && sent.autoContinue !== undefined && synopsisAutoContinueCountRef.current < 40
       setAgentAutoChainActive(willAutoContinue)
       if (willAutoContinue && sent.autoContinue !== undefined) {

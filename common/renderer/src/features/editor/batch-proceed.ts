@@ -10,5 +10,5 @@ export function loadBatchProceedEnabled(): boolean {
 
 /** @deprecated Prefer persistProceedMode(). */
 export function persistBatchProceedEnabled(enabled: boolean): void {
-  persistProceedMode(enabled ? "batch" : "single")
+  persistProceedMode(enabled ? "batch" : "precise")
 }

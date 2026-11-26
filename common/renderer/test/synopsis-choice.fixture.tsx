@@ -29,6 +29,14 @@ declare global {
 }
 
 window.choiceFixture = { sent: [], actions: [], configure: () => {}, restore: () => {} }
+const preciseFixture = new URLSearchParams(window.location.search).get("precise")
+localStorage.setItem("worldseed.creation-desk.proceed-mode", preciseFixture === null ? "batch" : "precise")
+const fixtureChoices: SynopsisConversationChoice[] = [
+  preciseFixture === "publish"
+    ? { label: "发布正文", action: "promote_draft_to_body", chapterSequence: 1, publishDraftVersionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }
+    : { label: "开始构思", action: "start_compose", chapterSequence: 1 },
+  { label: "只讨论", action: "discuss_only", chapterSequence: 1 },
+]
 
 const style = {
   novelMajorCategoryRulePath: "表现输出/小说大类规则/爽文.md",
@@ -62,7 +70,7 @@ function Fixture(): React.JSX.Element {
   const message: SynopsisConversationMessage = {
     messageId: context.messageId, projectId: context.projectId, sessionId: context.sessionId,
     role: "assistant", content: "请选择方向；也可以直接输入完整的自定义回答。", createdAtMs: 2,
-    choices: context.emptyChoices ? [] : choices.map((choice) => ({
+    choices: context.emptyChoices ? [] : preciseFixture !== null ? fixtureChoices : choices.map((choice) => ({
       ...choice, ...(context.questionId === undefined ? {} : { setupQuestionId: context.questionId }),
     })),
   }

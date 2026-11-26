@@ -660,6 +660,10 @@ export class SynopsisConversationService {
     message: string
     setupAnswerTo?: string
     publishDraftVersionId?: string
+    /** Creation-desk direct controls: host-owned precise action for this turn. */
+    preciseAction?: "start_compose" | "discuss_only" | "publish"
+    /** Chapter the direct control was rendered for; stale bindings are rejected. */
+    chapterSequence?: number
     model: AIModelPort
     chapterIntent?: ChapterNarrativeIntent
     presentation?: Readonly<{
@@ -701,6 +705,11 @@ export class SynopsisConversationService {
   }>): Promise<SynopsisConversationSendResult> {
     const focusLocked = input.focusLocked === true
     const batchAutomation = input.automation === "batch_chapter"
+    // 精准推进：renderer 显式发送 proceedMode=precise。缺省 proceedMode 的旧调用
+    // （包括 legacy batchProceed=false 映射出的 precise）保持旧 classifier 语义。
+    const preciseHostAction = batchAutomation ? undefined : input.preciseAction
+    const preciseMode = !batchAutomation
+      && (input.proceedMode === "precise" || preciseHostAction !== undefined)
     const agentMode = input.agentMode ?? "auto"
     const writePermissionMode = input.writePermissionMode
     const proceedMode: DiscussProceedMode = batchAutomation
@@ -749,6 +758,10 @@ export class SynopsisConversationService {
       })
     }
     const session = await this.ensureActiveSession(input.projectId, input.workspaceRootRef)
+    if (preciseHostAction !== undefined && input.chapterSequence !== undefined
+      && input.chapterSequence !== session.chapterSequence) {
+      throw new SynopsisInvalidStateError("这组精准操作已过期：焦点章节已变化，请刷新后重试。")
+    }
     clearSynopsisSendCancellation(input.projectId)
     const volume = await this.readFocusedVolume(input.workspaceRootRef, session)
     const boundaryAction = !volume.started ? "start"
@@ -831,7 +844,10 @@ export class SynopsisConversationService {
       const routeStartedAt = this.dependencies.now()
       const automationStep = batchAutomation ? input.automationStep : undefined
       const canPublish = agentMode !== "plan" && !batchAutomation
-      const publish = (draftVersionId: string) => this.publishConfirmedDraftIfRequested({
+      const publish = (
+        draftVersionId: string,
+        options?: Readonly<{ focusNextChapter?: boolean; hostChoices?: boolean }>,
+      ) => this.publishConfirmedDraftIfRequested({
         projectId: input.projectId,
         workspaceRootRef: input.workspaceRootRef,
         session,
@@ -839,6 +855,8 @@ export class SynopsisConversationService {
         draftVersionId,
         model: input.model,
         autoContinueNextChapter: nextChapterAuto,
+        ...(options?.focusNextChapter === true ? { focusNextChapter: true } : {}),
+        ...(options?.hostChoices === true ? { hostChoices: true } : {}),
         ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
         ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
         ...(input.deadlineMs === undefined ? {} : {
@@ -846,7 +864,22 @@ export class SynopsisConversationService {
         }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       })
+      // Explicit precise publish must be version-bound; after publishing the host moves
+      // focus to the next chapter but never starts writing it.
+      if (preciseHostAction === "publish") {
+        if (input.publishDraftVersionId === undefined) {
+          throw new SynopsisInvalidStateError("精准发布缺少绑定的草稿版本，请刷新后重试。")
+        }
+        if (!canPublish) throw new SynopsisInvalidStateError("当前模式不能通过讨论确认发布。")
+        return await publish(input.publishDraftVersionId, { focusNextChapter: true, hostChoices: true })
+      }
+      // Legacy API: a bare publishDraftVersionId keeps the old publish behavior — except in
+      // explicit precise mode, where only the direct「发布正文」action (preciseAction=publish)
+      // may publish. This keeps direct controls the only cross-stage path.
       if (input.publishDraftVersionId !== undefined) {
+        if (preciseMode) {
+          throw new SynopsisInvalidStateError("精准推进只能通过「发布正文」按钮发布草稿；请刷新后重试。")
+        }
         if (!canPublish) throw new SynopsisInvalidStateError("当前模式不能通过讨论确认发布。")
         return await publish(input.publishDraftVersionId)
       }
@@ -928,8 +961,43 @@ export class SynopsisConversationService {
       const initialVolumePlanningState = await this.readVolumePlanningState(input.workspaceRootRef, initialVolume)
       const initialVolumePlanningContext = await this.readVolumePlanningContext(input.workspaceRootRef, initialVolume, initialVolumePlanningState)
       const volumePlanningGateWasReady = initialVolumePlanningContext.ready && volume.wordsReady
+      if (preciseHostAction === "discuss_only" && workStyleGateReadyAtStart && volumePlanningGateWasReady) {
+        // 只讨论是 host-owned 的本地确认：不调用模型、不写任何材料，只把控制权交回用户。
+        return await this.runPreciseDiscussOnly({
+          projectId: input.projectId,
+          workspaceRootRef: input.workspaceRootRef,
+          session,
+          message: input.message,
+        })
+      }
+      if (preciseHostAction === "start_compose") {
+        // Explicit start is the only precise action allowed to author the three composition artifacts.
+        writeScope = {
+          synopsis: synopsisReady ? "rewrite" : "create",
+          outline: outlineReadyAtStart ? "rewrite" : "create",
+          draft: "write",
+        }
+        runtimeLog("info", "synopsis-conversation", "precise.start_compose", {
+          projectId: input.projectId,
+          sessionId: session.sessionId,
+          chapterSequence: session.chapterSequence,
+          synopsisReady,
+          outlineReady: outlineReadyAtStart,
+        })
+      }
+      // 精准模式在首个完整草稿出现前完全跳过 classifier：普通文本按只读讨论处理，
+      // 避免 router 的 JSON/契约故障挡住「开始构思」按钮；有可发布草稿后才允许分类修订。
+      const preciseFirstCompleteDraft = preciseMode
+        ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
+        : undefined
+      if (preciseMode && preciseHostAction === undefined
+        && (preciseFirstCompleteDraft === undefined || input.model.classifyDiscussTurn === undefined)) {
+        writeScope = {}
+      }
       if (workStyleGateReadyAtStart && volumePlanningGateWasReady && input.setupAnswerTo === undefined
-        && automationStep === undefined && input.model.classifyDiscussTurn !== undefined) {
+        && automationStep === undefined && preciseHostAction === undefined
+        && (!preciseMode || preciseFirstCompleteDraft !== undefined)
+        && input.model.classifyDiscussTurn !== undefined) {
         const candidate = canPublish ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence) : undefined
         const signals = [
           ...(input.signal === undefined ? [] : [input.signal]),
@@ -948,6 +1016,7 @@ export class SynopsisConversationService {
           outlineReady: outlineReadyAtStart,
           proceedMode,
           chapterAutomation: batchAutomation,
+          ...(input.maxModelCalls === undefined ? {} : { maxModelCalls: Math.max(1, input.maxModelCalls - 1) }),
           ...(candidate === undefined ? {} : { publishableDraftLabel: candidate.draftLabel }),
           ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }),
         })
@@ -961,9 +1030,20 @@ export class SynopsisConversationService {
         const parsedScope = discussTurnWriteScopeSchema.safeParse(normalizedScope)
         if (parsedScope.success) {
           const routed = parsedScope.data
+          if (preciseMode) {
+            // 精准模式普通文本只能在本阶段内修订已有材料：不得用 classifier 启动
+            // 缺失的梗概/细纲/草稿，也不得 advance、publish 或换焦点。
+            writeScope = restrictPreciseInStageScope(routed, {
+              synopsisReady,
+              outlineReady: outlineReadyAtStart,
+              // A publishable draft proves the compose stage completed even when the session
+              // pointer was reset by a focus change.
+              draftReady: preciseFirstCompleteDraft !== undefined
+                || (session.draftVersionId !== undefined && session.draftContentState !== "empty"),
+            })
           // A chapter synopsis write starts a complete composition. The router from
           // older prompt libraries may still authorize just the first artifact.
-          if (routed.synopsis !== undefined && Object.keys(routed).every((key) =>
+          } else if (routed.synopsis !== undefined && Object.keys(routed).every((key) =>
             ["synopsis", "outline", "draft", "chapterTitle", "advance"].includes(key))) {
             const { advance: _advance, ...composeScope } = routed
             writeScope = {
@@ -998,6 +1078,10 @@ export class SynopsisConversationService {
           if (candidate === undefined) throw new SynopsisInvalidStateError("当前章没有可发布的草稿。")
           return await publish(candidate.draftVersionId)
         }
+      }
+      // Precise ordinary text never runs with an unaudited (undefined) write scope.
+      if (preciseMode && preciseHostAction === undefined && writeScope === undefined) {
+        writeScope = {}
       }
       const chapterBodyMarkdown = await this.readFocusedCommittedBody(
         input.projectId,
@@ -1105,6 +1189,19 @@ export class SynopsisConversationService {
       if (remainingCallsAfterRouting !== undefined && remainingCallsAfterRouting <= 0) {
         throw new SynopsisInvalidStateError("本轮调用预算已用于识别写入范围，尚未写入任何内容。")
       }
+      // The synthetic「开始构思」label replaces the user's actual brief. Carry the discussion
+      // requirements the user typed before pressing Start into this turn's model history.
+      const startComposeRequirements = preciseHostAction === "start_compose"
+        ? priorMessages
+            .filter((message) => (
+              message.role === "user"
+              && message.hidden !== true
+              && message.content.trim().length > 0
+              && !isPreciseHostSyntheticMessage(message.content)
+            ))
+            .slice(-8)
+            .map((message) => message.content.trim().slice(0, 2_000))
+        : []
       const discussResult = await this.runSynopsisDiscuss({
         projectId: input.projectId,
         workspaceRootRef: input.workspaceRootRef,
@@ -1122,6 +1219,7 @@ export class SynopsisConversationService {
         userEditedSinceAgent,
         userEditedOutlineSinceAgent,
         synopsisConfirmed,
+        ...(startComposeRequirements.length === 0 ? {} : { startComposeRequirements }),
         ...(batchAutomation ? { batchAutomation: true } : {}),
         // Allows mid-chapter continueTurn / skip choice gate for single & partial custom.
         ...((batchProceed || withinChapterAuto) ? { batchProceed: true } : {}),
@@ -1274,6 +1372,21 @@ export class SynopsisConversationService {
       }
       const completeComposition = assist.synopsisBody !== undefined && assist.outlineBody !== undefined
         && assist.chapterDraftProposal !== undefined
+      if (preciseHostAction === "start_compose" && workStyleGateReadyAtStart && !volumePlanningNeedsFirstWrite) {
+        // Explicit start must deliver the whole composition in one response, before anything is written.
+        const missingComposition = [
+          hasPlanningContent(assist.synopsisBody ?? "", true) ? undefined : "梗概",
+          hasPlanningContent(assist.outlineBody ?? "", false) ? undefined : "细纲",
+          assist.chapterDraftProposal !== undefined || (assist.chapterDraftProposals?.length ?? 0) > 0
+            ? undefined
+            : "草稿",
+        ].filter((item): item is string => item !== undefined)
+        if (missingComposition.length > 0) {
+          throw new SynopsisInvalidStateError(
+            `精准构思必须一次交齐梗概、细纲与草稿；本轮响应缺少${missingComposition.join("、")}，未写入任何材料。请重试或改选「仅讨论」。`,
+          )
+        }
+      }
       if (completeComposition) {
         const outlinePathBeforeWrite = siblingPlanningMarkdownPath(synopsisPath, "outline") ?? outlinePathForRead
         const [currentSynopsis, currentOutline] = await Promise.all([
@@ -2344,9 +2457,10 @@ export class SynopsisConversationService {
       let autoContinue: { message: string } | undefined = autoContinueMessage === undefined
         ? undefined
         : { message: autoContinueMessage }
-      const publishableDraft = batchAutomation || savedDraft === undefined
+      const focusedPublishableDraft = batchAutomation
         ? undefined
         : await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
+      const publishableDraft = savedDraft === undefined ? undefined : focusedPublishableDraft
       if (publishableDraft !== undefined && publishableDraft.draftVersionId === savedDraft?.draftVersionId) {
         persistedChoices = withDraftConfirmationChoice(persistedChoices, publishableDraft)
         if (!assistantContent.includes(DRAFT_PUBLISH_CONFIRMATION)) {
@@ -2362,6 +2476,17 @@ export class SynopsisConversationService {
         } else if (restagedToOutlineThisTurn || savedOutlineThisTurn) {
           emitProceedProgress("outline_discuss", "done")
         }
+      }
+      // 精准推进：host-owned 直接控制按钮只挂在最新 assistant 结果上，旧消息里的按钮由 renderer 置灰。
+      const preciseHostControlsEnabled = preciseMode
+        && workStyleGateReadyAtStart
+        && volumePlanningGateWasReady
+        && !volumePlanningNeedsFirstWrite
+        && !volumeStoryNeedsUser
+        && !coldStartStyleNeedsChoice
+        && appliedFocusSequence === undefined
+      if (preciseHostControlsEnabled) {
+        persistedChoices = buildPreciseHostChoices(focusedPublishableDraft, session.chapterSequence)
       }
       if (pipelineAuto) {
         const fingerprint = await this.readDiscussProgressFingerprint({
@@ -3106,6 +3231,8 @@ export class SynopsisConversationService {
     composeText?: boolean
     refreshChoicesOnly?: boolean
     volumeBoundary?: VolumeBoundaryAction
+    /** Requirements the user typed before pressing「开始构思」; ephemeral model history. */
+    startComposeRequirements?: readonly string[]
   }>): Promise<Readonly<{
     content: string
     volumeBoundaryAccepted?: boolean
@@ -3899,6 +4026,19 @@ export class SynopsisConversationService {
           content: synopsisToolCatalog(toolCallbacks, foldsApplied > 0 ? DISCUSS_ARCHIVE_NOTICE : undefined),
         },
         ...archiveResults,
+        ...(input.startComposeRequirements === undefined || input.startComposeRequirements.length === 0
+          ? []
+          : [{
+              messageId: this.dependencies.createId(),
+              sequence: storedContext.length,
+              role: "system" as const,
+              kind: "phase_instruction" as const,
+              content: [
+                "【开始构思前的本章要求】",
+                "用户在点「开始构思」前讨论的本章要求（按时间顺序，作为本轮构思依据）：",
+                ...input.startComposeRequirements.map((text, index) => `${String(index + 1)}. ${text}`),
+              ].join("\n"),
+            }]),
         ...(input.writeScope === undefined ? [] : [{
           messageId: this.dependencies.createId(),
           sequence: storedContext.length,
@@ -6382,6 +6522,53 @@ export class SynopsisConversationService {
     )
   }
 
+  /**
+   * Host-owned「只讨论」: a local acknowledgment with no model call and no writes.
+   * The user can keep typing ordinary text afterwards (in-stage discussion/revision).
+   */
+  private async runPreciseDiscussOnly(input: Readonly<{
+    projectId: ProjectId
+    workspaceRootRef: string
+    session: Awaited<ReturnType<SynopsisConversationService["ensureActiveSession"]>>
+    message: string
+  }>): Promise<SynopsisConversationSendResult> {
+    const nowMs = this.dependencies.now()
+    await this.dependencies.conversation.appendMessage({
+      messageId: this.dependencies.createId(),
+      projectId: input.projectId,
+      sessionId: input.session.sessionId,
+      role: "user",
+      content: input.message,
+      createdAtMs: nowMs,
+    })
+    const publishableDraft = await this.findPublishableFocusDraft(input.projectId, input.session.chapterSequence)
+    const content = "已进入仅讨论模式：本轮不会写入梗概、细纲或正文。直接输入你的想法即可；需要一次生成或重写「梗概+细纲+草稿」时，点「开始构思」，确认草稿后再点「发布正文」。"
+    await this.dependencies.conversation.appendMessage({
+      messageId: this.dependencies.createId(),
+      projectId: input.projectId,
+      sessionId: input.session.sessionId,
+      role: "assistant",
+      content,
+      choices: buildPreciseHostChoices(publishableDraft, input.session.chapterSequence),
+      createdAtMs: nowMs + 1,
+    })
+    const proceedProgress = await this.syncProceedProgressFromMaterials({
+      projectId: input.projectId,
+      workspaceRootRef: input.workspaceRootRef,
+      session: input.session,
+      proceedMode: "precise",
+    })
+    synopsisConversationStreamHub.complete(input.projectId, this.dependencies.now(), { content })
+    synopsisConversationStreamHub.clear(input.projectId)
+    const session = await this.dependencies.conversation.findSession(input.session.sessionId)
+    if (session === undefined) throw new SynopsisInvalidStateError("讨论会话不存在")
+    return {
+      session: await this.withVolumeLifecycle(input.workspaceRootRef, session),
+      messages: [...await this.dependencies.conversation.listMessagesForProject(input.projectId)],
+      proceedProgress,
+    }
+  }
+
   private async publishConfirmedDraftIfRequested(input: Readonly<{
     projectId: ProjectId
     workspaceRootRef: string
@@ -6390,6 +6577,10 @@ export class SynopsisConversationService {
     draftVersionId: string
     model: AIModelPort
     autoContinueNextChapter: boolean
+    /** Explicit precise publish moves focus to the next chapter but never writes it. */
+    focusNextChapter?: boolean
+    /** Append host-owned precise direct-control choices to the assistant result. */
+    hostChoices?: boolean
     chapterIntent?: ChapterNarrativeIntent
     presentation?: SynopsisToolContext["presentation"]
     deadlineMs?: number
@@ -6444,11 +6635,31 @@ export class SynopsisConversationService {
       }
       const volume = done ? await this.readFocusedVolume(input.workspaceRootRef, input.session) : undefined
       if (volume?.atCap && volume.state?.endedAtMs === undefined) {
+        // Existing volume guard: the cap blocks focusing chapter N+1 until the volume is ended.
         autoContinue = { message: "本卷计划章节已全部发布，请标记卷末并开启下一卷。" }
+      } else if (done && input.focusNextChapter === true) {
+        const nextSequence = input.session.chapterSequence + 1
+        try {
+          await this.setFocus({
+            projectId: input.projectId,
+            workspaceRootRef: input.workspaceRootRef,
+            chapterSequence: nextSequence,
+            focusKind: "plot_synopsis",
+          })
+          content += `\n\n已将讨论焦点移到第${String(nextSequence)}章，并进入新章要求阶段：先讨论本章要写什么，AI 会在讨论后给出「开始构思」选项（本轮未写入下一章材料）。`
+        } catch (error) {
+          content += `\n\n正文已发布；未能自动进入第${String(nextSequence)}章：${error instanceof Error ? error.message : String(error)}`
+        }
       } else if (done && input.autoContinueNextChapter) {
         autoContinue = { message: publishedChapterAutoContinueMessage(input.session.chapterSequence) }
       } else if (!done) {
         choices = withDraftConfirmationChoice(undefined, draft)
+      }
+      if (input.hostChoices === true) {
+        // 发布成功（含卷末边界）后不再给「开始构思」：下一章先进入新章要求，
+        // 讨论后由 assistant 结果再给 host 按钮，避免在已发布章节上误导 Start。
+        // 发布失败时保留版本绑定发布 + 仅讨论，供用户重试。
+        choices = done ? undefined : buildPreciseHostChoices(draft, input.session.chapterSequence)
       }
     } catch (error) {
       content = error instanceof Error ? error.message : String(error)
@@ -7655,6 +7866,59 @@ function withDraftConfirmationChoice(
     action: "promote_draft_to_body",
     publishDraftVersionId: draft.draftVersionId,
   }, ...rest]
+}
+
+/**
+ * 精准模式普通文本的写入上限：只能在已存在的材料上做阶段内修订。
+ * 启动缺失材料、advance、publish、focus/卷操作都是 host-owned 跨阶段动作，
+ * 只能由显式 preciseAction 或用户点按钮触发。
+ */
+function restrictPreciseInStageScope(
+  scope: DiscussTurnWriteScope,
+  materials: Readonly<{ synopsisReady: boolean; outlineReady: boolean; draftReady: boolean }>,
+): DiscussTurnWriteScope {
+  return {
+    ...(scope.synopsis !== undefined && materials.synopsisReady ? { synopsis: scope.synopsis } : {}),
+    ...(scope.outline !== undefined && materials.outlineReady ? { outline: scope.outline } : {}),
+    ...(scope.draft === "write" && materials.draftReady ? { draft: "write" as const } : {}),
+    ...(scope.chapterTitle === true ? { chapterTitle: true as const } : {}),
+  }
+}
+
+/**
+ * Renderer sends the direct-control label as the user message. These synthetic labels are
+ * commands, never chapter requirements, so they must not leak into the start-compose brief.
+ */
+function isPreciseHostSyntheticMessage(message: string): boolean {
+  const text = message.trim()
+  return /^开始构思（/u.test(text)
+    || /^仅讨论（/u.test(text)
+    || /^草稿可以，发布正文/u.test(text)
+}
+
+/**
+ * 精准推进的直接控制按钮：阶段内二选一，不把「开始构思」和「发布正文」同时给出。
+ * 有可发布草稿时只给发布与仅讨论；否则给开始构思与仅讨论。
+ * 每个 choice 都带渲染时的 chapterSequence，便于 renderer 拒绝过期的上一章动作。
+ */
+function buildPreciseHostChoices(
+  publishableDraft: Readonly<{ draftLabel: string; draftVersionId: string }> | undefined,
+  chapterSequence: number,
+): SynopsisConversationChoice[] {
+  const discussOnly: SynopsisConversationChoice = {
+    label: "仅讨论（本轮不写入）",
+    action: "discuss_only",
+    chapterSequence,
+  }
+  if (publishableDraft !== undefined) {
+    return [{
+      label: `${DRAFT_PUBLISH_CONFIRMATION}（${publishableDraft.draftLabel}）`,
+      action: "promote_draft_to_body",
+      publishDraftVersionId: publishableDraft.draftVersionId,
+      chapterSequence,
+    }, discussOnly]
+  }
+  return [{ label: "开始构思（梗概+细纲+草稿）", action: "start_compose", chapterSequence }, discussOnly]
 }
 
 export function filterDiscussChoices(

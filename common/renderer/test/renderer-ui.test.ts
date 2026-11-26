@@ -785,7 +785,7 @@ describe("renderer workbench UI contract", () => {
             },
           },
           { label: "是否将焦点调整到第2章", action: "set_focus", chapterSequence: 2 },
-          { label: "是否确认用草稿(v1)经图治理覆盖正式正文", action: "promote_draft_to_body" },
+          { label: "发布正文", action: "promote_draft_to_body", chapterSequence: 1, publishDraftVersionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
         ],
         createdAtMs: 2,
       }],
@@ -823,7 +823,7 @@ describe("renderer workbench UI contract", () => {
     }))
 
     expect(html).toContain("data-testid=\"chapter-conversation\"")
-    expect(html).toContain("覆盖正式正文")
+    expect(html).toContain("发布正文")
     expect(html).not.toContain("是否将焦点调整到第2章")
     expect(html).not.toContain("data-testid=\"creation-desk-toolbar\"")
     expect(html).not.toContain("data-testid=\"creation-desk-token-metrics\"")

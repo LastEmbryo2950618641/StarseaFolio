@@ -166,37 +166,57 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
   }
 
   public async classifyDiscussTurn(input: DiscussTurnClassificationInput): Promise<DiscussTurnClassification> {
-    const { signal, ...context } = input
+    const { signal, maxModelCalls = 2, ...context } = input
     signal?.throwIfAborted()
     const client = await this.clientPromise
     const startedAt = Date.now()
-    const response = await this.completeWithRetry(client, {
-      model: this.config.model,
-      messages: [
-        {
-          role: "system",
-          content: renderRuntimePrompt("provider-auxiliary", "discuss-write-scope"),
-        },
-        { role: "user", content: JSON.stringify(context) },
-      ],
-      thinking: { type: "disabled" },
-      ...(this.config.jsonModeEnabled ? { responseFormat: { type: "json_object" as const } } : {}),
-      ...(signal === undefined ? {} : { signal }),
-      maxTokens: 512,
-    })
-    const parsed = discussTurnWriteScopeSchema.parse(JSON.parse((response.content ?? "").trim()
-      .replace(/^```(?:json)?\s*|\s*```$/giu, "")))
-    const usage = readUsage(response.usage)
-    return {
-      scope: parsed,
-      usage: {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        latencyMs: Math.max(0, Date.now() - startedAt),
-        ...(usage.cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens: usage.cacheHitInputTokens }),
-        ...(usage.cacheMissInputTokens === undefined ? {} : { cacheMissInputTokens: usage.cacheMissInputTokens }),
-      },
+    const instructions = renderRuntimePrompt("provider-auxiliary", "discuss-write-scope")
+    const attempts = maxModelCalls >= 2 ? 2 : 1
+    let inputTokens = 0
+    let outputTokens = 0
+    let cacheHitInputTokens: number | undefined
+    let cacheMissInputTokens: number | undefined
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      signal?.throwIfAborted()
+      const response = await this.completeWithRetry(client, {
+        model: this.config.model,
+        messages: [
+          { role: "system", content: instructions + (attempt === 1 ? "" : "\n上一轮未返回完整的写入范围。只输出一个完整 JSON 对象，无写入授权时输出 {}。") },
+          { role: "user", content: JSON.stringify(context) },
+        ],
+        thinking: { type: "disabled" },
+        ...(this.config.jsonModeEnabled ? { responseFormat: { type: "json_object" as const } } : {}),
+        ...(signal === undefined ? {} : { signal }),
+        maxTokens: attempt === 1 ? 512 : 1024,
+      })
+      signal?.throwIfAborted()
+      const usage = readUsage(response.usage)
+      inputTokens += usage.inputTokens
+      outputTokens += usage.outputTokens
+      if (usage.cacheHitInputTokens !== undefined) cacheHitInputTokens = (cacheHitInputTokens ?? 0) + usage.cacheHitInputTokens
+      if (usage.cacheMissInputTokens !== undefined) cacheMissInputTokens = (cacheMissInputTokens ?? 0) + usage.cacheMissInputTokens
+      const content = (response.content ?? "").trim().replace(/^```(?:json)?\s*|\s*```$/giu, "")
+      const parsed = parseDiscussScope(content)
+      if (parsed.success && response.finishReason !== "length" && response.finishReason !== "content_filter") {
+        return {
+          scope: parsed.data,
+          usage: {
+            modelCalls: attempt,
+            inputTokens,
+            outputTokens,
+            latencyMs: Math.max(0, Date.now() - startedAt),
+            ...(cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens }),
+            ...(cacheMissInputTokens === undefined ? {} : { cacheMissInputTokens }),
+          },
+        }
+      }
+      runtimeLog("warn", "deepseek-model", "write_scope.invalid_response", {
+        attempt, finishReason: response.finishReason, contentCharacters: content.length,
+        reasoningCharacters: response.reasoningContent?.length ?? 0,
+      })
+      if (response.finishReason === "content_filter") break
     }
+    throw new Error("写入范围判断失败：模型未返回完整有效的 JSON，本轮尚未开始构思生成。请重试。")
   }
 
   public async execute(request: PhaseRequestEnvelope, options?: ModelExecutionOptions): Promise<PhaseModelExecution> {
@@ -1345,6 +1365,16 @@ export class EnvironmentSecretProvider implements SecretProvider {
     const value = reference === "deepseek-api-key" ? this.values.DEEPSEEK_API_KEY : this.values[reference]
     return Promise.resolve(value ?? "")
   }
+}
+
+function parseDiscussScope(content: string) {
+  let value: unknown
+  try {
+    value = JSON.parse(content)
+  } catch {
+    value = undefined
+  }
+  return discussTurnWriteScopeSchema.safeParse(value)
 }
 
 function readUsage(value: unknown): {

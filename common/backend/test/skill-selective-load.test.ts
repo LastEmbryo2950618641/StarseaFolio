@@ -84,12 +84,14 @@ describe("skill selective loading", () => {
     }
   })
 
-  it("loads synopsis choices instructions that follow the user's actual request", async () => {
+  it("loads the canonical compose phase prompt for synopsis discussion", async () => {
     const adapter = new NodePromptResourceAdapter(packageRoot)
     const phase = await adapter.loadPhase("synopsis_discuss")
-    expect(phase.text).toContain("不要求用户点击确认按钮或使用固定说法")
-    expect(phase.text).toContain("用户明确要求提取、补全或继续细纲时")
-    expect(phase.text).toContain("但不是门禁")
+    // Phase prompts now come from the canonical prompt-docs stage document.
+    expect(phase.ref).toContain("prompt-docs/stages/02-compose.md")
+    expect(phase.text).toContain("创作台构思的回复协议")
+    expect(phase.text).toContain("本轮只讨论时用普通文本")
+    expect(phase.text).toContain("完整构思默认一次交齐")
   })
 
   it("resolves whitelisted skill scripts only", () => {

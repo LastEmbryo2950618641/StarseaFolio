@@ -7,9 +7,7 @@ import {
 } from "./creation-desk-render-budget.js"
 import {
   type DiscussAgentMode,
-  type DiscussCustomProceedGates,
   type DiscussFocusKind,
-  type DiscussProceedMode,
   type DiscussProceedStage,
   type DiscussWritePermissionMode,
   type SynopsisConversationMessage,
@@ -66,15 +64,12 @@ import {
 import {
   displayGateAuto,
   displayStageForProceedStage,
-  loadCustomProceedGates,
   loadProceedMode,
-  persistCustomProceedGates,
   persistProceedMode,
-  PROCEED_DISPLAY_STAGE_GROUPS,
   PROCEED_DISPLAY_STAGE_LABELS,
   PROCEED_DISPLAY_STAGE_ORDER,
   PROCEED_MODE_OPTIONS,
-  type ProceedDisplayStage,
+  type ProceedMode,
 } from "./proceed-mode.js"
 import {
   clampNoProgressGuardLimit,
@@ -95,7 +90,7 @@ import { type DiscussFocusChapterOption } from "./synopsis-path.js"
 import { useDeductionGoals } from "./use-deduction-goals.js"
 import { SynopsisChoiceComposerProvider, useChoiceDraft } from "./SynopsisChoiceComposerContext.js"
 import { SynopsisChoiceGroup } from "./SynopsisChoiceGroup.js"
-import { choiceContribution, choiceIdentity, latestSetupQuestionId } from "./synopsis-choice-state.js"
+import { choiceContribution, choiceIdentity, latestSetupQuestionId, directSynopsisChoiceOptions, isDirectSynopsisChoice, isLegacyPreciseShortcut, type DirectSynopsisChoiceOptions } from "./synopsis-choice-state.js"
 import {
   formatChapterIngestDetail,
   useChapterIngestActivity,
@@ -158,13 +153,14 @@ type Props = Readonly<{
   pendingStagingPromotes?: readonly SynopsisStagingPromoteProposal[]
   onSend(message: string, options?: Readonly<{
     agentMode?: DiscussAgentMode
-    proceedMode?: DiscussProceedMode
-    customProceedGates?: DiscussCustomProceedGates
+    proceedMode?: ProceedMode
     writePermissionMode?: DiscussWritePermissionMode
     noProgressGuardEnabled?: boolean
     noProgressGuardLimit?: number
     setupAnswerTo?: string
     publishDraftVersionId?: string
+    preciseAction?: "start_compose" | "discuss_only" | "publish"
+    chapterSequence?: number
   }>): Promise<void>
   onStop?(): Promise<void>
   onRefreshChoices(messageId: string): Promise<void>
@@ -199,12 +195,11 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
   const [advancedMenuOpen, setAdvancedMenuOpen] = useState(false)
   const [todoOpen, setTodoOpen] = useState(false)
   const [agentMode, setAgentMode] = useState<DiscussAgentMode>(() => loadDiscussAgentMode())
-  const [proceedMode, setProceedMode] = useState<DiscussProceedMode>(() => loadProceedMode())
+  const [proceedMode, setProceedMode] = useState<ProceedMode>(() => loadProceedMode())
   const [writePermissionMode, setWritePermissionMode] = useState<DiscussWritePermissionMode>(
     () => loadDiscussWritePermissionMode(),
   )
   const [noProgressGuard, setNoProgressGuard] = useState(() => loadNoProgressGuardPrefs())
-  const [customProceedGates, setCustomProceedGates] = useState<DiscussCustomProceedGates>(() => loadCustomProceedGates())
   const [lastProceedProgress, setLastProceedProgress] = useState<SynopsisConversationStreamSnapshot["proceedProgress"]>()
   const [goalsOpen, setGoalsOpen] = useState(false)
   useEffect(() => {
@@ -264,24 +259,22 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
     thread.scrollTop = thread.scrollHeight
   }
 
-  const sendMessage = useCallback(async (message: string, publishDraftVersionId?: string): Promise<void> => {
+  const sendMessage = useCallback(async (message: string, selection?: DirectSynopsisChoiceOptions): Promise<void> => {
     stickToLatestRef.current = true
     setShowJumpToLatest(false)
-    const setupAnswerTo = latestSetupQuestionId(props.messages)
+    const setupAnswerTo = selection === undefined ? latestSetupQuestionId(props.messages) : undefined
     await props.onSend(message, {
       agentMode,
       proceedMode,
-      ...(proceedMode === "custom" ? { customProceedGates } : {}),
       writePermissionMode,
       noProgressGuardEnabled: noProgressGuard.enabled,
       noProgressGuardLimit: noProgressGuard.limit,
       ...(setupAnswerTo === undefined ? {} : { setupAnswerTo }),
-      ...(publishDraftVersionId === undefined ? {} : { publishDraftVersionId }),
+      ...selection,
     })
     await goals.refresh()
   }, [
     agentMode,
-    customProceedGates,
     goals.refresh,
     noProgressGuard,
     proceedMode,
@@ -401,7 +394,8 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
     .reverse()
     .find((message) => message.role === "assistant" && (message.choices?.length ?? 0) > 0)
   const latestChoiceMessageId = latestChoiceMessage?.messageId
-  const publishSelections = visibleMessages.flatMap((message) => (message.choices ?? []).flatMap((choice) => (
+  const latestAssistantId = visibleMessages.findLast((message) => message.role === "assistant")?.messageId
+  const publishSelections = (proceedMode === "batch" ? visibleMessages : []).flatMap((message) => (message.choices ?? []).flatMap((choice) => (
     choice.action === "promote_draft_to_body" && choice.publishDraftVersionId !== undefined
       ? [{
           identity: choiceIdentity(props.workspaceRootRef, message, choice, 0),
@@ -516,6 +510,10 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   busy={props.busy}
                   choicesRefreshing={choicesRefreshing}
                   isLatestChoiceMessage={message.messageId === latestChoiceMessageId}
+                  isLatestAssistant={message.messageId === latestAssistantId}
+                  proceedMode={proceedMode}
+                  focusSequence={chapterSequence}
+                  onDirectChoice={sendMessage}
                   focusLocked={props.focusLocked === true}
                   chapterWorkflowEnabled={props.chapterWorkflowEnabled === true}
                   chapterIngestActive={chapterIngest !== undefined}
@@ -624,7 +622,7 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                   data-testid="creation-desk-proceed-mode"
                   value={proceedMode}
                   onChange={(event) => {
-                    const next = event.target.value as DiscussProceedMode
+                    const next = event.target.value as ProceedMode
                     setProceedMode(next)
                     persistProceedMode(next)
                   }}
@@ -635,7 +633,6 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                 </select>
                 <ProceedStageBar
                   mode={proceedMode}
-                  gates={customProceedGates}
                   agentMode={agentMode}
                   {...((() => {
                     const progress = props.stream?.proceedProgress ?? lastProceedProgress
@@ -643,21 +640,6 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
                       ? {}
                       : { activeStage: progress.stage, activeStatus: progress.status }
                   })())}
-                  interactive={proceedMode === "custom"}
-                  onToggleGate={(stage) => {
-                    setCustomProceedGates((current) => {
-                      const gates = PROCEED_DISPLAY_STAGE_GROUPS[stage]
-                      const nextAuto = stage === "compose_discuss"
-                        ? !(current.synopsis_discuss && current.outline_discuss && current.draft_discuss)
-                        : !current[gates[0]!]
-                      const next = {
-                        ...current,
-                        ...Object.fromEntries(gates.map((gate) => [gate, nextAuto])),
-                      } as typeof current
-                      persistCustomProceedGates(next)
-                      return next
-                    })
-                  }}
                 />
               </div>
               <details className="creation-desk-writing-settings" open={writingSettingsOpen} onToggle={(event) => {
@@ -795,7 +777,8 @@ export function SynopsisConversationComposer(props: Props): React.JSX.Element {
             setNoProgressGuard(clamped)
             persistNoProgressGuardPrefs(clamped)
           }}
-          onSend={sendMessage}
+          onSend={(message, versionId) => sendMessage(message, versionId === undefined ? undefined : { publishDraftVersionId: versionId })}
+           allowStartTurn={proceedMode === "batch"}
           publishSelections={publishSelections}
           onStartTurn={props.onStartTurn}
           chapterWorkflowEnabled={props.chapterWorkflowEnabled === true}
@@ -842,6 +825,7 @@ type ComposerInputProps = Readonly<{
   onNoProgressGuardChange(next: NoProgressGuardPrefs): void
   publishSelections: readonly Readonly<{ identity: string; text: string; versionId: string }>[]
   onSend(message: string, publishDraftVersionId?: string): Promise<void>
+  allowStartTurn: boolean
   onStop?(): Promise<void>
   onStartTurn(): void
   chapterWorkflowEnabled?: boolean
@@ -1089,6 +1073,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
         默认关闭。开启后：工作区无实质进展、Todo/工具空转、步骤连续失败达到此次数后硬停；关闭则不因空转硬停（预算上限仍生效）。
       </p>
     </div>
+    {props.allowStartTurn ? <>
     <p className="creation-desk-advanced-hint">先补齐剧情梗概与细纲，再开始正文</p>
     {props.chapterWorkflowEnabled !== true
       ? <p className="creation-desk-advanced-hint" data-testid="creation-desk-start-turn-disabled">正文推演工具已在项目设置中关闭；讨论 Agent 可用 chapterDraftProposal 写草稿</p>
@@ -1096,6 +1081,7 @@ function CreationDeskComposerInput(props: ComposerInputProps): React.JSX.Element
           disabled={props.running || props.busy} onClick={() => { props.onCloseAdvancedMenu(); props.onStartTurn() }}>
           <span><Play size={15} aria-hidden="true" />{props.running ? "正文推演工具运行中" : "调用正文推演工具"}</span><small>根据当前梗概生成新草稿</small>
         </button>}
+    </> : null}
   </div>
 
   return <div className={`creation-desk-composer${props.compact === true ? " is-compact" : ""}${isMinimal ? " is-minimal" : ""}`}>
@@ -1242,6 +1228,10 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
   busy: boolean
   choicesRefreshing: boolean
   isLatestChoiceMessage: boolean
+  isLatestAssistant: boolean
+  proceedMode: ProceedMode
+  focusSequence: number
+  onDirectChoice(message: string, selection: DirectSynopsisChoiceOptions): Promise<void>
   focusLocked: boolean
   chapterWorkflowEnabled?: boolean
   /** Right-rail / background chapter ingest is currently running. */
@@ -1257,9 +1247,19 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
   const choices = useMemo(() => (
     (message.choices ?? []).filter((choice) => (
       (!props.focusLocked || choice.action !== "set_focus")
+      && (props.proceedMode === "precise"
+        ? !isDirectSynopsisChoice(choice) && !isLegacyPreciseShortcut(choice)
+        : choice.action !== "start_compose" && choice.action !== "discuss_only")
       && (props.chapterWorkflowEnabled === true || choice.action !== "start_turn")
     ))
-  ), [message.choices, props.chapterWorkflowEnabled, props.focusLocked])
+  ), [message.choices, props.chapterWorkflowEnabled, props.focusLocked, props.proceedMode])
+  // Host-owned direct controls become one-click actions instead of editor text. They only
+  // apply to the focused chapter: a stale binding is never offered again.
+  const directChoices = useMemo(() => (message.choices ?? []).flatMap((choice) => {
+    if (choice.chapterSequence !== props.focusSequence) return []
+    const selection = directSynopsisChoiceOptions(choice, props.proceedMode)
+    return selection === undefined ? [] : [{ choice, selection }]
+  }), [message.choices, props.focusSequence, props.proceedMode])
   const segments = useMemo(() => {
     if (message.role !== "assistant") return []
     return timelineFromMessage({
@@ -1308,6 +1308,19 @@ const CreationDeskMessage = memo(function CreationDeskMessage(props: Readonly<{
         : <p>{message.content}</p>}
       {message.role === "assistant" && message.error !== undefined
         ? <p className="creation-desk-message-error" role="status">{message.error}</p>
+        : null}
+      {message.role === "assistant" && props.proceedMode === "precise" && props.isLatestAssistant
+        && directChoices.length > 0
+        ? <div className="synopsis-conversation-choices" data-testid="creation-desk-direct-choices">
+            {directChoices.map(({ choice, selection }) => <button
+              key={choice.action}
+              type="button"
+              className="synopsis-choice"
+              disabled={props.busy || props.running || props.choicesRefreshing}
+              onClick={() => { void props.onDirectChoice(choice.label, selection) }}>
+              {choice.label}
+            </button>)}
+          </div>
         : null}
       {message.role === "assistant"
         ? <SynopsisChoiceGroup
@@ -1796,13 +1809,10 @@ function ThinkingTailPreviewNote(props: Readonly<{ fullText: string }>): React.J
 }
 
 function ProceedStageBar(props: Readonly<{
-  mode: DiscussProceedMode
-  gates: DiscussCustomProceedGates
+  mode: ProceedMode
   agentMode: DiscussAgentMode
   activeStage?: DiscussProceedStage
   activeStatus?: "waiting" | "running" | "done"
-  interactive: boolean
-  onToggleGate(stage: ProceedDisplayStage): void
 }>): React.JSX.Element {
   const activeDisplay = props.activeStage === undefined ? undefined : displayStageForProceedStage(props.activeStage)
   const activeIndex = activeDisplay === undefined
@@ -1810,16 +1820,15 @@ function ProceedStageBar(props: Readonly<{
     : PROCEED_DISPLAY_STAGE_ORDER.indexOf(activeDisplay)
   return (
     <ol
-      className={`creation-desk-proceed-stages${props.interactive ? " interactive" : " readonly"}`}
+      className={`creation-desk-proceed-stages readonly`}
       data-testid="creation-desk-proceed-stages"
       data-mode={props.mode}
-      aria-label={props.interactive ? "自定义推进节点" : "当前推进阶段"}
+      aria-label="当前推进阶段"
     >
       {PROCEED_DISPLAY_STAGE_ORDER.map((stage, index) => {
         const auto = displayGateAuto({
           stage,
           mode: props.mode,
-          customGates: props.gates,
           agentMode: props.agentMode,
         })
         const isActive = activeDisplay === stage
@@ -1840,28 +1849,14 @@ function ProceedStageBar(props: Readonly<{
         return (
           <li key={stage} className={`creation-desk-proceed-step${stateClass}${auto ? " auto" : " stop"}`}>
             {index > 0 ? <span className="creation-desk-proceed-connector" aria-hidden="true" /> : null}
-            {props.interactive
-              ? <button
-                  type="button"
-                  className="creation-desk-proceed-stage"
-                  data-testid={`creation-desk-proceed-stage-${stage}`}
-                  aria-current={isActive ? "step" : undefined}
-                  aria-pressed={auto}
-                  title={isActive
-                    ? `${label} · 当前阶段`
-                    : auto ? `${label} · 自动：点击改为停等` : `${label} · 停等：点击改为自动`}
-                  onClick={() => { props.onToggleGate(stage) }}
-                >
-                  {content}
-                </button>
-              : <span
+            <span
                   className="creation-desk-proceed-stage"
                   data-testid={`creation-desk-proceed-stage-${stage}`}
                   aria-current={isActive ? "step" : undefined}
                   title={isActive ? `${label} · 当前阶段` : `${label} · ${auto ? "自动" : "停等"}`}
                 >
                   {content}
-                </span>}
+                </span>
           </li>
         )
       })}
