@@ -75,6 +75,7 @@ export function parseComposeHostTags(text: string): { text: string; chapterTitle
 export class ComposeProtocolError extends Error {}
 
 const CONTINUE_TURN_TAG = "<continue-turn/>"
+const REQUEST_COMPOSE_TAG = "<request-compose/>"
 const INTENT_MARKER = /^<compose-intent((?:\s+[a-z]+="(?:create|rewrite|write|whole_volume|patch)")*)\s*\/>$/u
 const INTENT_ATTRIBUTE = /([a-z]+)="(create|rewrite|write|whole_volume|patch)"/gu
 const INTENT_FIELDS = new Set(["synopsis", "outline", "draft", "volume"])
@@ -115,6 +116,18 @@ export function extractContinueTurnMarker(text: string): { text: string; continu
     return false
   })
   return found ? { text: kept.join("\n").trim(), continueTurn: true } : { text }
+}
+
+/** Remove the optional semantic compose-stage entry request marker from visible prose. */
+export function extractRequestComposeMarker(text: string): { text: string; requestComposeStage?: true } {
+  const lines = text.replaceAll("\r\n", "\n").split("\n")
+  let found = false
+  const kept = lines.filter((line) => {
+    if (line.trim() !== REQUEST_COMPOSE_TAG) return true
+    found = true
+    return false
+  })
+  return found ? { text: kept.join("\n").trim(), requestComposeStage: true } : { text }
 }
 
 type ComposeWriteIntent = Readonly<{ synopsis?: "create" | "rewrite"; outline?: "create" | "rewrite"; draft?: "write" }>

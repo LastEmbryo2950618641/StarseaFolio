@@ -26,6 +26,7 @@ import {
 } from "../../core/index.js"
 import { buildSourceUnitExactKeys } from "../retrieval/index.js"
 import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
+import { resolveStageEntryPrompt } from "../prompts/workspace-prompt-loader.js"
 import type { AIModelPort, PromptResourcePort } from "../turns/ports/ai-model-port.js"
 import { revisionReviewArtifactSchema } from "@starseafolio/prompt-contracts"
 import type { ProjectIdAllocatorPort } from "../ids/index.js"
@@ -586,7 +587,23 @@ export class ChapterRevisionService {
     const currentContent = current === undefined ? "" : await this.dependencies.internalStore.readDocument(current.contentRef)
     const proposedContent = await this.dependencies.internalStore.readDocument(revision.contentRef)
     const nowMs = this.dependencies.now()
-    const phasePrompt = await this.dependencies.prompts.loadPhase("revision_review")
+    const [basePhasePrompt, ingestionStagePrompt] = await Promise.all([
+      this.dependencies.prompts.loadPhase("revision_review"),
+      resolveStageEntryPrompt({
+        prompts: this.dependencies.prompts,
+        stage: "ingestion",
+        workspace: this.dependencies.workspace,
+        ...(input.workspaceRootRef ?? this.dependencies.workspaceRootRef) === undefined
+          ? {}
+          : { workspaceRootRef: input.workspaceRootRef ?? this.dependencies.workspaceRootRef },
+      }),
+    ])
+    const phasePrompt = ingestionStagePrompt === undefined || basePhasePrompt.text.includes(ingestionStagePrompt.text.trim())
+      ? basePhasePrompt
+      : (() => {
+          const text = `${basePhasePrompt.text}\n\n---\n\n${ingestionStagePrompt.text.trim()}`
+          return { ...basePhasePrompt, text, digest: digest(text) }
+        })()
     await this.dependencies.revisions.updateState({
       revisionTaskId: revision.revisionTaskId,
       status: "reviewing",
@@ -630,7 +647,13 @@ export class ChapterRevisionService {
       },
     })
     try {
-      const execution = await model.execute(request)
+      const execution = await model.execute(request, {
+        phasePrompt,
+        ...(ingestionStagePrompt === undefined ? {} : {
+          stagePrompt: ingestionStagePrompt,
+          reinjectStagePromptOnCompaction: true,
+        }),
+      })
       const artifact = revisionReviewArtifactSchema.parse(execution.result.artifact)
       const review: ChapterRevisionReview = {
         reviewId: this.dependencies.createId(),

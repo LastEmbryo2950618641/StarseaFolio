@@ -122,7 +122,10 @@ import { ChapterTemporalSourceResolver } from "./chapter-temporal-source-resolve
 import type { SqliteSynopsisConversationRepository } from "../../infrastructure/sqlite/repositories/sqlite-synopsis-conversation-repository.js"
 import { runtimeLog } from "../../infrastructure/diagnostics/index.js"
 import { synopsisConversationStreamHub } from "./synopsis-conversation-stream-hub.js"
-import { ComposeProtocolError, composeArtifactFromText, composeSections, extractComposeIntentMarker, extractContinueTurnMarker, parseComposeFocusTag, parseComposeHostTags } from "./compose-artifact.js"
+import { ComposeProtocolError, composeArtifactFromText, composeSections, extractComposeIntentMarker, extractContinueTurnMarker, extractRequestComposeMarker, parseComposeFocusTag, parseComposeHostTags } from "./compose-artifact.js"
+import { resolveStageEntryPrompt, resolveUserMessageWrapperPrompts } from "../prompts/workspace-prompt-loader.js"
+import { estimateModelMessageTokens } from "../context/context-window-manager.js"
+import type { PromptResource } from "../turns/ports/ai-model-port.js"
 import { isVolumeChapterCapReached, isVolumeStarted, nextVolumeFolderName, readVolumeLifecycleState, saveVolumeLifecycleState, transitionVolumeLifecycle, volumeLifecycleStatePath } from "./volume-lifecycle-state.js"
 import { parseComposeGoalProposals } from "./compose-goal-proposals.js"
 import { parseComposeToolRequest } from "./compose-tool-request.js"
@@ -985,8 +988,6 @@ export class SynopsisConversationService {
           outlineReady: outlineReadyAtStart,
         })
       }
-      // 精准模式在首个完整草稿出现前完全跳过 classifier：普通文本按只读讨论处理，
-      // 避免 router 的 JSON/契约故障挡住「开始构思」按钮；有可发布草稿后才允许分类修订。
       const preciseExistingDraft = preciseMode
         ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
         : undefined
@@ -1001,93 +1002,117 @@ export class SynopsisConversationService {
         })
       }
       const preciseFirstCompleteDraft = precisePlanningRecovery ? undefined : preciseExistingDraft
+      // 精准模式在进入构思前保持 writeScope = {}（不直接写入），由 AI 语义理解（classifyDiscussTurn
+      // 与主讨论模型的 <request-compose/> 信号，严禁正则硬匹配）判断用户是否表达开始落笔/构思/写草稿意图。
+      let aiDetectedComposeIntent = false
+      const precisePreComposeDiscuss = preciseMode
+        && preciseHostAction === undefined
+        && preciseFirstCompleteDraft === undefined
+        && workStyleGateReadyAtStart
+        && volumePlanningGateWasReady
       if (preciseMode && preciseHostAction === undefined
         && (preciseFirstCompleteDraft === undefined || input.model.classifyDiscussTurn === undefined)) {
         writeScope = {}
       }
       if (workStyleGateReadyAtStart && volumePlanningGateWasReady && input.setupAnswerTo === undefined
         && automationStep === undefined && preciseHostAction === undefined
-        && (!preciseMode || preciseFirstCompleteDraft !== undefined)
         && input.model.classifyDiscussTurn !== undefined) {
         const candidate = canPublish ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence) : undefined
         const signals = [
           ...(input.signal === undefined ? [] : [input.signal]),
           ...(input.deadlineMs === undefined ? [] : [AbortSignal.timeout(Math.max(1, input.deadlineMs - (this.dependencies.now() - routeStartedAt)))]),
         ]
-        const { scope, usage } = await input.model.classifyDiscussTurn({
-          message: input.message,
-          recentMessages: selectActiveDiscussRoutingMessages(
-            await this.dependencies.conversation.listDiscussContextMessages(session.sessionId),
-            priorMessages.filter((message) => !message.hidden).slice(-4),
-          )
-            .map(({ role, content }) => ({ role, content: content.slice(0, 3_000) })),
-          chapterSequence: session.chapterSequence,
-          focusKind: session.focusKind,
-          synopsisReady,
-          outlineReady: outlineReadyAtStart,
-          proceedMode,
-          chapterAutomation: batchAutomation,
-          ...(input.maxModelCalls === undefined ? {} : { maxModelCalls: Math.max(1, input.maxModelCalls - 1) }),
-          ...(candidate === undefined ? {} : { publishableDraftLabel: candidate.draftLabel }),
-          ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }),
-        })
-        if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
-        input.signal?.throwIfAborted()
-        // The router is a model: never let one malformed enum abort the whole turn.
-        const normalizedScope = scope !== null && typeof scope === "object"
-          && (scope as Record<string, unknown>).draft === "rewrite"
-          ? { ...(scope as Record<string, unknown>), draft: "write" }
-          : scope
-        const parsedScope = discussTurnWriteScopeSchema.safeParse(normalizedScope)
-        if (parsedScope.success) {
-          const routed = parsedScope.data
-          if (preciseMode) {
-            // 精准模式普通文本只能在本阶段内修订已有材料：不得用 classifier 启动
-            // 缺失的梗概/细纲/草稿，也不得 advance、publish 或换焦点。
-            writeScope = restrictPreciseInStageScope(routed, {
-              synopsisReady,
-              outlineReady: outlineReadyAtStart,
-              // A publishable draft proves the compose stage completed even when the session
-              // pointer was reset by a focus change.
-              draftReady: preciseFirstCompleteDraft !== undefined
-                || (session.draftVersionId !== undefined && session.draftContentState !== "empty"),
-            })
-          // A chapter synopsis write starts a complete composition. The router from
-          // older prompt libraries may still authorize just the first artifact.
-          } else if (routed.synopsis !== undefined && Object.keys(routed).every((key) =>
-            ["synopsis", "outline", "draft", "chapterTitle", "advance"].includes(key))) {
-            const { advance: _advance, ...composeScope } = routed
-            writeScope = {
-              ...composeScope,
-              synopsis: synopsisReady ? "rewrite" : "create",
-              outline: outlineReadyAtStart ? "rewrite" : "create",
-              draft: "write",
-            }
-          } else {
-            writeScope = routed
-          }
-          runtimeLog("info", "synopsis-conversation", "planning_write_scope.resolved", {
-            projectId: input.projectId, sessionId: session.sessionId, chapterSequence: session.chapterSequence, scope: writeScope,
+        try {
+          const { scope, usage } = await input.model.classifyDiscussTurn({
+            message: input.message,
+            recentMessages: selectActiveDiscussRoutingMessages(
+              await this.dependencies.conversation.listDiscussContextMessages(session.sessionId),
+              priorMessages.filter((message) => !message.hidden).slice(-4),
+            )
+              .map(({ role, content }) => ({ role, content: content.slice(0, 3_000) })),
+            chapterSequence: session.chapterSequence,
+            focusKind: session.focusKind,
+            synopsisReady,
+            outlineReady: outlineReadyAtStart,
+            proceedMode,
+            chapterAutomation: batchAutomation,
+            ...(input.maxModelCalls === undefined ? {} : { maxModelCalls: Math.max(1, input.maxModelCalls - 1) }),
+            ...(candidate === undefined ? {} : { publishableDraftLabel: candidate.draftLabel }),
+            ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }),
           })
-        } else {
-          runtimeLog("warn", "synopsis-conversation", "planning_write_scope.invalid", {
+          if (isSynopsisSendCancelled(input.projectId)) throw new SynopsisSendCancelledError()
+          input.signal?.throwIfAborted()
+          // The router is a model: never let one malformed enum abort the whole turn.
+          const normalizedScope = scope !== null && typeof scope === "object"
+            && (scope as Record<string, unknown>).draft === "rewrite"
+            ? { ...(scope as Record<string, unknown>), draft: "write" }
+            : scope
+          const parsedScope = discussTurnWriteScopeSchema.safeParse(normalizedScope)
+          if (parsedScope.success) {
+            const routed = parsedScope.data
+            if (precisePreComposeDiscuss) {
+              // 构思前仅记录 AI 语义识别出的构思/落笔意图，仍保持只读讨论，等待用户点「开始构思」确认。
+              aiDetectedComposeIntent = routed.synopsis !== undefined
+                || routed.outline !== undefined
+                || routed.draft === "write"
+              writeScope = {}
+            } else if (preciseMode) {
+              // 精准模式普通文本只能在本阶段内修订已有材料：不得用 classifier 启动
+              // 缺失的梗概/细纲/草稿，也不得 advance、publish 或换焦点。
+              writeScope = restrictPreciseInStageScope(routed, {
+                synopsisReady,
+                outlineReady: outlineReadyAtStart,
+                // A publishable draft proves the compose stage completed even when the session
+                // pointer was reset by a focus change.
+                draftReady: preciseFirstCompleteDraft !== undefined
+                  || (session.draftVersionId !== undefined && session.draftContentState !== "empty"),
+              })
+            // A chapter synopsis write starts a complete composition. The router from
+            // older prompt libraries may still authorize just the first artifact.
+            } else if (routed.synopsis !== undefined && Object.keys(routed).every((key) =>
+              ["synopsis", "outline", "draft", "chapterTitle", "advance"].includes(key))) {
+              const { advance: _advance, ...composeScope } = routed
+              writeScope = {
+                ...composeScope,
+                synopsis: synopsisReady ? "rewrite" : "create",
+                outline: outlineReadyAtStart ? "rewrite" : "create",
+                draft: "write",
+              }
+            } else {
+              writeScope = routed
+            }
+            runtimeLog("info", "synopsis-conversation", "planning_write_scope.resolved", {
+              projectId: input.projectId, sessionId: session.sessionId, chapterSequence: session.chapterSequence, scope: writeScope,
+            })
+          } else {
+            runtimeLog("warn", "synopsis-conversation", "planning_write_scope.invalid", {
+              projectId: input.projectId,
+              sessionId: session.sessionId,
+              chapterSequence: session.chapterSequence,
+              issues: parsedScope.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`),
+            })
+          }
+          routingCalls = Math.max(1, usage.modelCalls ?? 1)
+          synopsisConversationStreamHub.addUsage(input.projectId, usage, this.dependencies.now())
+          const cumulativeUsage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
+          if (cumulativeUsage !== undefined) {
+            await this.dependencies.conversation.saveDiscussUsage({
+              projectId: input.projectId, usage: cumulativeUsage, updatedAtMs: this.dependencies.now(),
+            })
+          }
+          if (writeScope !== undefined && writeScope.publish === true && Object.keys(writeScope).length === 1 && canPublish) {
+            if (candidate === undefined) throw new SynopsisInvalidStateError("当前章没有可发布的草稿。")
+            return await publish(candidate.draftVersionId)
+          }
+        } catch (error) {
+          if (error instanceof SynopsisSendCancelledError || input.signal?.aborted) throw error
+          if (!precisePreComposeDiscuss) throw error
+          // 构思前若语义路由返回异常 JSON，不阻断正常讨论，回退由主讨论模型的 <request-compose/> 识别。
+          runtimeLog("warn", "synopsis-conversation", "precise.compose_intent_router_fallback", {
             projectId: input.projectId,
             sessionId: session.sessionId,
-            chapterSequence: session.chapterSequence,
-            issues: parsedScope.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`),
+            error: error instanceof Error ? error.message : String(error),
           })
-        }
-        routingCalls = Math.max(1, usage.modelCalls ?? 1)
-        synopsisConversationStreamHub.addUsage(input.projectId, usage, this.dependencies.now())
-        const cumulativeUsage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
-        if (cumulativeUsage !== undefined) {
-          await this.dependencies.conversation.saveDiscussUsage({
-            projectId: input.projectId, usage: cumulativeUsage, updatedAtMs: this.dependencies.now(),
-          })
-        }
-        if (writeScope !== undefined && writeScope.publish === true && Object.keys(writeScope).length === 1 && canPublish) {
-          if (candidate === undefined) throw new SynopsisInvalidStateError("当前章没有可发布的草稿。")
-          return await publish(candidate.draftVersionId)
         }
       }
       // Precise ordinary text never runs with an unaudited (undefined) write scope.
@@ -1231,6 +1256,8 @@ export class SynopsisConversationService {
         userEditedOutlineSinceAgent,
         synopsisConfirmed,
         ...(startComposeRequirements.length === 0 ? {} : { startComposeRequirements }),
+        ...(preciseHostAction === "start_compose" ? { preciseStartCompose: true } : {}),
+        ...(precisePreComposeDiscuss ? { preciseRequestComposePrompt: true } : {}),
         ...(batchAutomation ? { batchAutomation: true } : {}),
         // Allows mid-chapter continueTurn / skip choice gate for single & partial custom.
         ...((batchProceed || withinChapterAuto) ? { batchProceed: true } : {}),
@@ -2492,6 +2519,8 @@ export class SynopsisConversationService {
         }
       }
       // 精准推进：host-owned 直接控制按钮只挂在最新 assistant 结果上，旧消息里的按钮由 renderer 置灰。
+      // - 已有可发布草稿：弹出「发布正文」与「仅讨论」
+      // - 构思前讨论：仅当 AI 语义识别出用户表达开始落笔/构思/写草稿意图（或从旧半成品恢复、或 start_compose 校验未通过需重试）时弹出「开始构思」与「仅讨论」
       const preciseHostControlsEnabled = preciseMode
         && workStyleGateReadyAtStart
         && volumePlanningGateWasReady
@@ -2500,12 +2529,16 @@ export class SynopsisConversationService {
         && !coldStartStyleNeedsChoice
         && appliedFocusSequence === undefined
       if (preciseHostControlsEnabled) {
-        persistedChoices = buildPreciseHostChoices(precisePublishableDraft, session.chapterSequence)
-        if (precisePlanningRecovery && precisePublishableDraft === undefined) {
+        if (precisePublishableDraft !== undefined) {
+          persistedChoices = buildPreciseHostChoices(precisePublishableDraft, session.chapterSequence)
+        } else if (precisePlanningRecovery) {
+          persistedChoices = buildPreciseHostChoices(undefined, session.chapterSequence)
           const recoveryNotice = "当前章有旧草稿，但梗概或细纲缺失。请点「开始构思」，同一回复生成梗概、细纲和草稿。"
           assistantContent = preciseHostAction === "start_compose"
             ? [recoveryNotice, ...writeNotices].join("\n\n")
             : `${recoveryNotice}\n\n${assistantContent}`
+        } else if (preciseHostAction === "start_compose" || aiDetectedComposeIntent || assist.requestComposeStage === true) {
+          persistedChoices = buildPreciseHostChoices(undefined, session.chapterSequence)
         }
       }
       if (pipelineAuto) {
@@ -3239,7 +3272,7 @@ export class SynopsisConversationService {
       minimumWordCount: number
       maximumWordCount: number
     }>
-    discussTrigger?: "user" | "turn_handoff"
+    discussTrigger?: "user" | "turn_handoff" | "new_chapter_entry"
     allowWorkflowTools?: boolean
     allowChapterWorkflowTools?: boolean
     volumePlanning?: VolumePlanningContext
@@ -3253,9 +3286,14 @@ export class SynopsisConversationService {
     volumeBoundary?: VolumeBoundaryAction
     /** Requirements the user typed before pressing「开始构思」; ephemeral model history. */
     startComposeRequirements?: readonly string[]
+    /** True when the user explicitly clicked「开始构思」to enter 构思阶段. */
+    preciseStartCompose?: boolean
+    /** True during pre-compose discussion so AI can semantically request 构思阶段 via <request-compose/>. */
+    preciseRequestComposePrompt?: boolean
   }>): Promise<Readonly<{
     content: string
     volumeBoundaryAccepted?: boolean
+    requestComposeStage?: boolean
     protagonistSupplementMarkdown?: string
     protagonistSupplementFields?: Record<string, CharacterFieldValue>
     reasoningContent?: string
@@ -3559,6 +3597,24 @@ export class SynopsisConversationService {
           sessionId: input.sessionId,
           hiddenCount: hiddenIds.length,
         })
+      }
+      const hasSystemRules = storedContext.some((message) => message.kind === "system_rules")
+      if (!hasSystemRules) {
+        storedContext = [
+          {
+            messageId: this.dependencies.createId(),
+            chainId: input.sessionId,
+            projectId: input.projectId,
+            sequence: -1,
+            role: "system",
+            kind: "system_rules",
+            content: systemRules.text,
+            contentDigest: systemRules.digest,
+            tokenEstimate: estimateModelMessageTokens(systemRules.text),
+            createdAtMs: nowMs,
+          },
+          ...storedContext,
+        ]
       }
       const hasSkillPack = storedContext.some((message) => message.content === defaultSkillPack.text)
       if (!hasSkillPack) {
@@ -4072,7 +4128,7 @@ export class SynopsisConversationService {
               messageId: this.dependencies.createId(),
               sequence: storedContext.length,
               role: "system" as const,
-              kind: "system_rules" as const,
+              kind: "phase_instruction" as const,
               content: carriedTodoNotice,
             }]),
         ...(attempt > 0 || readEvidence.length > 0
@@ -4080,7 +4136,7 @@ export class SynopsisConversationService {
               messageId: this.dependencies.createId(),
               sequence: storedContext.length,
               role: "system" as const,
-              kind: "system_rules" as const,
+              kind: "phase_instruction" as const,
               content: [
                 renderRuntimePrompt("discuss-messages", "react-reminder", { evidenceCount: readEvidence.length }),
                 ...activeRepairHints.slice(-2),
@@ -4091,6 +4147,36 @@ export class SynopsisConversationService {
             }]
           : []),
       ]
+      const isUserMessageTurn = input.discussTrigger === undefined || input.discussTrigger === "user"
+      const [messageWrappers, activeStagePrompt] = await Promise.all([
+        isUserMessageTurn
+          ? resolveUserMessageWrapperPrompts({
+              prompts: this.dependencies.prompts,
+              workspace: this.dependencies.workspace,
+              workspaceRootRef: input.workspaceRootRef,
+            })
+          : Promise.resolve<{ before?: PromptResource; after?: PromptResource }>({}),
+        input.discussTrigger === "new_chapter_entry" || input.discussTrigger === "turn_handoff"
+          ? resolveStageEntryPrompt({
+              prompts: this.dependencies.prompts,
+              stage: "new-chapter",
+              workspace: this.dependencies.workspace,
+              workspaceRootRef: input.workspaceRootRef,
+            })
+          : input.preciseStartCompose === true
+            ? resolveStageEntryPrompt({
+                prompts: this.dependencies.prompts,
+                stage: "compose",
+                workspace: this.dependencies.workspace,
+                workspaceRootRef: input.workspaceRootRef,
+              })
+            : input.preciseRequestComposePrompt === true
+              ? resolveStageEntryPrompt({
+                  prompts: this.dependencies.prompts,
+                  stage: "compose-request",
+                })
+              : Promise.resolve(undefined),
+      ])
       let streamedReasoning = ""
       const thinkingRound = attempt + 1
       let compactedEstimate: number | undefined
@@ -4179,8 +4265,13 @@ export class SynopsisConversationService {
                 const text = phasePrompt.text.replace(/^输出 JSON：顶层含[^\n]*\n?/mu, "").trimEnd()
                 return { ...phasePrompt, text, digest: digest(text) }
               }
-              if (input.discussTrigger === "turn_handoff") {
-                const text = `${input.userMessage}\n\n用普通文本给出交接分析。可用 <handoff-outline> 和 </handoff-outline> 提交卷大纲 Markdown。需要更新作品名或简介时，分别使用 <work-title> 或 <work-description> 闭合标签。不要返回 JSON 封套。`
+              if (input.discussTrigger === "turn_handoff" || input.discussTrigger === "new_chapter_entry") {
+                const stageLead = activeStagePrompt?.text.trim()
+                const text = [
+                  ...(stageLead !== undefined && stageLead.length > 0 ? [stageLead] : []),
+                  input.userMessage,
+                  "用普通文本完成章节入库后的收尾与新章要求衔接分析。可用 <handoff-outline> 和 </handoff-outline> 提交更新后的卷大纲 Markdown；可用 <goal-proposals>...</goal-proposals> 提交推演目标收尾/新章计划（每行 key: value，多项用 --- 分隔）；需要更新作品名或简介时，分别使用 <work-title> 或 <work-description> 闭合标签；可用 <creative-choices>...</creative-choices> 给出新章讨论方向。本轮不得写入下一章梗概、细纲或草稿，不要返回 JSON 封套。",
+                ].join("\n\n")
                 return { ...phasePrompt, text, digest: digest(text) }
               }
               if (firstVolumeText) {
@@ -4216,9 +4307,14 @@ export class SynopsisConversationService {
                     ...sections.map((section) => `<compose-${section}>\n${headings[section]}\n</compose-${section}>`),
                   ].join("\n")
               const phaseGuidance = phasePrompt.text.replace(/^输出 JSON：顶层含[^\n]*\n?/mu, "").trimEnd()
-              const text = `【本轮讨论输出协议】\n${protocol}\n如需根据用户要求更新作品名或简介，在构思段外分别使用 <work-title>...</work-title> 或 <work-description>...</work-description>。如需提供备选方向，可在构思段外用 <creative-choices> 和 </creative-choices> 包住至少两个选项，每行以 - 开头。如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。不要输出 JSON 响应封套。下文的旧输出字段名只说明篇章内容或工作流程，以本段输出格式为准。\n\n${phaseGuidance}`
+              const stageLead = activeStagePrompt?.text.trim()
+              const stagePrefix = stageLead !== undefined && stageLead.length > 0 ? `${stageLead}\n\n` : ""
+              const text = `${stagePrefix}【本轮讨论输出协议】\n${protocol}\n如需根据用户要求更新作品名或简介，在构思段外分别使用 <work-title>...</work-title> 或 <work-description>...</work-description>。如需提供备选方向，可在构思段外用 <creative-choices> 和 </creative-choices> 包住至少两个选项，每行以 - 开头。如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。不要输出 JSON 响应封套。下文的旧输出字段名只说明篇章内容或工作流程，以本段输出格式为准。\n\n${phaseGuidance}`
               return { ...phasePrompt, text, digest: digest(text) }
             })(),
+            ...(messageWrappers.before === undefined ? {} : { beforeUserMessagePrompt: messageWrappers.before }),
+            ...(messageWrappers.after === undefined ? {} : { afterUserMessagePrompt: messageWrappers.after }),
+            ...(activeStagePrompt === undefined ? {} : { stagePrompt: activeStagePrompt }),
             outputMode: "text",
             forceThinking: true,
             ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -4276,7 +4372,8 @@ export class SynopsisConversationService {
             || typeof artifact.assistantMessage !== "string" || !artifact.assistantMessage.trim()) {
             throw new SynopsisInvalidStateError("模型未返回有效的讨论文本，本次响应不会写入。")
           }
-          const { text: rawText, continueTurn } = extractContinueTurnMarker(artifact.assistantMessage)
+          const { text: withoutContinue, continueTurn } = extractContinueTurnMarker(artifact.assistantMessage)
+          const { text: rawText, requestComposeStage } = extractRequestComposeMarker(withoutContinue)
           const toolRequestParsed = parseComposeToolRequest(rawText)
           if (toolRequestParsed.toolRequest !== undefined) {
             const visible = toolRequestParsed.text.trim()
@@ -4297,16 +4394,23 @@ export class SynopsisConversationService {
           } else if (input.refreshChoicesOnly) {
             const parsed = parseDiscussChoices(rawText)
             execution = { ...execution, result: { ...execution.result, artifact: { ...parsed, finalSelfReview: "已解析刷新选项。" } } }
-          } else if (input.discussTrigger === "turn_handoff") {
-            const { prose, ...metadata } = parseWorkMetadataTags(rawText)
+          } else if (input.discussTrigger === "turn_handoff" || input.discussTrigger === "new_chapter_entry") {
+            const { text: withoutGoals, goalProposals } = parseComposeGoalProposals(rawText)
+            const { prose, ...metadata } = parseWorkMetadataTags(withoutGoals)
             const start = "<handoff-outline>"
             const end = "</handoff-outline>"
             const outline = prose.includes(start) || prose.includes(end) ? extractBlock(prose, start, end) : undefined
-            const assistantMessage = (outline === undefined ? prose : `${outline.before}\n${outline.after}`).trim()
+            const proseWithoutOutline = (outline === undefined ? prose : `${outline.before}\n${outline.after}`).trim()
+            const parsedChoices = proseWithoutOutline.includes("<creative-choices>") || proseWithoutOutline.includes("</creative-choices>")
+              ? parseDiscussChoices(proseWithoutOutline)
+              : undefined
+            const assistantMessage = (parsedChoices?.assistantMessage ?? proseWithoutOutline).trim()
             execution = { ...execution, result: { ...execution.result, artifact: {
               ...metadata,
-              assistantMessage: assistantMessage || "已完成章节交接分析。",
-              finalSelfReview: "已解析章节交接文本。",
+              assistantMessage: assistantMessage || "已完成章节入库收尾与新章要求衔接。",
+              finalSelfReview: "已解析章节交接与新章衔接文本。",
+              ...(parsedChoices?.choices === undefined ? {} : { choices: parsedChoices.choices }),
+              ...(goalProposals === undefined ? {} : { goalProposals }),
               ...(continueTurn ? { continueTurn: true } : {}),
               ...(outline?.content ? { arcPlan: { markdown: outline.content } } : {}),
             } } }
@@ -4409,6 +4513,7 @@ export class SynopsisConversationService {
                   ...(focusChange === undefined ? {} : { focusChange }),
                   ...(stagingPromote === undefined ? {} : { stagingPromote }),
                   ...(continueTurn ? { continueTurn: true } : {}),
+                  ...(requestComposeStage ? { requestComposeStage: true } : {}),
                 },
               },
             }
@@ -5409,6 +5514,7 @@ export class SynopsisConversationService {
           } }),
           ...mapArtifactFocusChange(artifact.data.focusChange),
           ...(artifact.data.continueTurn === true ? { continueTurn: true } : {}),
+          ...(artifact.data.requestComposeStage === true ? { requestComposeStage: true } : {}),
           ...(artifact.data.choices === undefined ? {} : { choices: artifact.data.choices }),
           ...(artifact.data.stagingDelta === undefined
             ? {}
@@ -5575,6 +5681,7 @@ export class SynopsisConversationService {
             } }),
             ...mapArtifactFocusChange(artifact.data.focusChange),
             ...(artifact.data.continueTurn === true ? { continueTurn: true } : {}),
+            ...(artifact.data.requestComposeStage === true ? { requestComposeStage: true } : {}),
             ...(artifact.data.choices === undefined ? {} : { choices: artifact.data.choices }),
             ...(artifact.data.stagingDelta === undefined
               ? {}
@@ -6215,6 +6322,22 @@ export class SynopsisConversationService {
       ...(assist.choices === undefined ? {} : { choices: assist.choices }),
       createdAtMs: this.dependencies.now(),
     })
+    if (assist.goalProposals !== undefined && assist.goalProposals.length > 0) {
+      const createdProposals = await this.dependencies.goals.createProposalsFromArtifact({
+        projectId: input.projectId,
+        proposals: assist.goalProposals,
+        sourceMessageId: assistantMessageId,
+      })
+      const projectSettings = this.dependencies.readProjectSettings === undefined
+        ? undefined
+        : await this.dependencies.readProjectSettings()
+      if (projectSettings?.creationDesk.autoApproveGoalProposals !== false && createdProposals.length > 0) {
+        await this.dependencies.goals.approveProposalsLenient({
+          projectId: input.projectId,
+          proposalIds: createdProposals.map((proposal) => proposal.proposalId),
+        })
+      }
+    }
     await this.setFocus({
       projectId: input.projectId,
       workspaceRootRef: input.workspaceRootRef,
@@ -6637,6 +6760,8 @@ export class SynopsisConversationService {
     let content: string
     let autoContinue: { message: string } | undefined
     let choices: SynopsisConversationChoice[] | undefined
+    const assistantMessageId = this.dependencies.createId()
+    let pendingHandoffGoals: Parameters<DeductionGoalsService["createProposalsFromArtifact"]>[0]["proposals"] = []
     try {
       const published = await this.dependencies.publishDraft({
         projectId: input.projectId,
@@ -6667,7 +6792,8 @@ export class SynopsisConversationService {
         // Existing volume guard: the cap blocks focusing chapter N+1 until the volume is ended.
         autoContinue = { message: "本卷计划章节已全部发布，请标记卷末并开启下一卷。" }
       } else if (done && input.focusNextChapter === true) {
-        const nextSequence = input.session.chapterSequence + 1
+        const prevSequence = input.session.chapterSequence
+        const nextSequence = prevSequence + 1
         try {
           await this.setFocus({
             projectId: input.projectId,
@@ -6675,7 +6801,92 @@ export class SynopsisConversationService {
             chapterSequence: nextSequence,
             focusKind: "plot_synopsis",
           })
-          content += `\n\n已将讨论焦点移到第${String(nextSequence)}章，并进入新章要求阶段：先讨论本章要写什么，AI 会在讨论后给出「开始构思」选项（本轮未写入下一章材料）。`
+          const nextSession = await this.dependencies.conversation.findSession(input.session.sessionId) ?? input.session
+          const handoffVolume = extractVolumeFolderNameFromPath(nextSession.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
+          const volumePlan = await this.readVolumePlanningState(input.workspaceRootRef, handoffVolume)
+          const volumePlanningContext = await this.readVolumePlanningContext(input.workspaceRootRef, handoffVolume, volumePlan)
+          const nextSynopsisMarkdown = await this.readSynopsisFile(input.workspaceRootRef, nextSession.synopsisPath)
+          const nextOutlinePath = siblingPlanningMarkdownPath(nextSession.synopsisPath, "outline")
+            ?? deriveOutlineMarkdownPath(nextSequence, nextSession.title, handoffVolume)
+          const nextOutlineMarkdown = await this.readSynopsisFile(input.workspaceRootRef, nextOutlinePath)
+          const prevBodyMarkdown = await this.readFocusedCommittedBody(input.projectId, input.workspaceRootRef, prevSequence)
+          const goalsSnapshot = await this.dependencies.goals.list(input.projectId)
+          const activeGoals = selectGoalsForChapterContext(goalsSnapshot.goals, nextSequence)
+          const chapterProgress = goalsSnapshot.progress.filter(
+            (item) => (item.chapterSequence === prevSequence || item.chapterSequence === nextSequence)
+              && item.status !== "superseded",
+          )
+          const hookScheduleAudit = await this.dependencies.goals.auditHookSchedules(input.projectId)
+          let handoffSummary = ""
+          try {
+            const handoff = await this.runSynopsisDiscuss({
+              projectId: input.projectId,
+              workspaceRootRef: input.workspaceRootRef,
+              sessionId: nextSession.sessionId,
+              userMessage: [
+                `第${String(prevSequence)}章已完成章节入库并发布正文，现由宿主发起进入第${String(nextSequence)}章「新章要求阶段」。`,
+                `当前卷：${handoffVolume}${volume?.plan?.targetChapterCount === undefined ? "" : `（目标 ${String(volume.plan.targetChapterCount)} 章）`}。`,
+                "请基于已发布正文与卷大纲、推演目标、卷信息完成上一章收尾与新章衔接（不要写入下一章梗概、细纲或草稿）。",
+              ].join("\n"),
+              heading: nextSession.title,
+              chapterSequence: nextSequence,
+              synopsisMarkdown: nextSynopsisMarkdown,
+              outlineMarkdown: nextOutlineMarkdown,
+              ...(prevBodyMarkdown === undefined ? {} : { chapterBodyMarkdown: prevBodyMarkdown }),
+              userEditedSinceAgent: false,
+              userEditedOutlineSinceAgent: false,
+              synopsisConfirmed: false,
+              activeGoals,
+              chapterProgress,
+              hookScheduleAudit,
+              model: input.model,
+              discussTrigger: "new_chapter_entry",
+              composeText: true,
+              volumePlanning: volumePlanningContext,
+              ...(input.chapterIntent === undefined ? {} : { chapterIntent: input.chapterIntent }),
+              ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+              ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
+              ...(input.signal === undefined ? {} : { signal: input.signal }),
+            })
+            await this.applyWorkMetadata(handoff)
+            if (handoff.arcPlanMarkdown !== undefined) {
+              await this.dependencies.workspace.saveUserMarkdown(
+                input.workspaceRootRef,
+                ARC_PLAN_STAGING_PATH,
+                handoff.arcPlanMarkdown,
+              )
+              await this.dependencies.workspace.saveUserMarkdown(
+                input.workspaceRootRef,
+                volumeOutlinePlanPath(handoffVolume),
+                handoff.arcPlanMarkdown,
+              )
+            }
+            if (handoff.goalProposals !== undefined && handoff.goalProposals.length > 0) {
+              pendingHandoffGoals = handoff.goalProposals
+            }
+            const discussionChoices = handoff.choices?.filter((choice) => choice.action === "continue_discuss")
+            if (discussionChoices !== undefined && discussionChoices.length > 0) {
+              choices = [...discussionChoices]
+            }
+            handoffSummary = handoff.content.trim()
+          } catch (handoffError) {
+            runtimeLog("warn", "synopsis-conversation", "new_chapter_entry.failed", {
+              projectId: input.projectId,
+              sessionId: nextSession.sessionId,
+              chapterSequence: nextSequence,
+              error: handoffError instanceof Error ? handoffError.message : String(handoffError),
+            })
+          }
+          // Ensure progress stays on chapter_requirements waiting after the post-publish handoff.
+          synopsisConversationStreamHub.setProceedProgress(
+            input.projectId,
+            { stage: "chapter_requirements", status: "waiting" },
+            this.dependencies.now(),
+          )
+          content += `\n\n已将讨论焦点移到第${String(nextSequence)}章，并进入新章要求阶段：先讨论本章要写什么，表达开始构思或落笔意图后 AI 会弹出「开始构思」选项（本轮未写入下一章材料）。`
+          if (handoffSummary.length > 0) {
+            content += `\n\n${handoffSummary}`
+          }
         } catch (error) {
           content += `\n\n正文已发布；未能自动进入第${String(nextSequence)}章：${error instanceof Error ? error.message : String(error)}`
         }
@@ -6684,17 +6895,17 @@ export class SynopsisConversationService {
       } else if (!done) {
         choices = withDraftConfirmationChoice(undefined, draft)
       }
-      if (input.hostChoices === true) {
+      if (input.hostChoices === true && !done) {
         // 发布成功（含卷末边界）后不再给「开始构思」：下一章先进入新章要求，
         // 讨论后由 assistant 结果再给 host 按钮，避免在已发布章节上误导 Start。
         // 发布失败时保留版本绑定发布 + 仅讨论，供用户重试。
-        choices = done ? undefined : buildPreciseHostChoices(draft, input.session.chapterSequence)
+        choices = buildPreciseHostChoices(draft, input.session.chapterSequence)
       }
     } catch (error) {
       content = error instanceof Error ? error.message : String(error)
     }
     await this.dependencies.conversation.appendMessage({
-      messageId: this.dependencies.createId(),
+      messageId: assistantMessageId,
       projectId: input.projectId,
       sessionId: input.session.sessionId,
       role: "assistant",
@@ -6702,6 +6913,22 @@ export class SynopsisConversationService {
       ...(choices === undefined ? {} : { choices }),
       createdAtMs: nowMs + 1,
     })
+    if (pendingHandoffGoals.length > 0) {
+      const createdProposals = await this.dependencies.goals.createProposalsFromArtifact({
+        projectId: input.projectId,
+        proposals: pendingHandoffGoals,
+        sourceMessageId: assistantMessageId,
+      })
+      const projectSettings = this.dependencies.readProjectSettings === undefined
+        ? undefined
+        : await this.dependencies.readProjectSettings()
+      if (projectSettings?.creationDesk.autoApproveGoalProposals !== false && createdProposals.length > 0) {
+        await this.dependencies.goals.approveProposalsLenient({
+          projectId: input.projectId,
+          proposalIds: createdProposals.map((proposal) => proposal.proposalId),
+        })
+      }
+    }
     const usage = synopsisConversationStreamHub.readCumulativeUsage(input.projectId)
     const proceedProgress = synopsisConversationStreamHub.peek(
       input.projectId,

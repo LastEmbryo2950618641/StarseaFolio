@@ -231,8 +231,10 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       modelReferenceAliasCount: referenceView.aliasCount,
       deadlineRemainingMs: request.remainingBudget.deadlineAtMs - Date.now(),
     })
+    const needsFallbackSystemRules = options?.contextMessages === undefined
+      || !options.contextMessages.some((message) => message.kind === "system_rules" || message.role === "system")
     const [baseRules, phasePrompt, client] = await Promise.all([
-      options?.contextMessages === undefined ? this.prompts.loadTurnSystemRules() : Promise.resolve(undefined),
+      needsFallbackSystemRules ? this.prompts.loadTurnSystemRules() : Promise.resolve(undefined),
       options?.phasePrompt === undefined
         ? this.prompts.loadPhase(request.phase)
         : Promise.resolve(options.phasePrompt),
@@ -287,18 +289,42 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         content: outputReminder,
       },
     ]
+    const beforeUserText = options?.beforeUserMessagePrompt?.text.trim()
+    const afterUserText = options?.afterUserMessagePrompt?.text.trim()
+    const stagePromptText = options?.stagePrompt?.text.trim()
+    const includeStagePrompt = stagePromptText !== undefined
+      && stagePromptText.length > 0
+      && !phasePrompt.text.includes(stagePromptText)
     const inheritedMessages = options?.contextMessages === undefined
       ? [{ role: "system" as const, content: baseRules?.text ?? "" }]
-      : normalizeContextMessages(options.contextMessages, request.phase, phasePrompt.text, textOutput)
+      : normalizeContextMessages(
+          options.contextMessages,
+          request.phase,
+          phasePrompt.text,
+          textOutput,
+          stagePromptText,
+        )
     // Keep only the locked leading system rules as prefix. Phase instruction,
     // protocol, schema, and reminder stay at the request tail so adjacent phases
     // share a byte-identical KV prefix through the inherited chain.
     const leadingSystem = inheritedMessages.filter((message) => message.role === "system")
+    const guaranteedLeadingSystem = leadingSystem.length > 0
+      ? leadingSystem
+      : baseRules === undefined
+        ? []
+        : [{ role: "system" as const, content: baseRules.text }]
     const inheritedHistory = inheritedMessages.filter((message) => message.role !== "system")
     const messages: DeepSeekMessage[] = [
-      ...leadingSystem,
+      ...guaranteedLeadingSystem,
       ...inheritedHistory,
+      ...(beforeUserText !== undefined && beforeUserText.length > 0
+        ? [{ role: "user" as const, content: beforeUserText }]
+        : []),
       { role: "user", content: modelRequestText },
+      ...(afterUserText !== undefined && afterUserText.length > 0
+        ? [{ role: "user" as const, content: afterUserText }]
+        : []),
+      ...(includeStagePrompt ? [{ role: "user" as const, content: stagePromptText }] : []),
       { role: "user", content: phasePrompt.text },
       { role: "user", content: protocolMessage },
       ...(outputContractPrefix === undefined ? [] : [{ role: "user" as const, content: outputContractPrefix }]),
@@ -920,20 +946,32 @@ function normalizeResponsesUsage(value: unknown): Record<string, unknown> | unde
   }
 }
 
+function isReinjectedStagePromptMessage(message: VisibleModelContextMessage): boolean {
+  if (message.kind !== "phase_instruction") return false
+  const trimmed = message.content.trim()
+  return trimmed.startsWith("{") && trimmed.includes("\"stage-prompt-reinject-v1\"")
+}
+
 function normalizeContextMessages(
   contextMessages: readonly VisibleModelContextMessage[],
   currentPhase: AIPhase,
   currentPhaseInstruction: string,
   textOutput: boolean,
+  currentStagePromptText?: string,
 ): DeepSeekMessage[] {
   const inherited = contextMessages.filter((message) => {
+    if (currentStagePromptText !== undefined && currentStagePromptText.length > 0 && isReinjectedStagePromptMessage(message)) {
+      return false
+    }
     if (textOutput && message.phase === currentPhase && (message.kind === "phase_protocol" || message.kind === "phase_instruction")) return false
     if (message.taskId === undefined || message.turnId === undefined || message.phase !== currentPhase) return true
     if (message.kind === "phase_protocol") return false
     if (message.kind === "phase_instruction" && message.content === currentPhaseInstruction) return false
     return !(message.kind === "phase_request" && message.content.startsWith(OUTPUT_CONTRACT_PREFIX))
   })
-  return inherited.map((message, index) => {
+  const systemRules = inherited.filter((message) => message.kind === "system_rules")
+  const rest = inherited.filter((message) => message.kind !== "system_rules")
+  return [...systemRules, ...rest].map((message, index) => {
     const role = message.role === "system" && index > 0 ? "user" as const : message.role
     return { role, content: message.content }
   })

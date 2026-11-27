@@ -343,10 +343,13 @@ export function requestMentionsPresentationRules(
   })
 }
 
-/** User-rule markdown under `世界推演规则/用户规则/` (nested folders allowed). */
+/** User-rule / system-memory markdown under `提示词/{用户规则,系统记忆}/系统提示词/` or legacy `世界推演规则/用户规则/`. */
 export function isUserRuleMarkdownPath(path: string): boolean {
   const normalized = path.trim().replace(/\\/gu, "/")
-  return normalized.startsWith("世界推演规则/用户规则/") && normalized.endsWith(".md")
+  if (!normalized.endsWith(".md")) return false
+  return normalized.startsWith("提示词/用户规则/系统提示词/")
+    || normalized.startsWith("提示词/系统记忆/系统提示词/")
+    || normalized.startsWith("世界推演规则/用户规则/")
 }
 
 export function listUserRuleMarkdownPaths(

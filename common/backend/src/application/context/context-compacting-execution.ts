@@ -9,6 +9,7 @@ import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 export const CONTEXT_FOLD_SUMMARY_PROTOCOL = "context-fold-summary-v1"
 export const CONTEXT_BUDGET_PROTOCOL = "context-budget-v1"
+export const STAGE_PROMPT_REINJECT_PROTOCOL = "stage-prompt-reinject-v1"
 
 const COMPRESS_PROMPT_RESERVE_TOKENS = 2_500
 const COMPRESS_OUTPUT_RESERVE_TOKENS = 4_500
@@ -489,6 +490,30 @@ export async function executeWithContextCompaction(input: {
         (input.request as { input?: unknown }).input = stripped
       }
       messages = folded.messages
+      if (input.options.reinjectStagePromptOnCompaction === true && input.options.stagePrompt !== undefined) {
+        const reinjectText = input.options.stagePrompt.text.trim()
+        if (reinjectText.length > 0) {
+          const nextSequence = messages.reduce((max, message) => Math.max(max, message.sequence), -1) + 1
+          messages = [
+            ...messages,
+            {
+              messageId: createMessageId(),
+              sequence: nextSequence,
+              role: "user",
+              kind: "phase_instruction",
+              taskId: input.request.taskId,
+              turnId: input.request.turnId,
+              phase: input.request.phase,
+              content: JSON.stringify({
+                protocol: STAGE_PROMPT_REINJECT_PROTOCOL,
+                ref: input.options.stagePrompt.ref,
+                digest: input.options.stagePrompt.digest,
+                text: reinjectText,
+              }),
+            },
+          ]
+        }
+      }
       await input.onCompacted({
         reason,
         ...(observedInputTokens === undefined ? {} : { observedInputTokens }),

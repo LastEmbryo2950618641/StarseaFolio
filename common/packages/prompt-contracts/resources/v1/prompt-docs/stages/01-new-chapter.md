@@ -4,6 +4,26 @@ title: 新章节阶段
 
 # 新章节阶段
 
+<!-- stage:new-chapter-entry -->
+
+## 阶段入口：申请进入新章要求阶段
+
+上一章正文已完成章节入库并落盘，现由宿主向你发起进入下一章「新章要求阶段」的收尾与衔接任务。
+
+## 职责
+
+1. **主线与支线收尾衔接**：结合刚发布的上一章正文与当前卷大纲，核对主线/支线推进、兑现情况与后续落点；如需更新卷大纲，在回复中输出 `<handoff-outline>...</handoff-outline>` 包裹更新后的完整卷大纲 Markdown。
+2. **推演目标收尾与规划**：对照 `activeGoals`、`chapterProgress` 与伏笔/高潮排期，使用 `<goal-proposals>...</goal-proposals>`（每行 `key: value`，多项之间用独占一行的 `---` 分隔，支持 `kind` 取 `create|update_content|complete|remove|set_chapter_progress` 及 `goalId`/`content`/`summary`/`narrativeKind`/`scale`/`chapterSequence`/`plantChapterSequence`/`payoffChapterSequence`/`reason`）标记已完成目标、修订受影响目标、记录本章或下章预期进度或新增目标。
+3. **卷信息核对与衔接**：核对当前卷进度（已发布章数、卷目标与剩余章数）、卷定位与作品元数据（如需微调作品名/简介可使用 `<work-title>` / `<work-description>`）。
+4. **新章要求切入**：向用户简要汇报上一章收尾结果，并围绕即将开始的下一章提出 2–3 个讨论切入点或剧情方向（放在 `<creative-choices>` 块中，每行 `-` 开头）。
+
+## 硬边界
+
+- 本轮仅做章节入库后的收尾与新章要求衔接，**禁止**直接写入下一章的梗概、细纲或草稿（不要输出 `<compose-synopsis>`、`<compose-outline>`、`<compose-draft>`）。
+- 不要输出 `<request-compose/>`，不要调用 `publish_draft`，等待用户与你讨论新章要求并明确表达开始构思意图后再进入构思阶段。
+
+<!-- /stage:new-chapter-entry -->
+
 <!-- phase:interpret -->
 
 ## 子阶段：interpret

@@ -173,9 +173,11 @@ describe("precise chapter progression", () => {
       await prepareChapterPlanning(harness)
       const requirements = "本章要写林烬在雨夜站台追查失踪者留下的信，结尾停在末班车启动。"
       await send(harness, { message: requirements, proceedMode: "precise" })
+      const classifyCallsBeforeStart = classifyCalls.length
       const sent = await send(harness, { message: "开始构思", proceedMode: "precise", preciseAction: "start_compose" })
 
-      expect(classifyCalls).toEqual([])
+      // Explicit start_compose must bypass the classifier.
+      expect(classifyCalls).toHaveLength(classifyCallsBeforeStart)
       expect(sent.appendedDraft).toBeDefined()
       expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
       expect(sent.proceedProgress).toEqual({ stage: "draft_discuss", status: "waiting" })
@@ -234,29 +236,44 @@ describe("precise chapter progression", () => {
     }
   })
 
-  it("keeps ordinary precise text inside the stage: no classifier before the first draft, no starting missing materials, no publish", async () => {
+  it("keeps ordinary precise text inside the stage: offers Start only when AI detects compose intent, never writes or publishes without confirmation", async () => {
     const classifyCalls: string[] = []
+    let replies = 0
     const model = createPreciseModel({
       classifier: () => {
-        throw new Error("precise discussion before the first complete draft must skip the classifier")
+        throw new Error("router failure must fall back to main AI semantic intent")
       },
       classifyCalls,
-      reply: () => "我们先讨论这一章想写什么，暂不落盘。",
+      reply: () => {
+        replies += 1
+        return replies === 1
+          ? "我们先讨论这一章想写什么，暂不落盘。"
+          : replies === 2
+            ? "收到，既然你准备开始落笔，我已准备好进入构思阶段。\n<request-compose/>"
+            : "草稿尚未生成，不能直接发布正文。"
+      },
     })
     const harness = await openChapterHarness("Precise ordinary text guard", { model })
     try {
       await prepareChapterPlanning(harness)
       const synopsisPath = await clearChapterPlanningMaterials(harness)
-      const sent = await send(harness, { message: "先写梗概", proceedMode: "precise" })
-      expect(sent.appendedDraft).toBeUndefined()
+      // Pure brainstorming without AI-detected compose intent must NOT pop up Start/Discuss controls.
+      const brainstorm = await send(harness, { message: "先聊聊第一章气氛该偏冷还是偏急", proceedMode: "precise" })
+      expect(brainstorm.appendedDraft).toBeUndefined()
       expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, synopsisPath)).toBe(EMPTY_SYNOPSIS)
-      const assistant = sent.messages.filter((message) => message.role === "assistant").at(-1)
-      expect(assistant?.choices?.map((choice) => choice.action)).toEqual(["start_compose", "discuss_only"])
-      expect(assistant?.choices?.every((choice) => choice.chapterSequence === 1)).toBe(true)
-      expect(classifyCalls).toEqual([])
+      const brainstormAssistant = brainstorm.messages.filter((message) => message.role === "assistant").at(-1)
+      expect(brainstormAssistant?.choices?.some((choice) => choice.action === "start_compose")).not.toBe(true)
+
+      // When AI semantically recognizes compose/drafting intent (<request-compose/>), host offers Start + Discuss-only without writing.
+      const readyToCompose = await send(harness, { message: "方向定好了，我们开始构思落笔吧", proceedMode: "precise" })
+      expect(readyToCompose.appendedDraft).toBeUndefined()
+      expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, synopsisPath)).toBe(EMPTY_SYNOPSIS)
+      const readyAssistant = readyToCompose.messages.filter((message) => message.role === "assistant").at(-1)
+      expect(readyAssistant?.content).not.toContain("<request-compose/>")
+      expect(readyAssistant?.choices?.map((choice) => choice.action)).toEqual(["start_compose", "discuss_only"])
+      expect(readyAssistant?.choices?.every((choice) => choice.chapterSequence === 1)).toBe(true)
 
       await send(harness, { message: "发布正文", proceedMode: "precise" })
-      expect(classifyCalls).toEqual([])
       const chapters = await invoke<unknown[]>(harness, "chapter.list", {})
       expect(chapters).toEqual([])
     } finally {
@@ -369,7 +386,9 @@ describe("precise chapter progression", () => {
       discussCalls,
       reply: () => {
         replies += 1
-        return replies === 1 ? composeAll : "第二章先对齐要求：主角下车后沿线索追查。"
+        if (replies === 1) return composeAll
+        if (replies === 2) return "已完成第1章主线、目标与卷进度收尾，第2章可从下车后追查线索切入。"
+        return "第二章要求已对齐，可以开始构思。\n<request-compose/>"
       },
     })
     const harness = await openChapterHarness("Precise publish", { model })
@@ -398,12 +417,15 @@ describe("precise chapter progression", () => {
       expect(published.session.chapterSequence).toBe(2)
       expect(published.session.draftVersionId).toBeUndefined()
       expect((await invoke<unknown[]>(harness, "chapter.list", {})).length).toBe(1)
-      // Focus moved but the next chapter was not composed and starts with chapter requirements.
-      expect(discussCalls).toHaveLength(discussCallsBeforePublish)
+      // Focus moved and host triggered the 新章节阶段 wrap-up/transition call without composing chapter 2.
+      expect(discussCalls).toHaveLength(discussCallsBeforePublish + 1)
+      expect(discussCalls.at(-1)?.chapterSequence).toBe(2)
+      expect(discussCalls.at(-1)?.prompt).toContain("上一章正文已完成章节入库并落盘")
       expect(published.proceedProgress).toEqual({ stage: "chapter_requirements", status: "waiting" })
       const assistant = published.messages.filter((message) => message.role === "assistant").at(-1)
       expect(assistant?.content).toContain("已将讨论焦点移到第2章")
       expect(assistant?.content).toContain("新章要求阶段")
+      expect(assistant?.content).toContain("已完成第1章主线、目标与卷进度收尾")
       // No Start/publish controls before the user discusses the new chapter requirements.
       expect(assistant?.choices === undefined || assistant.choices.length === 0).toBe(true)
       const chapterTwoOutline = published.session.synopsisPath.replace("[剧情梗概].md", "[剧情细纲].md")
@@ -411,8 +433,8 @@ describe("precise chapter progression", () => {
         .catch(() => "")
       expect(outlineExists.trim()).toBe("")
 
-      // After the user discusses the new chapter requirements, the assistant result offers Start.
-      const discussed = await send(harness, { message: "第二章要写他下车后沿线索追查", proceedMode: "precise" })
+      // After the user expresses compose intent for chapter 2, the assistant result offers Start.
+      const discussed = await send(harness, { message: "第二章要写他下车后沿线索追查，按这个开始构思吧", proceedMode: "precise" })
       expect(discussed.proceedProgress?.stage).toBe("chapter_requirements")
       const discussedAssistant = discussed.messages.filter((message) => message.role === "assistant").at(-1)
       expect(discussedAssistant?.choices?.map((choice) => choice.action)).toEqual(["start_compose", "discuss_only"])
