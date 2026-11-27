@@ -73,10 +73,12 @@ export class SqliteTurnPersistence implements TurnPersistencePort {
       const existing = await transaction.selectFrom("model_context_chains").selectAll()
         .where("project_id", "=", input.projectId).executeTakeFirst()
       if (existing !== undefined) {
-        if (existing.system_rules_digest === input.systemRulesDigest) return mapModelContextChain(existing)
         const rules = await transaction.selectFrom("model_context_messages").select(["id", "token_estimate", "hidden_at"])
           .where("chain_id", "=", existing.id).where("sequence_no", "=", 0).where("kind", "=", "system_rules")
           .executeTakeFirstOrThrow()
+        if (existing.system_rules_digest === input.systemRulesDigest && rules.hidden_at === null) {
+          return mapModelContextChain(existing)
+        }
         const tokenEstimate = estimateTextTokens(input.systemRulesContent)
         await transaction.updateTable("model_context_messages").set({
           content_text: input.systemRulesContent,

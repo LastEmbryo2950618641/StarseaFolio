@@ -10,7 +10,25 @@ export const SYSTEM_PROMPT_DOCS = Object.freeze([
 ] as const)
 
 export const DISCUSS_SYSTEM_PROMPT_DOC = "resources/v1/prompt-docs/system/06-discuss-skill-index.md" as const
+export const BEFORE_USER_MESSAGE_PROMPT_DOC = "resources/v1/prompt-docs/dynamic/01-before-user-message.md" as const
 export const AFTER_USER_MESSAGE_PROMPT_DOC = "resources/v1/prompt-docs/dynamic/02-after-user-message.md" as const
+export const NEW_CHAPTER_STAGE_PROMPT_DOC = "resources/v1/prompt-docs/stages/01-new-chapter.md" as const
+export const COMPOSE_STAGE_PROMPT_DOC = "resources/v1/prompt-docs/stages/02-compose.md" as const
+export const INGESTION_STAGE_PROMPT_DOC = "resources/v1/prompt-docs/stages/04-ingestion.md" as const
+
+export const MESSAGE_WRAPPER_MARKERS = Object.freeze({
+  before: "message:before-user-message",
+  after: "message:after-user-message",
+} as const)
+
+export const STAGE_ENTRY_MARKERS = Object.freeze({
+  newChapterEntry: "stage:new-chapter-entry",
+  composeRequest: "stage:compose-request",
+  composeEntry: "stage:compose-entry",
+  ingestionEntry: "stage:ingestion-entry",
+} as const)
+
+export type StagePromptKind = "new-chapter" | "compose-request" | "compose" | "ingestion"
 
 export type PromptDocDefinition = Readonly<{
   id: string
@@ -19,19 +37,20 @@ export type PromptDocDefinition = Readonly<{
 }>
 
 export const STAGE_PROMPT_DOCS = Object.freeze([
-  { id: "new-chapter", resourcePath: "resources/v1/prompt-docs/stages/01-new-chapter.md", tag: "新章节阶段" },
-  { id: "compose", resourcePath: "resources/v1/prompt-docs/stages/02-compose.md", tag: "构思阶段" },
-  { id: "ingestion", resourcePath: "resources/v1/prompt-docs/stages/04-ingestion.md", tag: "章节入库阶段" },
+  { id: "new-chapter", resourcePath: NEW_CHAPTER_STAGE_PROMPT_DOC, tag: "新章节阶段" },
+  { id: "compose", resourcePath: COMPOSE_STAGE_PROMPT_DOC, tag: "构思阶段" },
+  { id: "ingestion", resourcePath: INGESTION_STAGE_PROMPT_DOC, tag: "章节入库阶段" },
 ] as const satisfies readonly PromptDocDefinition[])
 
 export const DYNAMIC_PROMPT_DOCS = Object.freeze([
-  { id: "before-user-message", resourcePath: "resources/v1/prompt-docs/dynamic/01-before-user-message.md", tag: "消息前" },
-  { id: "after-user-message", resourcePath: "resources/v1/prompt-docs/dynamic/02-after-user-message.md", tag: "消息后" },
+  { id: "before-user-message", resourcePath: BEFORE_USER_MESSAGE_PROMPT_DOC, tag: "消息前" },
+  { id: "after-user-message", resourcePath: AFTER_USER_MESSAGE_PROMPT_DOC, tag: "消息后" },
 ] as const satisfies readonly PromptDocDefinition[])
 
 const NEW_CHAPTER_PHASES = ["interpret", "rule_assembly", "source_retrieval", "emergence_planning", "emergence_review"] as const
 const INGESTION_PHASES = [
   "settings_extraction",
+  "work_style_revision",
   "graph_governance",
   "graph_structure_plan",
   "graph_capacity_rewrite",
@@ -56,7 +75,6 @@ const STAGE_BY_PHASE: Record<string, (typeof STAGE_PROMPT_DOCS)[number]["id"]> =
 }
 
 const DYNAMIC_BY_PHASE: Partial<Record<AIPhase, string>> = {
-  work_style_revision: "before-user-message",
   response_review: "after-user-message",
 }
 
@@ -94,4 +112,19 @@ export function extractPromptDocSection(markdown: string, marker: string): strin
   const endAt = markdown.indexOf(end, contentAt)
   if (endAt < 0) throw new Error(`Unclosed prompt document section: ${marker}`)
   return markdown.slice(contentAt, endAt).trimStart().replace(/^## [^\n]*\n+/u, "").trim()
+}
+
+const INTERNAL_SECTION_BLOCK_PATTERN = /<!--\s*(?:phase|query|skill):[^\s>]+\s*-->[\s\S]*?<!--\s*\/(?:phase|query|skill):[^\s>]+\s*-->/gu
+
+/**
+ * Extract a marked section when present; otherwise fall back to user-edited plain markdown
+ * (stripping YAML frontmatter and any internal phase/query/skill blocks).
+ */
+export function extractPromptDocSectionOrFull(markdown: string, marker: string): string {
+  const start = `<!-- ${marker} -->`
+  if (markdown.includes(start)) {
+    return extractPromptDocSection(markdown, marker)
+  }
+  const withoutFrontmatter = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/u, "")
+  return withoutFrontmatter.replace(INTERNAL_SECTION_BLOCK_PATTERN, "").trim()
 }

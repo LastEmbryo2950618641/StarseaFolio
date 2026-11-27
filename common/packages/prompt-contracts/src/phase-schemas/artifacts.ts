@@ -725,6 +725,8 @@ export const synopsisDiscussArtifactSchema = z.object({
    * (e.g. more chapters to draft/publish). The client auto-sends a continuation turn.
    */
   continueTurn: z.boolean().optional(),
+  /** AI semantic request to enter 构思阶段 so the host offers「开始构思」and「仅讨论」. */
+  requestComposeStage: z.boolean().optional(),
   /**
    * Full chapter draft for the focused (or locked) chapter, including its first draft.
    * Applied immediately as a new draft version; official 章节正文/*.md is unchanged.

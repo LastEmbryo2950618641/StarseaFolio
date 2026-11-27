@@ -4,6 +4,20 @@ title: 章节入库阶段
 
 # 章节入库阶段
 
+<!-- stage:ingestion-entry -->
+
+## 阶段入口：章节入库阶段执行
+
+用户已通过「发布正文」确认当前章草稿进入正式章节入库流程。本阶段涵盖草稿审核（`revision_review`）、设定抽取（`settings_extraction`）、作品风格融合（`work_style_revision`）、图结构规划与治理（`graph_*`）、语义核对（`semantic_review`）与提交复核（`commit_review`），直至正式正文落盘。
+
+## 阶段硬规则（上下文压缩后仍须持续生效）
+
+- 本提示词会在章节入库阶段的每次模型调用以及发生上下文压缩后重新注入，确保跨子阶段与压缩恢复后仍保持一致约束。
+- 严格基于当前待发布草稿、用户原话与本轮实际读取的设定/图/前文证据执行，禁止凭空编造未读取事实或擅自改写已确认草稿核心情节。
+- 设定抽取仅提交 `proposals[]`，作品风格融合仅按用户原话与正文呈现线索修订 `表现输出/本作品描写/作品风格.md`，图治理与语义核对严格遵守引用与结构化契约。
+
+<!-- /stage:ingestion-entry -->
+
 <!-- phase:settings-extraction -->
 
 ## 子阶段：settings-extraction
@@ -46,6 +60,50 @@ title: 章节入库阶段
 人物 payload 示例：`{"kind":"create","relativePath":"设定集/人物/林照.json","characterOperations":[{"op":"set","field":"姓名","value":"林照"},{"op":"set","field":"身份","value":"见习药师"}]}`。人物格式由宿主管理，AI 可新增、删除、更改 fields 内字段，不可改 JSON 外层。
 
 <!-- /phase:settings-extraction -->
+
+<!-- phase:work-style-revision -->
+
+## 子阶段：work-style-revision
+
+# work_style_revision
+
+在设定抽取完成之后、图治理主流程继续之前，单独完成 **作品风格抽取与融合**。本阶段只处理 `表现输出/本作品描写/作品风格.md`，不写设定集、不改图。
+
+## 职责
+
+- 从用户自己的话里识别文风、意象、声口、命名、人称、对话、尺度或章钩要求；
+- 修订发布时，可从本轮正文归纳适合跨章沿用的语气和声口。单场使用的短句、视点、修辞和对话比例作为当场的创作选择，不外推成规则；
+- 与当前作品风格文件做小节级融合，输出可落盘的修订；
+- 没有新的风格线索时，返回空 `sections`，并在 `summary` 中说明。
+
+## 硬规则
+
+- 材料有两类，可同时存在：
+  1. **用户原话**：阶段输入 `userRequirements`（若有）。冲突时以用户原话为准。
+  2. **本轮正文**：修订发布（`workflow=revision`）时，`userInput` 是本章正文；允许从中归纳**呈现/文风**线索，写入对应小节。
+- 其他非 revision 流程没有 `userRequirements` 时，只看 `userInput` 里用户明确提出的呈现要求（此时 `userInput` 不是正文）。
+- 归纳出来的笔风用正向描述写成倾向，具体句段、视点和描写随场面选择。作者明确提出的要求按原意记录。
+- 当前全文在已读证据 `表现输出/本作品描写/作品风格.md`。只改这次碰到的小节，其余小节原样保留，8 个标题都要留着。
+- 没有新的文风、意象、声口、命名、人称、对话、尺度或章钩线索时，返回空 `sections`。修订发布且正文无明显新文风可融时，`summary` 写「正文无明显新文风可融」，不要写「无用户风格要求」。
+- 默认 `mode: "merge"`。`content` 是该节融合后的正文（不含标题）：原有且不矛盾的句子必须逐句保留，再写进新线索。只是补一条时，`content` 可以只写新增句子。
+- 仅当**用户原话**与该节已有句子明显矛盾、无法并存时，才用 `mode: "replace"`。正文蒸馏不得使用 `replace`，只允许 `merge`。不要整文件替换。
+- 每个 section 必须带 `source`：`"user"`（来自用户原话）或 `"body"`（来自本轮正文）。缺省按 `"user"`。
+- `userQuote`：`source=user` 时必须是 `userRequirements`（或非 revision 下上述 `userInput`）中的连续原句；`source=body` 时必须是正文中的连续短摘录。对不上、只是「发布正文」这类确认，宿主不会落盘。
+- 不得改掉语体笔风里已经写明的规则路径，除非**用户原话**里给出了新的 `表现输出/笔风规则/`、`小说大类规则/` 或 `小说次大类规则/` 路径。正文蒸馏禁止改这些路径。
+- 剧情事实（人物、地点、势力、规则、术语）不属于本阶段；正文蒸馏只抽呈现约束，不抽设定。
+
+## 输出
+
+输出 JSON：`summary`、`sections[]`（可为空）、可选 `finalSelfReview`。
+
+`sections` 项形如：
+
+- 用户原话：`{"heading":"## 6. 尺度意象章钩","mode":"merge","content":"意象固定为书、水、门，并落在实物上。","userQuote":"意象只用书、水和门","source":"user"}`
+- 正文蒸馏：`{"heading":"## 8. 句子与对话","mode":"merge","content":"对白偏短句，少解释动机。","userQuote":"「先走。」她没再解释。","source":"body"}`
+
+`outcome` 必须为 `continue`；本阶段不发起 `request_read`。
+
+<!-- /phase:work-style-revision -->
 
 <!-- phase:graph-governance -->
 

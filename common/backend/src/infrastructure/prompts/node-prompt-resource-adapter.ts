@@ -3,14 +3,21 @@ import { resolve } from "node:path"
 
 import type { AIPhase } from "@starseafolio/contracts"
 import {
+  AFTER_USER_MESSAGE_PROMPT_DOC,
   BASE_RULES_RESOURCE,
+  BEFORE_USER_MESSAGE_PROMPT_DOC,
+  COMPOSE_STAGE_PROMPT_DOC,
   CONTENT_HANDLING_RESOURCE,
   DISCUSS_CREATION_DESK_WORKFLOW_RESOURCE,
+  INGESTION_STAGE_PROMPT_DOC,
+  MESSAGE_WRAPPER_MARKERS,
+  NEW_CHAPTER_STAGE_PROMPT_DOC,
   OUTLINE_TO_DRAFT_GUIDE_RESOURCE,
   PLOT_SYNOPSIS_GUIDE_RESOURCE,
   PROMPT_CONTRACT_VERSION,
   SETTINGS_QUERY_GUIDE_RESOURCE,
   SETTINGS_REVISION_GUIDE_RESOURCE,
+  STAGE_ENTRY_MARKERS,
   SYNOPSIS_TO_OUTLINE_GUIDE_RESOURCE,
   USER_TO_SYNOPSIS_GUIDE_RESOURCE,
   WEBNOVEL_PROSE_LOGIC_RESOURCE,
@@ -19,6 +26,7 @@ import {
   SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES,
   defaultSkillIdsForPhase,
   extractPromptDocSection,
+  extractPromptDocSectionOrFull,
   formatSkillEvidenceHeader,
   listPlatformSkills,
   resolvePromptDefinition,
@@ -27,6 +35,7 @@ import {
   stagePromptDocForSkill,
   STAGE_SKILL_DOCS,
   SYNOPSIS_SKILLS_PROTOCOL,
+  type StagePromptKind,
 } from "@starseafolio/prompt-contracts"
 
 import type { LoadedSkillResource, PromptResource, PromptResourcePort } from "../../application/index.js"
@@ -90,6 +99,39 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
 
   public async loadSynopsisDiscussSystemRules(): Promise<PromptResource> {
     return this.loadComposite("synopsis-discuss-system-rules", SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES)
+  }
+
+  public async loadBeforeUserMessagePrompt(): Promise<PromptResource> {
+    return this.loadOptionalSection(BEFORE_USER_MESSAGE_PROMPT_DOC, MESSAGE_WRAPPER_MARKERS.before)
+  }
+
+  public async loadAfterUserMessagePrompt(): Promise<PromptResource> {
+    return this.loadOptionalSection(AFTER_USER_MESSAGE_PROMPT_DOC, MESSAGE_WRAPPER_MARKERS.after)
+  }
+
+  public async loadStageEntryPrompt(stage: StagePromptKind): Promise<PromptResource> {
+    switch (stage) {
+      case "new-chapter":
+        return this.loadOptionalSection(NEW_CHAPTER_STAGE_PROMPT_DOC, STAGE_ENTRY_MARKERS.newChapterEntry)
+      case "compose-request":
+        return this.loadOptionalSection(COMPOSE_STAGE_PROMPT_DOC, STAGE_ENTRY_MARKERS.composeRequest)
+      case "compose":
+        return this.loadOptionalSection(COMPOSE_STAGE_PROMPT_DOC, STAGE_ENTRY_MARKERS.composeEntry)
+      case "ingestion":
+        return this.loadOptionalSection(INGESTION_STAGE_PROMPT_DOC, STAGE_ENTRY_MARKERS.ingestionEntry)
+    }
+  }
+
+  private async loadOptionalSection(resourcePath: string, marker: string): Promise<PromptResource> {
+    const markdown = await this.readBundledOrOverride(resourcePath)
+    const extracted = extractPromptDocSectionOrFull(markdown, marker)
+    const text = extracted.length === 0 ? "" : normalizePrompt(extracted)
+    return {
+      ref: `${PROMPT_CONTRACT_VERSION}:${resourcePath}#${marker}`,
+      version: PROMPT_CONTRACT_VERSION,
+      digest: digest(text),
+      text,
+    }
   }
 
   public async loadPhase(phase: AIPhase): Promise<PromptResource> {

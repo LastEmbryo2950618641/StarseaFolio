@@ -14,7 +14,7 @@ import type {
 } from "@starseafolio/contracts"
 
 import type { GraphDegreeEntry } from "./graph-repository.js"
-import type { DiscussTurnWriteScope, StageProjection } from "@starseafolio/prompt-contracts"
+import type { DiscussTurnWriteScope, StagePromptKind, StageProjection } from "@starseafolio/prompt-contracts"
 
 export type PhaseModelUsage = Readonly<{
   modelCalls?: number
@@ -51,6 +51,14 @@ export type ModelExecutionOptions = Readonly<{
   contextChainId?: string
   contextMessages?: readonly VisibleModelContextMessage[]
   phasePrompt?: PromptResource
+  /** Prompt injected immediately before the user message on every user-sent turn. */
+  beforeUserMessagePrompt?: PromptResource
+  /** Prompt injected immediately after the user message on every user-sent turn. */
+  afterUserMessagePrompt?: PromptResource
+  /** Active stage prompt (e.g. new-chapter, compose, ingestion). */
+  stagePrompt?: PromptResource
+  /** Re-inject stagePrompt into compacted context after every compaction (required for chapter ingestion). */
+  reinjectStagePromptOnCompaction?: boolean
   /** When set, adapters should stream provider deltas when the protocol supports it. */
   onPartial?: (partial: ModelStreamPartial) => void
   /** Called before a schema-repair completion so UIs can reset streamed resulting text. */
@@ -130,6 +138,9 @@ export interface PromptResourcePort {
   loadDiscussCreationDeskWorkflow(): Promise<PromptResource>
   loadTurnSystemRules(): Promise<PromptResource>
   loadSynopsisDiscussSystemRules(): Promise<PromptResource>
+  loadBeforeUserMessagePrompt?(): Promise<PromptResource>
+  loadAfterUserMessagePrompt?(): Promise<PromptResource>
+  loadStageEntryPrompt?(stage: StagePromptKind): Promise<PromptResource>
   loadPhase(phase: AIPhase): Promise<PromptResource>
   /** Load one platform skill body (+ optional references). */
   loadSkill(skillId: string, options?: Readonly<{ includeReferences?: boolean }>): Promise<LoadedSkillResource>
@@ -285,7 +296,7 @@ export type TurnPhaseInput = Readonly<{
         finishedAtMs?: number
       }>[]
     }>
-    discussTrigger?: "user" | "turn_handoff"
+    discussTrigger?: "user" | "turn_handoff" | "new_chapter_entry"
   }>
   workNaming?: Readonly<{
     currentDisplayName: string

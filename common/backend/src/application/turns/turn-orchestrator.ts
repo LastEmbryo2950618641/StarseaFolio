@@ -77,6 +77,10 @@ import {
   WORK_STYLE_RULE_PATH,
   type GraphRevision,
 } from "../../core/index.js"
+import {
+  resolveStageEntryPrompt,
+  resolveUserMessageWrapperPrompts,
+} from "../prompts/workspace-prompt-loader.js"
 import type {
   AIModelPort,
   DecisionRecord,
@@ -85,6 +89,7 @@ import type {
   GraphDegreeProfile,
   CurrentGraphOwnerRevision,
   PhaseModelExecution,
+  PromptResource,
   PromptResourcePort,
   RetrievalProjection,
   RetrievalRepository,
@@ -3040,7 +3045,25 @@ export class TurnOrchestrator {
 
   private async executePhase(input: ExecutePhaseInput): Promise<ExecutePhaseResult> {
     throwIfExecutionCancelled(input.signal)
-    const basePrompt = await this.dependencies.prompts.loadPhase(input.phase)
+    const isChapterIngestion = input.input.workflow === "revision"
+    const [basePrompt, ingestionStagePrompt, messageWrappers] = await Promise.all([
+      this.dependencies.prompts.loadPhase(input.phase),
+      isChapterIngestion
+        ? resolveStageEntryPrompt({
+            prompts: this.dependencies.prompts,
+            stage: "ingestion",
+            workspace: this.dependencies.workspace,
+            workspaceRootRef: input.input.workspaceRootRef,
+          })
+        : Promise.resolve(undefined),
+      !isChapterIngestion && input.input.userInput.trim().length > 0
+        ? resolveUserMessageWrapperPrompts({
+            prompts: this.dependencies.prompts,
+            workspace: this.dependencies.workspace,
+            workspaceRootRef: input.input.workspaceRootRef,
+          })
+        : Promise.resolve<{ before?: PromptResource; after?: PromptResource }>({}),
+    ])
     // 只有带默认 skill 包的阶段才加载，避免给其余阶段追加空包噪声。
     // query draft 只回答事实，不加载 outline-to-draft/deslop/dialogue 写作包。
     const defaultSkillPackPhase = input.phase === "settings_extraction"
@@ -3060,6 +3083,7 @@ export class TurnOrchestrator {
     const archiveSessionId = input.input.conversationArchiveSessionId
     const conversation = this.dependencies.synopsisConversation
     const canReadArchive = input.phase === "draft" && archiveSessionId !== undefined && conversation !== undefined
+    const stageAppendix = ingestionStagePrompt?.text.trim()
     const appendices = [
       worldDivergencePhaseAppendix(
         resolveWorldDivergenceMode(input.input.projectSettings),
@@ -3070,6 +3094,9 @@ export class TurnOrchestrator {
       workflowAppendix,
       skillPack?.text,
       canReadArchive ? renderRuntimePrompt("turn-context", "archive") : undefined,
+      stageAppendix !== undefined && stageAppendix.length > 0 && !basePrompt.text.includes(stageAppendix)
+        ? stageAppendix
+        : undefined,
     ].filter((text): text is string => text !== undefined && text.trim().length > 0)
     const prompt = appendices.length === 0
       ? basePrompt
@@ -3350,6 +3377,12 @@ export class TurnOrchestrator {
             contextChainId: input.modelContextChainId,
             contextMessages,
             phasePrompt: prompt,
+            ...(messageWrappers.before === undefined ? {} : { beforeUserMessagePrompt: messageWrappers.before }),
+            ...(messageWrappers.after === undefined ? {} : { afterUserMessagePrompt: messageWrappers.after }),
+            ...(ingestionStagePrompt === undefined ? {} : {
+              stagePrompt: ingestionStagePrompt,
+              reinjectStagePromptOnCompaction: true,
+            }),
             ...(input.signal === undefined ? {} : { signal: input.signal }),
           },
         })
