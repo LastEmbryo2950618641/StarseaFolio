@@ -169,8 +169,9 @@ describe("precise chapter progression", () => {
     const discussCalls: DiscussCall[] = []
     let replies = 0
     const model = createPreciseModel({
-      classifier: () => {
-        throw new Error("explicit precise start must bypass the classifier")
+      classifier: (message) => {
+        if (message === "开始构思") throw new Error("explicit precise start must bypass the classifier")
+        return {}
       },
       classifyCalls,
       discussCalls,
@@ -186,7 +187,7 @@ describe("precise chapter progression", () => {
       await send(harness, { message: requirements, proceedMode: "precise" })
       const sent = await send(harness, { message: "开始构思", proceedMode: "precise", preciseAction: "start_compose" })
 
-      expect(classifyCalls).toEqual([])
+      expect(classifyCalls).toEqual([requirements])
       expect(sent.appendedDraft).toBeDefined()
       expect(sent.appendedDraft?.draftVersionId).toBeTruthy()
       expect(sent.proceedProgress).toEqual({ stage: "draft_discuss", status: "waiting" })
@@ -252,12 +253,10 @@ describe("precise chapter progression", () => {
     }
   })
 
-  it("keeps ordinary precise text inside the stage: no classifier before the first draft, no starting missing materials, no publish", async () => {
+  it("keeps ordinary precise text inside the stage: AI may offer compose, but does not start missing materials or publish", async () => {
     const classifyCalls: string[] = []
     const model = createPreciseModel({
-      classifier: () => {
-        throw new Error("precise discussion before the first complete draft must skip the classifier")
-      },
+      classifier: (message) => message.includes("先写梗概") ? { startCompose: true } : {},
       classifyCalls,
       reply: () => "我们先讨论这一章想写什么，暂不落盘。",
     })
@@ -269,12 +268,12 @@ describe("precise chapter progression", () => {
       expect(sent.appendedDraft).toBeUndefined()
       expect(await harness.container.workspace.readMarkdown(harness.workspaceRootRef, synopsisPath)).toBe(EMPTY_SYNOPSIS)
       const assistant = sent.messages.filter((message) => message.role === "assistant").at(-1)
+      expect(classifyCalls).toEqual(["先写梗概"])
       expect(assistant?.choices?.map((choice) => choice.action)).toEqual(["start_compose", "discuss_only"])
       expect(assistant?.choices?.every((choice) => choice.chapterSequence === 1)).toBe(true)
-      expect(classifyCalls).toEqual([])
 
       await send(harness, { message: "发布正文", proceedMode: "precise" })
-      expect(classifyCalls).toEqual([])
+      expect(classifyCalls).toEqual(["先写梗概", "发布正文"])
       const chapters = await invoke<unknown[]>(harness, "chapter.list", {})
       expect(chapters).toEqual([])
     } finally {
@@ -361,7 +360,7 @@ describe("precise chapter progression", () => {
     }
   })
 
-  it("keeps 只讨论 as a local acknowledgment with host controls and no model call", async () => {
+  it("keeps 只讨论 as a local acknowledgment with no forced host controls and no model call", async () => {
     const classifyCalls: string[] = []
     const discussCalls: DiscussCall[] = []
     const model = createPreciseModel({ classifier: () => ({}), classifyCalls, discussCalls })
@@ -373,8 +372,72 @@ describe("precise chapter progression", () => {
       expect(classifyCalls).toEqual([])
       const assistant = sent.messages.filter((message) => message.role === "assistant").at(-1)
       expect(assistant?.content).toContain("仅讨论模式")
+      expect(assistant?.choices === undefined || assistant.choices.length === 0).toBe(true)
+    } finally {
+      await closeHarness(harness)
+    }
+  })
+
+  it("when classifier detects compose intent, offers start_compose even if a publishable draft already exists", async () => {
+    const classifyCalls: string[] = []
+    const discussCalls: DiscussCall[] = []
+    const model = createPreciseModel({
+      classifier: () => ({ startCompose: true }),
+      classifyCalls,
+      discussCalls,
+      reply: () => composeAll,
+    })
+    const harness = await openChapterHarness("Precise AI compose offer with draft", { model })
+    try {
+      await prepareChapterPlanning(harness)
+      const composed = await send(harness, { message: "开始构思", proceedMode: "precise", preciseAction: "start_compose" })
+      expect(composed.appendedDraft?.draftVersionId).toBeTruthy()
+      const discussCallsBefore = discussCalls.length
+
+      const offered = await send(harness, { message: "整章重写，换成雨夜对峙开场", proceedMode: "precise" })
+      expect(classifyCalls).toEqual(["整章重写，换成雨夜对峙开场"])
+      expect(discussCalls).toHaveLength(discussCallsBefore)
+      expect(offered.appendedDraft).toBeUndefined()
+      const assistant = offered.messages.filter((message) => message.role === "assistant").at(-1)
+      expect(assistant?.content).toContain("已收到本章要求")
       expect(assistant?.choices?.map((choice) => choice.action)).toEqual(["start_compose", "discuss_only"])
-      expect(assistant?.choices?.every((choice) => choice.chapterSequence === 1)).toBe(true)
+      expect(assistant?.choices?.some((choice) => choice.action === "promote_draft_to_body")).toBe(false)
+    } finally {
+      await closeHarness(harness)
+    }
+  })
+
+  it("when classifier detects publish intent, offers promote_draft instead of auto-publishing", async () => {
+    const classifyCalls: string[] = []
+    const discussCalls: DiscussCall[] = []
+    const model = createPreciseModel({
+      classifier: () => ({ publish: true }),
+      classifyCalls,
+      discussCalls,
+      reply: () => composeAll,
+    })
+    const harness = await openChapterHarness("Precise AI publish offer", { model })
+    try {
+      await prepareChapterPlanning(harness)
+      const composed = await send(harness, { message: "开始构思", proceedMode: "precise", preciseAction: "start_compose" })
+      const draftVersionId = composed.appendedDraft?.draftVersionId
+      expect(draftVersionId).toBeTruthy()
+      const discussCallsBefore = discussCalls.length
+
+      const offered = await send(harness, { message: "草稿可以，发布正文", proceedMode: "precise" })
+      expect(classifyCalls).toEqual(["草稿可以，发布正文"])
+      expect(discussCalls).toHaveLength(discussCallsBefore)
+      expect(offered.appendedDraft).toBeUndefined()
+      expect(await invoke<unknown[]>(harness, "chapter.list", {})).toEqual([])
+      const assistant = offered.messages.filter((message) => message.role === "assistant").at(-1)
+      expect(assistant?.content).toContain("要发布当前草稿")
+      expect(assistant?.choices?.map((choice) => choice.action)).toEqual(["promote_draft_to_body", "discuss_only"])
+      expect(assistant?.choices?.[0]).toEqual(expect.objectContaining({
+        action: "promote_draft_to_body",
+        publishDraftVersionId: draftVersionId,
+        chapterSequence: 1,
+      }))
+      expect(assistant?.choices?.some((choice) => choice.action === "start_compose")).toBe(false)
     } finally {
       await closeHarness(harness)
     }
@@ -440,15 +503,15 @@ describe("precise chapter progression", () => {
         .catch(() => "")
       expect(outlineExists.trim()).toBe("")
 
-      // After the user discusses the new chapter requirements, the assistant result offers Start.
+      // 普通讨论不必点选；无分类器意图时不硬挂开始构思/发布。
       const discussed = await send(harness, { message: "第二章要写他下车后沿线索追查", proceedMode: "precise" })
       expect(discussCalls.at(-1)?.authorMessage).toBe("第二章要写他下车后沿线索追查")
       // 新章阶段提示已在上一次代码发起的阶段入口写入链里；讨论链只追加，这里仍能在上下文里看到。
       expect(discussCalls.at(-1)?.context).toContain("先用当前卷的信息")
       expect(discussed.proceedProgress?.stage).toBe("chapter_requirements")
       const discussedAssistant = discussed.messages.filter((message) => message.role === "assistant").at(-1)
-      expect(discussedAssistant?.choices?.map((choice) => choice.action)).toEqual(["start_compose", "discuss_only"])
-      expect(discussedAssistant?.choices?.every((choice) => choice.chapterSequence === 2)).toBe(true)
+      expect(discussedAssistant?.choices?.some((choice) => choice.action === "start_compose")).toBeFalsy()
+      expect(discussedAssistant?.choices?.some((choice) => choice.action === "promote_draft_to_body")).toBeFalsy()
     } finally {
       await closeHarness(harness)
     }

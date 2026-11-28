@@ -32,7 +32,7 @@ Return exactly one JSON object and no Markdown fences or commentary.
 若用户把后续推进交给系统，才用 advance=true。完整构思已由三项字段授权，无须附 advance。用户明确要求仅改某项或本步就停时，不能附 advance。
 明确要求切换章节焦点，或要求修改当前焦点之外的章或卷时，先仅用 focus=true，待焦点切换后再授权目标写入。明确要求撤回现有正文、让它退出当前版本并回到推演时用 restage=true，按专用流程先完成回退。普通新写、改写或局部修订草稿不授权回退。
 明确要求改章名或对齐标题用 chapterTitle=true，明确要求改卷名用 volumeTitle=true，明确要求通过命令执行工作区操作用 shell=true。
-当前有可发布草稿，且用户明确批准将这份现有草稿入库时，才单独返回 {"publish":true}。否定、引用按钮文案、询问是否应发布、对旧版本的确认、要求先改写或等待都不能授权发布现有草稿。批量编排自行发布，不返回 publish。
+`requireComposeConfirmation=true`（精准推进）时：当前有可发布草稿，且用户明确要求将这份现有草稿入库，只返回 {"publish":true}。这只是提请确认（宿主会挂「发布正文 / 仅讨论」），不是直接发布授权。否定、引用按钮文案、询问是否应发布、对旧版本的确认、要求先改写或等待都不触发。其他模式：当前有可发布草稿且用户明确批准入库时才单独返回 {"publish":true} 作为发布授权。批量编排自行发布，不返回 publish。
 
 ## compression-fragment
 

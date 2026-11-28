@@ -988,18 +988,15 @@ export class SynopsisConversationService {
         })
       }
       const preciseFirstCompleteDraft = precisePlanningRecovery ? undefined : preciseExistingDraft
-      // 首稿出现前不交给分类器决定是否落笔。宿主直接给出「开始构思 / 仅讨论」，
-      // 只有用户点「开始构思」才进入构思阶段。已有草稿后才用模型理解发布或阶段内修订。
-      const preciseAwaitingFirstComposition = preciseMode
-        && preciseHostAction === undefined
-        && preciseFirstCompleteDraft === undefined
-      if (!preciseAwaitingFirstComposition
-        && workStyleGateReadyAtStart && volumePlanningGateWasReady && input.setupAnswerTo === undefined
+      // 精准推进：构思/发布确认均由分类器从用户输入读出意图后挂选项；普通讨论不必点选。
+      // 显式 preciseAction（点按钮）仍绕过分类器直接执行。
+      if (workStyleGateReadyAtStart && volumePlanningGateWasReady && input.setupAnswerTo === undefined
         && automationStep === undefined && preciseHostAction === undefined
         && input.model.classifyDiscussTurn !== undefined) {
         const candidate = preciseMode ? preciseFirstCompleteDraft
           : canPublish ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence) : undefined
         let confirmCompose = false
+        let confirmPublish = false
         const signals = [
           ...(input.signal === undefined ? [] : [input.signal]),
           ...(input.deadlineMs === undefined ? [] : [AbortSignal.timeout(Math.max(1, input.deadlineMs - (this.dependencies.now() - routeStartedAt)))]),
@@ -1040,7 +1037,13 @@ export class SynopsisConversationService {
             const olderComposeRoute = (routed.synopsis !== undefined && routed.outline !== undefined && routed.draft === "write")
               || (!draftReady && (routed.synopsis !== undefined || routed.outline !== undefined || routed.draft === "write"))
             confirmCompose = agentMode !== "plan" && (routed.startCompose === true || olderComposeRoute)
-            writeScope = confirmCompose ? {} : restrictPreciseInStageScope(routed, { synopsisReady, outlineReady: outlineReadyAtStart, draftReady })
+            // publish 会在 restrict 中被剥掉；先记下意图，本轮只挂确认按钮。
+            confirmPublish = agentMode !== "plan"
+              && routed.publish === true
+              && Object.keys(routed).every((key) => key === "publish")
+            writeScope = confirmCompose || confirmPublish
+              ? {}
+              : restrictPreciseInStageScope(routed, { synopsisReady, outlineReady: outlineReadyAtStart, draftReady })
           // A chapter synopsis write starts a complete composition. The router from
           // older prompt libraries may still authorize just the first artifact.
           } else if (routed.synopsis !== undefined && Object.keys(routed).every((key) =>
@@ -1074,6 +1077,8 @@ export class SynopsisConversationService {
             projectId: input.projectId, usage: cumulativeUsage, updatedAtMs: this.dependencies.now(),
           })
         }
+        // 分类器读出「要构思」→ 挂开始构思/仅讨论；读出「要发布」→ 挂发布正文/仅讨论。
+        // 都不直接执行；普通输入走讨论不必点选；会话选项（点选进对话框）另路。
         if (confirmCompose) {
           return await this.runPreciseDiscussOnly({
             projectId: input.projectId,
@@ -1081,6 +1086,17 @@ export class SynopsisConversationService {
             session,
             message: input.message,
             confirmCompose: true,
+          })
+        }
+        if (confirmPublish) {
+          if (candidate === undefined) throw new SynopsisInvalidStateError("当前章没有可发布的草稿。")
+          return await this.runPreciseDiscussOnly({
+            projectId: input.projectId,
+            workspaceRootRef: input.workspaceRootRef,
+            session,
+            message: input.message,
+            confirmPublish: true,
+            publishCandidate: candidate,
           })
         }
         if (writeScope !== undefined && writeScope.publish === true && Object.keys(writeScope).length === 1 && canPublish) {
@@ -2490,7 +2506,8 @@ export class SynopsisConversationService {
           emitProceedProgress("outline_discuss", "done")
         }
       }
-      // 精准推进：host-owned 直接控制按钮只挂在最新 assistant 结果上，旧消息里的按钮由 renderer 置灰。
+      // 精准推进：仅在「刚点开始构思」或「材料复原」时由宿主挂协议按钮；
+      // 普通讨论不因已有草稿硬挂发布/构思——那些由分类器意图触发。
       const preciseHostControlsEnabled = preciseMode
         && workStyleGateReadyAtStart
         && volumePlanningGateWasReady
@@ -2499,12 +2516,14 @@ export class SynopsisConversationService {
         && !coldStartStyleNeedsChoice
         && appliedFocusSequence === undefined
       if (preciseHostControlsEnabled) {
-        persistedChoices = buildPreciseHostChoices(precisePublishableDraft, session.chapterSequence)
-        if (precisePlanningRecovery && precisePublishableDraft === undefined) {
+        if (preciseHostAction === "start_compose") {
+          persistedChoices = precisePublishableDraft === undefined
+            ? buildPreciseComposeOfferChoices(session.chapterSequence)
+            : buildPrecisePublishOfferChoices(precisePublishableDraft, session.chapterSequence)
+        } else if (precisePlanningRecovery && precisePublishableDraft === undefined) {
+          persistedChoices = buildPreciseComposeOfferChoices(session.chapterSequence)
           const recoveryNotice = "当前章有旧草稿，但梗概或细纲缺失。请点「开始构思」，同一回复生成梗概、细纲和草稿。"
-          assistantContent = preciseHostAction === "start_compose"
-            ? [recoveryNotice, ...writeNotices].join("\n\n")
-            : `${recoveryNotice}\n\n${assistantContent}`
+          assistantContent = `${recoveryNotice}\n\n${assistantContent}`
         }
       }
       if (pipelineAuto) {
@@ -6516,6 +6535,9 @@ export class SynopsisConversationService {
     recovery?: boolean
     /** 分类器判定用户想要开始构思：不写入，只给出「开始构思 / 仅讨论」按钮。 */
     confirmCompose?: boolean
+    /** 分类器判定用户想要发布：不写入，只给出「发布正文 / 仅讨论」按钮。 */
+    confirmPublish?: boolean
+    publishCandidate?: Readonly<{ draftLabel: string; draftVersionId: string }>
   }>): Promise<SynopsisConversationSendResult> {
     const nowMs = this.dependencies.now()
     await this.dependencies.conversation.appendMessage({
@@ -6526,22 +6548,26 @@ export class SynopsisConversationService {
       content: input.message,
       createdAtMs: nowMs,
     })
-    const planningReady = await this.hasCompleteFocusedPlanning(input.workspaceRootRef, input.session)
-    const publishableDraft = planningReady
-      ? await this.findPublishableFocusDraft(input.projectId, input.session.chapterSequence)
-      : undefined
-    const content = input.confirmCompose === true
-      ? "已收到本章要求。本轮不写入；点「开始构思」后在同一回复生成梗概、细纲和草稿，确认草稿后再点「发布正文」。"
-      : input.recovery === true
-        ? "当前章有旧草稿，但梗概或细纲缺失。本轮要求已记录。请点「开始构思」，同一回复生成梗概、细纲和草稿。"
-        : "已进入仅讨论模式：本轮不会写入梗概、细纲或正文。直接输入你的想法即可；需要一次生成或重写「梗概+细纲+草稿」时，点「开始构思」，确认草稿后再点「发布正文」。"
+    // AI 意图 → 对应协议按钮；普通「仅讨论」只确认本轮不写，不按材料硬挂发布/构思。
+    const choices = input.confirmPublish === true && input.publishCandidate !== undefined
+      ? buildPrecisePublishOfferChoices(input.publishCandidate, input.session.chapterSequence)
+      : input.confirmCompose === true || input.recovery === true
+        ? buildPreciseComposeOfferChoices(input.session.chapterSequence)
+        : undefined
+    const content = input.confirmPublish === true
+      ? `已理解要发布当前草稿（${input.publishCandidate?.draftLabel ?? "当前版"}）。本轮不写入；点「发布正文」确认入库，或点「仅讨论」继续改。`
+      : input.confirmCompose === true
+        ? "已收到本章要求。本轮不写入；点「开始构思」后在同一回复生成梗概、细纲和草稿，确认草稿后再点「发布正文」。"
+        : input.recovery === true
+          ? "当前章有旧草稿，但梗概或细纲缺失。本轮要求已记录。请点「开始构思」，同一回复生成梗概、细纲和草稿。"
+          : "已进入仅讨论模式：本轮不会写入梗概、细纲或正文。直接输入你的想法即可；需要构思或发布时，说明意图后会再给出对应选项。"
     await this.dependencies.conversation.appendMessage({
       messageId: this.dependencies.createId(),
       projectId: input.projectId,
       sessionId: input.session.sessionId,
       role: "assistant",
       content,
-      choices: buildPreciseHostChoices(publishableDraft, input.session.chapterSequence),
+      ...(choices === undefined ? {} : { choices }),
       createdAtMs: nowMs + 1,
     })
     const proceedProgress = await this.syncProceedProgressFromMaterials({
@@ -7938,28 +7964,49 @@ function isPreciseHostSyntheticMessage(message: string): boolean {
 }
 
 /**
- * 精准推进的直接控制按钮：阶段内二选一，不把「开始构思」和「发布正文」同时给出。
- * 有可发布草稿时只给发布与仅讨论；否则给开始构思与仅讨论。
+ * AI（分类器）发现用户输入含「要构思」含义时挂出的确认选项；
+ * 与材料状态无关——即使已有可发布草稿，也仍是开始构思 / 仅讨论。
+ * 普通会话里 AI 给出的 continue_discuss 选项（点选后文本进对话框）是另一路，不走这里。
+ */
+function buildPreciseComposeOfferChoices(chapterSequence: number): SynopsisConversationChoice[] {
+  return [
+    { label: "开始构思（梗概+细纲+草稿）", action: "start_compose", chapterSequence },
+    { label: "仅讨论（本轮不写入）", action: "discuss_only", chapterSequence },
+  ]
+}
+
+/**
+ * AI（分类器）发现用户输入含「要发布」含义，或刚完成构思落稿时挂出的确认选项：
+ * 发布正文 / 仅讨论。不与「开始构思」同时给出。
+ */
+function buildPrecisePublishOfferChoices(
+  publishableDraft: Readonly<{ draftLabel: string; draftVersionId: string }>,
+  chapterSequence: number,
+): SynopsisConversationChoice[] {
+  return [{
+    label: `${DRAFT_PUBLISH_CONFIRMATION}（${publishableDraft.draftLabel}）`,
+    action: "promote_draft_to_body",
+    publishDraftVersionId: publishableDraft.draftVersionId,
+    chapterSequence,
+  }, {
+    label: "仅讨论（本轮不写入）",
+    action: "discuss_only",
+    chapterSequence,
+  }]
+}
+
+/**
+ * 精准推进发布失败重试等场景的宿主控制：有可发布草稿时给发布与仅讨论，否则给构思与仅讨论。
  * 每个 choice 都带渲染时的 chapterSequence，便于 renderer 拒绝过期的上一章动作。
  */
 function buildPreciseHostChoices(
   publishableDraft: Readonly<{ draftLabel: string; draftVersionId: string }> | undefined,
   chapterSequence: number,
 ): SynopsisConversationChoice[] {
-  const discussOnly: SynopsisConversationChoice = {
-    label: "仅讨论（本轮不写入）",
-    action: "discuss_only",
-    chapterSequence,
-  }
   if (publishableDraft !== undefined) {
-    return [{
-      label: `${DRAFT_PUBLISH_CONFIRMATION}（${publishableDraft.draftLabel}）`,
-      action: "promote_draft_to_body",
-      publishDraftVersionId: publishableDraft.draftVersionId,
-      chapterSequence,
-    }, discussOnly]
+    return buildPrecisePublishOfferChoices(publishableDraft, chapterSequence)
   }
-  return [{ label: "开始构思（梗概+细纲+草稿）", action: "start_compose", chapterSequence }, discussOnly]
+  return buildPreciseComposeOfferChoices(chapterSequence)
 }
 
 export function filterDiscussChoices(
