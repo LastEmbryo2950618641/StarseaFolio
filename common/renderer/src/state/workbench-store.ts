@@ -8,6 +8,7 @@ export type ProjectSettingsSection =
   | "graph"
   | "history"
   | "model"
+  | "network"
   | "workDirectory"
   | "about"
 

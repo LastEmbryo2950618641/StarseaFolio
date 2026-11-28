@@ -91,7 +91,8 @@ describe("current configuration", () => {
     expect(defaultDeepSeekRuntimeConfig.jsonModeEnabled).toBe(true)
     expect(defaultDeepSeekRuntimeConfig.thinkingModeEnabled).toBe(true)
     expect(defaultDeepSeekRuntimeConfig.reasoningEffort).toBe("high")
-    expect(defaultDeepSeekRuntimeConfig.timeoutMs).toBe(7_200_000)
+    expect(defaultDeepSeekRuntimeConfig.timeoutMs).toBe(300_000)
+    expect(defaultDeepSeekRuntimeConfig.maxAttempts).toBe(4)
     expect(deepSeekRuntimeConfigSchema.safeParse({
       ...defaultDeepSeekRuntimeConfig,
       model: "deepseek-v4-flash",

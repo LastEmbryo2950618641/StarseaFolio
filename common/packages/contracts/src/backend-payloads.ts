@@ -39,6 +39,10 @@ export const modelSelectionSchema = z.object({
   jsonModeEnabled: z.boolean().default(true),
   disableResponseStorage: z.boolean().default(true),
   serviceTier: modelServiceTierSchema.default("auto"),
+  /** Per-request HTTP timeout from app「网络」settings. */
+  timeoutMs: z.number().int().positive().max(7_200_000).optional(),
+  /** Total transport attempts including the first try. */
+  maxAttempts: z.number().int().min(1).max(10).optional(),
 })
 export type ModelSelection = z.infer<typeof modelSelectionSchema>
 

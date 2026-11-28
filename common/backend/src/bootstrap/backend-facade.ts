@@ -1385,18 +1385,7 @@ export class BackendFacade {
 
   private resolveModel(selection: ModelSelection | undefined): import("../application/index.js").AIModelPort {
     if (selection === undefined) return this.container.model
-    return this.container.createModelFromSelection({
-      baseUrl: selection.baseUrl,
-      model: selection.model,
-      apiKey: requireResolvedApiKey(selection.apiKey),
-      apiProtocol: selection.apiProtocol,
-      contextWindowTokens: selection.contextWindowTokens,
-      thinkingModeEnabled: selection.thinkingModeEnabled,
-      reasoningEffort: selection.reasoningEffort,
-      jsonModeEnabled: selection.jsonModeEnabled,
-      disableResponseStorage: selection.disableResponseStorage,
-      serviceTier: selection.serviceTier,
-    })
+    return this.container.createModelFromSelection(toDeepSeekModelSelection(selection))
   }
 
   private async readTask(taskId: string): Promise<unknown> {
@@ -1488,18 +1477,7 @@ export class BackendFacade {
 
     const selectedModel = payload.model === undefined
       ? undefined
-      : this.container.createModelFromSelection({
-        baseUrl: payload.model.baseUrl,
-        model: payload.model.model,
-        apiKey: requireResolvedApiKey(payload.model.apiKey),
-        apiProtocol: payload.model.apiProtocol,
-        contextWindowTokens: payload.model.contextWindowTokens,
-        ...(payload.model.thinkingModeEnabled === undefined ? {} : { thinkingModeEnabled: payload.model.thinkingModeEnabled }),
-        ...(payload.model.reasoningEffort === undefined ? {} : { reasoningEffort: payload.model.reasoningEffort }),
-        ...(payload.model.jsonModeEnabled === undefined ? {} : { jsonModeEnabled: payload.model.jsonModeEnabled }),
-        disableResponseStorage: payload.model.disableResponseStorage,
-        serviceTier: payload.model.serviceTier,
-      })
+      : this.container.createModelFromSelection(toDeepSeekModelSelection(payload.model))
     const loadedRecord = await this.loadResumableTask(payload.taskId, selectedModel)
     const record = payload.model === undefined
       ? loadedRecord
@@ -1996,6 +1974,23 @@ function requireResolvedApiKey(apiKey: string | undefined): string {
     if (apiKey === undefined) throw new Error("Model credential was not resolved by the desktop credential vault")
     return apiKey
   }
+
+function toDeepSeekModelSelection(selection: ModelSelection): import("../infrastructure/models/model-factory.js").DeepSeekModelSelection {
+  return {
+    baseUrl: selection.baseUrl,
+    model: selection.model,
+    apiKey: requireResolvedApiKey(selection.apiKey),
+    apiProtocol: selection.apiProtocol,
+    contextWindowTokens: selection.contextWindowTokens,
+    thinkingModeEnabled: selection.thinkingModeEnabled,
+    reasoningEffort: selection.reasoningEffort,
+    jsonModeEnabled: selection.jsonModeEnabled,
+    disableResponseStorage: selection.disableResponseStorage,
+    serviceTier: selection.serviceTier,
+    ...(selection.timeoutMs === undefined ? {} : { timeoutMs: selection.timeoutMs }),
+    ...(selection.maxAttempts === undefined ? {} : { maxAttempts: selection.maxAttempts }),
+  }
+}
 
 function buildAutomaticEvolutionInstruction(triggerTaskId: string): string {
   return [

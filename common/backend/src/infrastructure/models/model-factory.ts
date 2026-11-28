@@ -25,6 +25,8 @@ export type DeepSeekModelSelection = Readonly<{
   jsonModeEnabled?: boolean
   disableResponseStorage?: boolean
   serviceTier?: "auto" | "default" | "flex" | "priority" | "fast"
+  timeoutMs?: number
+  maxAttempts?: number
 }>
 
 export function createModelFromEnvironment(
@@ -78,6 +80,8 @@ export function createModelFromSelection(
     jsonModeEnabled: selection.jsonModeEnabled ?? defaultDeepSeekRuntimeConfig.jsonModeEnabled,
     disableResponseStorage: selection.disableResponseStorage ?? defaultDeepSeekRuntimeConfig.disableResponseStorage,
     serviceTier: selection.serviceTier ?? defaultDeepSeekRuntimeConfig.serviceTier,
+    timeoutMs: selection.timeoutMs ?? defaultDeepSeekRuntimeConfig.timeoutMs,
+    maxAttempts: selection.maxAttempts ?? defaultDeepSeekRuntimeConfig.maxAttempts,
   })
   const secrets = { getSecret: (reference: string) => Promise.resolve(reference === "turn-api-key" ? apiKey : "") }
   const prompts = new NodePromptResourceAdapter(resolve(promptPackageRoot), promptLibrary)

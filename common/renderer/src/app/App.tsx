@@ -108,6 +108,7 @@ import { BackendWaitTimeoutDialog } from "../features/status/BackendWaitTimeoutD
 import { RightRail, summarizeSynopsisStreamTokenMetrics, summarizeSynopsisUsageTokenMetrics, type TaskTokenMetrics } from "../features/status/RightRail.js"
 import { RightPanelViewport } from "../features/status/RightPanelViewport.js"
 import { type ModelProfile } from "../features/settings/ModelConfigurationDialog.js"
+import { loadNetworkPreferences } from "../features/settings/network-preferences.js"
 import { AppUpdateDialog } from "../features/settings/AppUpdateDialog.js"
 import { AppDialogsHost } from "../features/settings/AppDialogsHost.js"
 import { WorkbenchPages } from "../features/settings/WorkbenchPages.js"
@@ -3867,6 +3868,7 @@ function parseWordCount(value: string): number | undefined {
 }
 
 function modelSelection(profile: ModelProfile) {
+  const network = loadNetworkPreferences()
   return {
     baseUrl: profile.baseUrl,
     model: profile.model,
@@ -3878,6 +3880,8 @@ function modelSelection(profile: ModelProfile) {
     jsonModeEnabled: profile.jsonModeEnabled,
     disableResponseStorage: profile.disableResponseStorage,
     serviceTier: profile.serviceTier,
+    timeoutMs: network.requestTimeoutMs,
+    maxAttempts: network.maxAttempts,
   }
 }
 

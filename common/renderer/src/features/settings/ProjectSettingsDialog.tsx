@@ -7,6 +7,7 @@ import {
   Database,
   FolderOpen,
   Gauge,
+  Globe,
   History,
   Info,
   Network,
@@ -22,9 +23,10 @@ import type {
   UpdateManifest,
 } from "../../api/client.js"
 import { AboutSettingsPanel } from "./AboutSettingsPanel.js"
+import { NetworkSettingsPanel } from "./NetworkSettingsPanel.js"
 import { WorkDirectorySettingsPanel } from "./WorkDirectorySettingsPanel.js"
 
-type SettingsSection = "execution" | "retrieval" | "graph" | "history" | "model" | "workDirectory" | "about"
+type SettingsSection = "execution" | "retrieval" | "graph" | "history" | "model" | "network" | "workDirectory" | "about"
 type NumericExecutionSetting = Exclude<
   keyof ProjectSettings["execution"],
   "outputTokenLimitMode" | "worldDivergenceMode"
@@ -64,11 +66,12 @@ const sections: readonly SectionDefinition[] = [
   { id: "graph", label: "世界图", group: "项目", keywords: "出度 入度 合并 预警 展开 节点 连接 入口 布局", icon: Network },
   { id: "history", label: "推演历史", group: "项目", keywords: "保存 历史 世界线 保留 上限 删除", icon: History },
   { id: "model", label: "模型服务", group: "应用", keywords: "base url api key deepseek 模型", icon: Bot },
+  { id: "network", label: "网络", group: "应用", keywords: "超时 重试 请求 timeout retry http 网络", icon: Globe },
   { id: "workDirectory", label: "工作目录", group: "应用", keywords: "书籍 存放 路径 目录 新建 默认", icon: FolderOpen },
   { id: "about", label: "关于", group: "应用", keywords: "版本 构建号 更新 检查 关于 星海余页 starseafolio", icon: Info },
 ]
 
-const appOnlySections = new Set<SettingsSection>(["workDirectory", "about"])
+const appOnlySections = new Set<SettingsSection>(["network", "workDirectory", "about"])
 
 export function ProjectSettingsDialog({
   projectName,
@@ -198,6 +201,7 @@ export function ProjectSettingsDialog({
           {section === "graph" ? <GraphSettings value={draft.graph} onChange={updateGraph} /> : null}
           {section === "history" ? <HistorySettings value={draft.history} entryCount={historyEntryCount} onChange={updateHistoryLimit} /> : null}
           {section === "model" ? <ModelSettings activeModelName={activeModelName} onOpen={onOpenModelSettings} /> : null}
+          {section === "network" ? <NetworkSettingsPanel /> : null}
           {section === "workDirectory" ? <WorkDirectorySettingsPanel /> : null}
           {section === "about" ? <AboutSettingsPanel
             info={appUpdate.info}
@@ -213,6 +217,8 @@ export function ProjectSettingsDialog({
       <footer className="model-dialog-footer settings-footer">
         <p>{showList ? saveError ?? "选择设置项目查看或修改配置。" : section === "workDirectory"
           ? "工作目录变更会立即生效，无需点击应用。"
+          : section === "network"
+            ? "网络设置保存后立即生效，下一轮模型请求开始使用新的超时与重试。"
           : section === "about"
             ? "更新设置保存后立即生效；检查更新会在应用内提示，并支持下载安装包后打开安装向导。"
           : saveError ?? validationMessage ?? "项目参数保存到内部数据库；新设置从下一轮推演开始生效。"}</p>

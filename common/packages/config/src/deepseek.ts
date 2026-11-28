@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { deepSeekReasoningEffortSchema } from "@starseafolio/contracts"
 
-import { defaultTurnWallTimeMs } from "./profiles.js"
+import { defaultNetworkSettings } from "./network.js"
 
 export const deepSeekRuntimeConfigSchema = z.object({
   provider: z.literal("deepseek"),
@@ -19,8 +19,8 @@ export const deepSeekRuntimeConfigSchema = z.object({
   proxyUrl: z.url().refine((url) => url.startsWith("http://") || url.startsWith("https://"), {
     message: "proxyUrl must use HTTP or HTTPS",
   }).optional(),
-  timeoutMs: z.number().int().positive(),
-  maxAttempts: z.number().int().min(1).max(2),
+  timeoutMs: z.number().int().positive().max(7_200_000),
+  maxAttempts: z.number().int().min(1).max(10),
   maxSchemaRepairAttempts: z.number().int().min(0).max(2),
   jsonModeEnabled: z.boolean(),
   thinkingModeEnabled: z.boolean(),
@@ -37,8 +37,8 @@ export const defaultDeepSeekRuntimeConfig = Object.freeze({
   apiProtocol: "openai_chat_completions",
   apiKeyRef: "deepseek-api-key",
   contextWindowTokens: 1_000_000,
-  timeoutMs: defaultTurnWallTimeMs,
-  maxAttempts: 2,
+  timeoutMs: defaultNetworkSettings.requestTimeoutMs,
+  maxAttempts: defaultNetworkSettings.maxAttempts,
   maxSchemaRepairAttempts: 2,
   jsonModeEnabled: true,
   thinkingModeEnabled: true,
