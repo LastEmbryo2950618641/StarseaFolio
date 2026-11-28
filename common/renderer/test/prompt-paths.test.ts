@@ -8,6 +8,7 @@ import {
   normalizeWorkspacePath,
   promptCategoryLabel,
   promptTag,
+  workspaceDirectoryBadge,
 } from "../src/features/workspace/prompt-paths.js"
 
 describe("prompt paths", () => {
@@ -68,5 +69,20 @@ describe("prompt paths", () => {
 
   it("normalizes separators and trailing slashes", () => {
     expect(normalizeWorkspacePath("提示词\\系统规则\\写作基调.md/")).toBe("提示词/系统规则/写作基调.md")
+  })
+
+  it("labels presentation directories that inject or share prompt overlays", () => {
+    expect(workspaceDirectoryBadge("表现输出/本作品描写")).toEqual({
+      label: "构思阶段",
+      tooltip: "本文件夹内提示词在构思阶段全部注入讨论与生成",
+    })
+    expect(workspaceDirectoryBadge("表现输出\\本作品描写")).toEqual({
+      label: "构思阶段",
+      tooltip: "本文件夹内提示词在构思阶段全部注入讨论与生成",
+    })
+    expect(workspaceDirectoryBadge("表现输出/描写规则")?.label).toBe("共享")
+    expect(workspaceDirectoryBadge("表现输出/笔风规则")?.label).toBe("共享")
+    expect(workspaceDirectoryBadge("表现输出/本作品描写/作品风格.md")).toBeUndefined()
+    expect(workspaceDirectoryBadge("设定集")).toBeUndefined()
   })
 })

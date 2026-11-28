@@ -46,4 +46,11 @@ export interface DocumentRepository {
    * (e.g. partial history checkout) while document_versions + contentRef remain.
    */
   ensureActiveDocumentHead(version: DocumentVersion): Promise<void>
+  /** Rename surface only: update committed chapter heading and publish path without a new revision. */
+  updateCommittedChapterSurface(input: Readonly<{
+    projectId: ProjectId
+    chapterId: string
+    heading: string
+    publishPath: string
+  }>): Promise<DocumentVersion | undefined>
 }

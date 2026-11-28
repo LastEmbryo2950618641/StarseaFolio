@@ -158,6 +158,28 @@ export class SqliteDocumentRepository implements DocumentRepository {
       scope_id: version.scopeId,
     })).execute()
   }
+
+  public async updateCommittedChapterSurface(input: Readonly<{
+    projectId: ProjectId
+    chapterId: string
+    heading: string
+    publishPath: string
+  }>): Promise<DocumentVersion | undefined> {
+    const current = await this.findCurrentChapter(input.projectId, input.chapterId)
+    if (current === undefined) return undefined
+    await this.database.updateTable("document_versions")
+      .set({
+        heading: input.heading,
+        publish_path: input.publishPath,
+      })
+      .where("id", "=", current.id)
+      .executeTakeFirstOrThrow()
+    return {
+      ...current,
+      heading: input.heading,
+      publishPath: input.publishPath,
+    }
+  }
 }
 
 export async function clearUncommittedSourceUnitsInTransaction(

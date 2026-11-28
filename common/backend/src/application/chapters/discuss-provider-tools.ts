@@ -2,6 +2,8 @@
 export const DISCUSS_PROVIDER_TOOL_NAMES = [
   "request_read",
   "character_update",
+  "rename_chapter",
+  "update_work_metadata",
   "chapter_workflow",
   "publish_draft",
   "restage_chapter",
@@ -19,6 +21,8 @@ export type DiscussProviderToolName = (typeof DISCUSS_PROVIDER_TOOL_NAMES)[numbe
 const TOOL_SUMMARIES: Readonly<Record<DiscussProviderToolName, string>> = {
   request_read: "读取讨论所需资料；一次可提交多个读取请求",
   character_update: "人物字段读取或更新",
+  rename_chapter: "重命名当前焦点章标题（梗概/细纲/正文同步）",
+  update_work_metadata: "更新作品显示名或作品简介",
   chapter_workflow: "正文推演工具：读取、梗概/细纲/草稿与图治理",
   publish_draft: "发布已确认草稿并触发图治理",
   restage_chapter: "回退章节到指定阶段",

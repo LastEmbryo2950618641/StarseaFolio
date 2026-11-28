@@ -122,3 +122,26 @@ export function promptCategoryLabel(path: string): string | undefined {
   if (PLATFORM_PROMPT_MIRROR_PATHS.has(normalized)) return "平台规则"
   return undefined
 }
+
+export type WorkspaceDirectoryBadge = Readonly<{
+  label: string
+  tooltip: string
+}>
+
+/** 文件夹侧徽标：标明该目录内提示词/规则在何范围生效或于何阶段注入。 */
+export function workspaceDirectoryBadge(path: string): WorkspaceDirectoryBadge | undefined {
+  const normalized = normalizeWorkspacePath(path)
+  if (normalized === "表现输出/描写规则" || normalized === "表现输出/笔风规则") {
+    return {
+      label: "共享",
+      tooltip: "所有作品共享，修改会对所有作品生效",
+    }
+  }
+  if (normalized === "表现输出/本作品描写") {
+    return {
+      label: "构思阶段",
+      tooltip: "本文件夹内提示词在构思阶段全部注入讨论与生成",
+    }
+  }
+  return undefined
+}

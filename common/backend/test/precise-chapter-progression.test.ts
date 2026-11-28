@@ -569,4 +569,74 @@ describe("precise chapter progression", () => {
       await closeHarness(harness)
     }
   })
+
+  it("renames the published chapter via rename_chapter without asking choices", async () => {
+    const classifyCalls: string[] = []
+    const discussCalls: DiscussCall[] = []
+    let renameStep = 0
+    const model = createPreciseModel({
+      classifier: () => ({ chapterTitle: true }),
+      classifyCalls,
+      discussCalls,
+      reply: ({ prompt }) => {
+        if (prompt.includes("完整构思") || prompt.includes("一次生成并交齐")) return composeAll
+        expect(prompt).toContain("rename_chapter")
+        expect(prompt).toContain("直接改当前章标题")
+        renameStep += 1
+        if (renameStep === 1) {
+          return [
+            "先改章名。",
+            "<tool-request>",
+            "name: rename_chapter",
+            "action: describe",
+            "</tool-request>",
+          ].join("\n")
+        }
+        if (renameStep === 2) {
+          return [
+            "正在改名。",
+            "<tool-request>",
+            "name: rename_chapter",
+            "action: invoke",
+            'arguments: {"title":"圣皇侍院的成立"}',
+            "</tool-request>",
+          ].join("\n")
+        }
+        return "已把本章标题改成「圣皇侍院的成立」。"
+      },
+    })
+    const harness = await openChapterHarness("Precise direct chapter title", { model })
+    try {
+      await prepareChapterPlanning(harness)
+      const composed = await send(harness, { message: "开始构思", proceedMode: "precise", preciseAction: "start_compose" })
+      const published = await send(harness, {
+        message: "发布正文",
+        proceedMode: "precise",
+        preciseAction: "publish",
+        publishDraftVersionId: composed.appendedDraft?.draftVersionId,
+        chapterSequence: 1,
+      })
+      expect((await invoke<Array<{ heading: string }>>(harness, "chapter.list", {})).map((chapter) => chapter.heading))
+        .toEqual([expect.stringContaining("雨夜旧站台")])
+
+      // Publish may advance focus; force chapter 1 so rename targets the published body.
+      await invoke(harness, "synopsis.conversation.setFocus", { chapterSequence: 1, focusKind: "chapter_body" })
+      const renamed = await send(harness, {
+        message: "标题不要叫雨夜旧站台，改成圣皇侍院的成立",
+        proceedMode: "precise",
+        chapterSequence: 1,
+      })
+      expect(classifyCalls.at(-1)).toContain("圣皇侍院的成立")
+      expect(renamed.session.title).toBe("圣皇侍院的成立")
+      expect(renamed.session.synopsisPath).toContain("圣皇侍院的成立")
+      const chapters = await invoke<Array<{ heading: string; publishPath: string }>>(harness, "chapter.list", {})
+      expect(chapters).toHaveLength(1)
+      expect(chapters[0]?.heading).toContain("圣皇侍院的成立")
+      expect(chapters[0]?.publishPath).toContain("圣皇侍院的成立")
+      expect(renameStep).toBeGreaterThanOrEqual(3)
+      expect(renamed.session.chapterSequence).toBe(1)
+    } finally {
+      await closeHarness(harness)
+    }
+  })
 })

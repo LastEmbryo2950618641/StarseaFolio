@@ -8,7 +8,7 @@ const TAG_NAMES = ["tool-request", "compose-tool-request", "toolRequest"] as con
 const TOOL_NAMES = new Set([
   "chapter_workflow", "publish_draft", "restage_chapter", "bash", "todo_write", "memory_write",
   "load_skill", "conversation_archive", "original_work_search", "original_work_download",
-  "character_update",
+  "character_update", "rename_chapter", "update_work_metadata",
 ])
 
 /** Parse the optional plain-text tool request block used for non-native tools. */

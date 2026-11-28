@@ -17,7 +17,7 @@ import { filterInventoryForSkillView } from "./skill-tree-filter.js"
 import { isChapterBodyMarkdownPath } from "../editor/synopsis-path.js"
 import { WorkspaceTreeContextMenu } from "./WorkspaceTreeContextMenu.js"
 import { workspaceTreeLabel } from "./workspace-tree-labels.js"
-import { filterVisiblePromptEntries, isPromptPath, promptTag } from "./prompt-paths.js"
+import { filterVisiblePromptEntries, isPromptPath, promptTag, workspaceDirectoryBadge } from "./prompt-paths.js"
 
 export const SETTINGS_LINEAGE_VIRTUAL_PATH = "__virtual__/设定沿革"
 
@@ -171,6 +171,7 @@ function TreeRow({
   // Prompt files are editable; show the fixed/message/stage tag instead of the scaffold lock.
   const promptFile = node.kind === "file" && isPromptPath(node.path)
   const promptBadge = promptFile ? promptTag(node.path) ?? "提示词" : undefined
+  const directoryBadge = node.kind === "directory" ? workspaceDirectoryBadge(node.path) : undefined
   const displayName = workspaceTreeLabel(node.path, node.name)
   const displayNameTitle = displayName === node.name ? undefined : `${displayName}（${node.name}）`
   const selected = node.kind === "file" && !lineageActive && selectedPath === node.path
@@ -275,9 +276,11 @@ function TreeRow({
         </span>
         <span className="tree-row-label">{node.name}</span>
       </button>
-      {node.path === "表现输出/描写规则" || node.path === "表现输出/笔风规则"
-        ? <UiTooltip label="所有作品共享，修改会对所有作品生效"><span className="tree-row-virtual-badge">共享</span></UiTooltip>
-        : null}
+      {directoryBadge === undefined
+        ? null
+        : <UiTooltip label={directoryBadge.tooltip}>
+            <span className="tree-row-virtual-badge">{directoryBadge.label}</span>
+          </UiTooltip>}
       {lockKind === "chapter_workflow"
         ? <LockBadge kind={lockKind} />
         : null}

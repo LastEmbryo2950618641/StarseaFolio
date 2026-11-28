@@ -36,4 +36,21 @@ describe("compose tool request protocol", () => {
     expect(() => parseComposeToolRequest("<tool-request>\nname: todo_write\naction: invoke\narguments: nope\n</tool-request>"))
       .toThrow(/arguments/u)
   })
+
+  it("accepts rename_chapter and update_work_metadata", () => {
+    expect(parseComposeToolRequest([
+      "<tool-request>",
+      "name: rename_chapter",
+      "action: invoke",
+      'arguments: {"title":"新章名"}',
+      "</tool-request>",
+    ].join("\n")).toolRequest).toEqual({
+      name: "rename_chapter",
+      action: "invoke",
+      arguments: '{"title":"新章名"}',
+    })
+    expect(parseComposeToolRequest(
+      '<tool-request>\nname: update_work_metadata\naction: describe\n</tool-request>',
+    ).toolRequest).toEqual({ name: "update_work_metadata", action: "describe" })
+  })
 })

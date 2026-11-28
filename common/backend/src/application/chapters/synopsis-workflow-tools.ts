@@ -125,8 +125,26 @@ export type SynopsisReferenceResult = Readonly<{
   importedFiles?: readonly string[]
   candidateUrls?: readonly string[]
 }>
+export type SynopsisRenameChapterInput = SynopsisToolContext & Readonly<{ title: string }>
+export type SynopsisRenameChapterResult = Readonly<{
+  chapterSequence: number
+  title: string
+  previousTitle: string
+  synopsisPath: string
+  notices: readonly string[]
+}>
+export type SynopsisUpdateWorkMetadataInput = SynopsisToolContext & Readonly<{
+  title?: string
+  description?: string
+}>
+export type SynopsisUpdateWorkMetadataResult = Readonly<{
+  workDisplayName?: string
+  workDescription?: string
+}>
 export type SynopsisWorkflowToolCallbacks = Readonly<{
   updateCharacter?: (input: SynopsisToolContext & { update: CharacterUpdate }) => Promise<{ relativePath: string; content: string }>
+  renameChapter?: (input: SynopsisRenameChapterInput) => Promise<SynopsisRenameChapterResult>
+  updateWorkMetadata?: (input: SynopsisUpdateWorkMetadataInput) => Promise<SynopsisUpdateWorkMetadataResult>
   executeWorkflowTool?: (input: SynopsisWorkflowToolInput) => Promise<SynopsisWorkflowToolResult>
   publishDraft?: (input: SynopsisPublishDraftInput) => Promise<SynopsisPublishDraftResult>
   restageChapter?: (input: SynopsisRestageInput) => Promise<SynopsisRestageResult>
@@ -140,6 +158,8 @@ export type SynopsisWorkflowToolCallbacks = Readonly<{
 }>
 export type SynopsisToolName =
   | "character_update"
+  | "rename_chapter"
+  | "update_work_metadata"
   | "chapter_workflow"
   | "publish_draft"
   | "restage_chapter"
@@ -173,6 +193,19 @@ const descriptions = {
       expectedContent: renderRuntimePrompt("discuss-tools", "character-update-parameter-expected-content"),
     },
     writingGuide: renderRuntimePrompt("discuss-tools", "character-update-guide"),
+  },
+  rename_chapter: {
+    parameters: {
+      title: renderRuntimePrompt("discuss-tools", "rename-chapter-parameter-title"),
+    },
+    writingGuide: renderRuntimePrompt("discuss-tools", "rename-chapter-guide"),
+  },
+  update_work_metadata: {
+    parameters: {
+      title: renderRuntimePrompt("discuss-tools", "update-work-metadata-parameter-title"),
+      description: renderRuntimePrompt("discuss-tools", "update-work-metadata-parameter-description"),
+    },
+    writingGuide: renderRuntimePrompt("discuss-tools", "update-work-metadata-guide"),
   },
   chapter_workflow: {
     parameters: {
@@ -251,6 +284,10 @@ function callbackForTool(
   callbacks: SynopsisWorkflowToolCallbacks,
 ): ((input: never) => Promise<unknown>) | undefined {
   if (name === "character_update") return callbacks.updateCharacter
+  if (name === "rename_chapter") return callbacks.renameChapter as ((input: never) => Promise<unknown>) | undefined
+  if (name === "update_work_metadata") {
+    return callbacks.updateWorkMetadata as ((input: never) => Promise<unknown>) | undefined
+  }
   if (name === "chapter_workflow") return callbacks.executeWorkflowTool as ((input: never) => Promise<unknown>) | undefined
   if (name === "publish_draft") return callbacks.publishDraft as ((input: never) => Promise<unknown>) | undefined
   if (name === "restage_chapter") return callbacks.restageChapter as ((input: never) => Promise<unknown>) | undefined
@@ -274,6 +311,16 @@ export function synopsisToolCatalog(callbacks: SynopsisWorkflowToolCallbacks, ar
         name: "character_update", displayName: "人物字段工具",
         definition: renderRuntimePrompt("discuss-tools", "character-update-definition"),
         scenario: renderRuntimePrompt("discuss-tools", "character-update-scenario"),
+      }]),
+      ...(callbacks.renameChapter === undefined ? [] : [{
+        name: "rename_chapter", displayName: "章节改名",
+        definition: renderRuntimePrompt("discuss-tools", "rename-chapter-definition"),
+        scenario: renderRuntimePrompt("discuss-tools", "rename-chapter-scenario"),
+      }]),
+      ...(callbacks.updateWorkMetadata === undefined ? [] : [{
+        name: "update_work_metadata", displayName: "作品元数据",
+        definition: renderRuntimePrompt("discuss-tools", "update-work-metadata-definition"),
+        scenario: renderRuntimePrompt("discuss-tools", "update-work-metadata-scenario"),
       }]),
       ...(callbacks.executeWorkflowTool === undefined ? [] : [{
         name: "chapter_workflow",
@@ -461,6 +508,36 @@ export async function executeSynopsisTool(input: Readonly<{
       if (callbacks.updateCharacter === undefined) throw new Error("人物字段工具不可用")
       const result = await callbacks.updateCharacter({ ...context, update })
       return { ...envelope, status: "character_updated", result }
+    }
+    if (request.name === "rename_chapter") {
+      const args = parseArguments(request.arguments, ["title"])
+      if (callbacks.renameChapter === undefined) throw new Error("章节改名工具不可用")
+      const result = await callbacks.renameChapter({ ...context, title: requiredText(args, "title") })
+      context.signal?.throwIfAborted()
+      return { ...envelope, status: "chapter_renamed", result }
+    }
+    if (request.name === "update_work_metadata") {
+      const args = parseArguments(request.arguments, ["title", "description"])
+      if (callbacks.updateWorkMetadata === undefined) throw new Error("作品元数据工具不可用")
+      const title = args.title === undefined ? undefined : requiredText(args, "title")
+      const description = args.description === undefined
+        ? undefined
+        : (typeof args.description === "string" ? args.description.replaceAll("\r\n", "\n") : (() => {
+          throw new Error("description 必须为字符串")
+        })())
+      if (title === undefined && description === undefined) {
+        throw new Error("须提供 title 或 description 至少一个")
+      }
+      if (description !== undefined && description.trim().length > 300) {
+        throw new Error("作品简介最多 300 字")
+      }
+      const result = await callbacks.updateWorkMetadata({
+        ...context,
+        ...(title === undefined ? {} : { title }),
+        ...(description === undefined ? {} : { description }),
+      })
+      context.signal?.throwIfAborted()
+      return { ...envelope, status: "work_metadata_updated", result }
     }
     if (request.name === "chapter_workflow") {
       const args = parseArguments(request.arguments, ["userInput", "heading", "chapterSequences"])

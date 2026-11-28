@@ -671,6 +671,8 @@ export const synopsisDiscussArtifactSchema = z.object({
       "original_work_search",
       "original_work_download",
       "character_update",
+      "rename_chapter",
+      "update_work_metadata",
     ]),
     action: z.enum(["describe", "invoke"]),
     arguments: z.string().max(200_000).optional(),

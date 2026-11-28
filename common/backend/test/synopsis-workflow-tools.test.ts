@@ -24,6 +24,17 @@ function message(result: Record<string, unknown>, role: "system" | "assistant" =
 function setup() {
   const callbacks = {
     updateCharacter: vi.fn(async () => ({ relativePath: "设定集/人物/示例.json", content: "{}" })),
+    renameChapter: vi.fn(async (input) => ({
+      chapterSequence: input.chapterSequence,
+      title: input.title,
+      previousTitle: "旧标题",
+      synopsisPath: `章节正文/第一卷 示例/第七章 ${input.title} [剧情梗概].md`,
+      notices: [`已将本章规划文件重命名为「${input.title}」。`],
+    })),
+    updateWorkMetadata: vi.fn(async (input) => ({
+      ...(input.title === undefined ? {} : { workDisplayName: input.title }),
+      ...(input.description === undefined ? {} : { workDescription: input.description }),
+    })),
     executeWorkflowTool: vi.fn(async () => draft),
     publishDraft: vi.fn(async () => ({ ...draft, status: "graph_sync_pending" })),
     restageChapter: vi.fn(async () => ({
@@ -92,12 +103,16 @@ describe("synopsis workflow progressive disclosure", () => {
     expect(catalog).toContain("todo_write")
     expect(catalog).toContain("memory_write")
     expect(catalog).toContain("load_skill")
+    expect(catalog).toContain("rename_chapter")
+    expect(catalog).toContain("update_work_metadata")
     expect(catalog).toContain("正文推演工具")
     expect(catalog).toContain("图治理工具")
     expect(catalog).toContain("工作区 Bash")
     expect(catalog).toContain("Todo 清单")
     expect(catalog).toContain("Agent 记忆")
     expect(catalog).toContain("加载 Skill")
+    expect(catalog).toContain("章节改名")
+    expect(catalog).toContain("作品元数据")
     expect(catalog).toContain("original_work_search")
     expect(catalog).toContain("original_work_download")
     expect(catalog).not.toContain("original_work_crawl")
@@ -105,6 +120,49 @@ describe("synopsis workflow progressive disclosure", () => {
     expect(catalog).not.toContain("revisionTaskId")
     expect(catalog).not.toContain("writingGuide")
     expect(JSON.parse(synopsisToolCatalog({})).tools).toEqual([])
+  })
+
+  it("describes and invokes rename_chapter", async () => {
+    const { execute, callbacks, describeTool } = setup()
+    await describeTool("rename_chapter")
+    expect(await execute({
+      name: "rename_chapter",
+      action: "invoke",
+      arguments: JSON.stringify({ title: "新章名" }),
+    })).toMatchObject({
+      status: "chapter_renamed",
+      result: { title: "新章名", previousTitle: "旧标题" },
+    })
+    expect(callbacks.renameChapter).toHaveBeenCalledWith({ ...context, title: "新章名" })
+  })
+
+  it("describes and invokes update_work_metadata", async () => {
+    const { execute, callbacks, describeTool } = setup()
+    await describeTool("update_work_metadata")
+    expect(await execute({
+      name: "update_work_metadata",
+      action: "invoke",
+      arguments: JSON.stringify({ title: "新书名", description: "一句话简介" }),
+    })).toMatchObject({
+      status: "work_metadata_updated",
+      result: { workDisplayName: "新书名", workDescription: "一句话简介" },
+    })
+    expect(callbacks.updateWorkMetadata).toHaveBeenCalledWith({
+      ...context,
+      title: "新书名",
+      description: "一句话简介",
+    })
+  })
+
+  it("rejects update_work_metadata without title or description", async () => {
+    const { execute, callbacks, describeTool } = setup()
+    await describeTool("update_work_metadata")
+    expect(await execute({
+      name: "update_work_metadata",
+      action: "invoke",
+      arguments: JSON.stringify({}),
+    })).toMatchObject({ status: "error", message: expect.stringContaining("title 或 description") })
+    expect(callbacks.updateWorkMetadata).not.toHaveBeenCalled()
   })
 
   it("describes and invokes load_skill", async () => {

@@ -68,6 +68,7 @@ import {
   formatChapterSequenceLabel,
   digest,
   assembleChapterDocument,
+  normalizeChapterHeading,
   readChapterBody,
   pickPreferredVolumeFolderName,
   parseChapterSequenceFromLabel,
@@ -1264,6 +1265,7 @@ export class SynopsisConversationService {
         composeText: workStyleGateReadyAtStart && volumePlanningGateWasReady
           && (scopedComposeIntent(writeScope) !== undefined || isOutlinePatchScope(writeScope)
             || isVolumeComposeScope(writeScope) || isFocusOnlyScope(writeScope)
+            || isChapterTitleOnlyScope(writeScope)
             || (writeScope !== undefined && Object.keys(writeScope).length === 0)),
         ...(writeScope === undefined ? {} : { writeScope }),
         allowWorkflowTools: workStyleGateReadyAtStart,
@@ -1324,12 +1326,14 @@ export class SynopsisConversationService {
       if (isSynopsisSendCancelled(input.projectId)) {
         throw new SynopsisSendCancelledError()
       }
-      let synopsisPath = session.synopsisPath
-      let sessionTitle = session.title
-      let lastAgentDigest = session.lastAgentDigest
-      let lastOutlineAgentDigest = session.lastOutlineAgentDigest
-      let nextSynopsisContentState = session.synopsisContentState
-      let nextOutlineContentState = session.outlineContentState
+      // Mid-turn tools (rename_chapter) may have already updated session path/title.
+      const sessionAfterDiscuss = await this.dependencies.conversation.findSession(session.sessionId) ?? session
+      let synopsisPath = sessionAfterDiscuss.synopsisPath
+      let sessionTitle = sessionAfterDiscuss.title
+      let lastAgentDigest = sessionAfterDiscuss.lastAgentDigest
+      let lastOutlineAgentDigest = sessionAfterDiscuss.lastOutlineAgentDigest
+      let nextSynopsisContentState = sessionAfterDiscuss.synopsisContentState
+      let nextOutlineContentState = sessionAfterDiscuss.outlineContentState
       let wroteSynopsisBody = false
       let savedOutlineThisTurn = false
       let restagedToSynopsisThisTurn = false
@@ -1578,8 +1582,27 @@ export class SynopsisConversationService {
             await this.dependencies.workspace.removeSynopsisMarkdown(input.workspaceRootRef, synopsisPath)
             synopsisPath = nextPath
             if (assist.chapterTitle !== undefined) sessionTitle = resolvedTitle
+          } else if (assist.chapterTitle !== undefined) {
+            sessionTitle = resolvedTitle
           }
         }
+      }
+
+      // 用户明确获准改章名时：规划文件改名后，同步重命名已发布正文，章节面板才会立刻显示新标题。
+      if (writeScope?.chapterTitle === true && assist.chapterTitle !== undefined && !userEditedSinceAgent
+        && assist.titleAlignTarget === undefined) {
+        const synced = await this.applyTitleAlignTarget({
+          projectId: input.projectId,
+          workspaceRootRef: input.workspaceRootRef,
+          chapterSequence: session.chapterSequence,
+          target: "planning",
+          synopsisPath,
+          sessionTitle,
+          volumeFolderName: nextVolume,
+        })
+        synopsisPath = synced.synopsisPath
+        sessionTitle = synced.sessionTitle
+        writeNotices.push(...synced.notices.filter((notice) => !notice.includes("未能同时找到")))
       }
 
       if (assist.titleAlignTarget !== undefined) {
@@ -3722,6 +3745,7 @@ export class SynopsisConversationService {
         })
     let latestBudgetAdvisory: SynopsisConversationBudgetAdvisory | undefined
     let latestToolDraft: SynopsisWorkflowToolResult | undefined
+    let chapterRenamedViaTool = false
     const noteDiscussBlock = async (
       gate: string,
       message: string,
@@ -3808,6 +3832,12 @@ export class SynopsisConversationService {
         }
       : {
           ...(this.dependencies.updateCharacter === undefined ? {} : { updateCharacter: this.dependencies.updateCharacter }),
+          renameChapter: async (request) => this.executeRenameChapterTool(request),
+          ...(this.dependencies.renameDisplayName === undefined && this.dependencies.saveWorkDescription === undefined
+            ? {}
+            : {
+                updateWorkMetadata: async (request) => this.executeUpdateWorkMetadataTool(request),
+              }),
            ...(allowChapterWorkflowTools && chapterWorkflowEnabled && executeWorkflowTool !== undefined
              && (input.writeScope === undefined || (
                (input.writeScope.draft === "write" || input.writeScope.advance === true)
@@ -4185,6 +4215,15 @@ export class SynopsisConversationService {
                  const text = "用普通文本回复。用户要求切换焦点，或修改其他卷／章时，提交 <chapter-focus> 块。第一行为目标章的绝对章序号；修改整卷时选择目标卷的首章。之后逐字引用本轮用户要求切换或修改的原话，然后闭合 </chapter-focus>。若切换后需要修改，另起一行输出 <continue-turn/>。本轮不能修改文件。"
                  return { ...phasePrompt, text, digest: digest(text) }
                }
+               if (isChapterTitleOnlyScope(input.writeScope)) {
+                 const text = [
+                   "本轮已获准直接改当前章标题。请调用 rename_chapter 工具（先 describe 再 invoke；arguments 含 title，不含「第N章」前缀）。",
+                   "宿主会立刻重命名梗概/细纲，并在已有正式正文时同步改名；不要用选项征询是否改名，也不要只在正文声称已改却不调用工具。",
+                   "若用户同时还要求改草稿或其它材料，可在说明里写「本轮仅获准改标题，改草稿需再授权」，但本轮必须完成 rename_chapter。",
+                   "需要资料时调用原生读取工具；不要输出构思三段标签或 JSON 封套。",
+                 ].join("\n")
+                 return { ...phasePrompt, text, digest: digest(text) }
+               }
                if (isOutlinePatchScope(input.writeScope)) {
                  const text = "只提交一个 <compose-outline-patch> 块，内含 1–20 对 <search>...</search> 和 <replace>...</replace>。每个开闭标签独占一行。逐字复制当前细纲中唯一匹配的原文并保留空白。删除时留空替换块。块外只允许空白。"
                  return { ...phasePrompt, text, digest: digest(text) }
@@ -4202,14 +4241,18 @@ export class SynopsisConversationService {
                }
               const sections = composeIntent === undefined ? [] : composeSections(composeIntent)
               const headings = { synopsis: "梗概", outline: "细纲", draft: "草稿" } as const
+              const titleAuthorized = input.writeScope?.chapterTitle === true
               const protocol = sections.length === 0
-                ? "用普通文本回复讨论。需要资料时调用原生读取工具；需要 Todo、正文推演等工具时，只输出 <tool-request> 文本块（name、action，invoke 时再加一行 arguments 单行 JSON），不要自造其他标签。"
+                ? "用普通文本回复讨论。需要资料时调用原生读取工具；需要 Todo、正文推演、rename_chapter、update_work_metadata 等工具时，只输出 <tool-request> 文本块（name、action，invoke 时再加一行 arguments 单行 JSON），不要自造其他标签。"
                 : [sections.length === 3 ? "本轮执行完整构思，一次生成并交齐梗概、细纲和草稿。即使当前文件缺少梗概或细纲，也直接用本次回复中的前置产物完成后两段。宿主校验三段后按顺序写入。生成期间不要声称已保存或已发布。用户已点「开始构思」，本轮禁止再提新的确认问题、禁止改用选项征询，也不要仅输出讨论或计划；缺失的人物、场景细节按已有材料自行合理推定，并把推定写进梗概与细纲。" : "本轮仅可交付下列获准产物。",
-                    "需要资料时先调用原生读取工具；需要 Todo 等非读取工具时，另起一个 <tool-request> 块（name、action，invoke 时加一行 arguments 单行 JSON），工具请求不能与下列构思写入同回。资料齐全后，在同一回复中按下列顺序交付完整 Markdown。",
+                    "需要资料时先调用原生读取工具；需要 Todo、rename_chapter、update_work_metadata 等非读取工具时，另起一个 <tool-request> 块（name、action，invoke 时加一行 arguments 单行 JSON），工具请求不能与下列构思写入同回。资料齐全后，在同一回复中按下列顺序交付完整 Markdown。",
                     ...sections.map((section) => `<compose-${section}>\n${headings[section]}\n</compose-${section}>`),
+                    ...(titleAuthorized
+                      ? ["本轮同时获准改章名：请先单独调用 rename_chapter（title 不含「第N章」前缀），不要只嘴改。"]
+                      : []),
                   ].join("\n")
               const phaseGuidance = phasePrompt.text.replace(/^输出 JSON：顶层含[^\n]*\n?/mu, "").trimEnd()
-              const text = `【本轮讨论输出协议】\n${protocol}\n如需根据用户要求更新作品名或简介，在构思段外分别使用 <work-title>...</work-title> 或 <work-description>...</work-description>。如需提供备选方向，可在构思段外用 <creative-choices> 和 </creative-choices> 包住至少两个选项，每行以 - 开头。如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。不要输出 JSON 响应封套。下文的旧输出字段名只说明篇章内容或工作流程，以本段输出格式为准。构思标签只能出现一次且必须按梗概→细纲→草稿顺序：禁止在正文、代码围栏、举例、说明或自检中重复这些标签，也禁止把标签写进 Markdown 标题；标签块之外的文字会被当作正文说明。\n\n${phaseGuidance}`
+              const text = `【本轮讨论输出协议】\n${protocol}\n如需根据用户要求更新作品名或简介，调用 update_work_metadata 工具（title/description）。${titleAuthorized && sections.length === 0 ? "本轮获准改章名时必须调用 rename_chapter。" : ""}如需提供备选方向，可在构思段外用 <creative-choices> 和 </creative-choices> 包住至少两个选项，每行以 - 开头。如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。不要输出 JSON 响应封套。下文的旧输出字段名只说明篇章内容或工作流程，以本段输出格式为准。构思标签只能出现一次且必须按梗概→细纲→草稿顺序：禁止在正文、代码围栏、举例、说明或自检中重复这些标签，也禁止把标签写进 Markdown 标题；标签块之外的文字会被当作正文说明。\n\n${phaseGuidance}`
               return { ...phasePrompt, text, digest: digest(text) }
             })(),
             outputMode: "text",
@@ -4801,6 +4844,24 @@ export class SynopsisConversationService {
               })
             }
           }
+          if (!toolFailed && toolRequest.name === "rename_chapter" && toolRequest.action === "invoke") {
+            chapterRenamedViaTool = true
+            const renamedSession = await this.dependencies.conversation.findSession(input.sessionId)
+              ?? await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
+            if (renamedSession !== undefined) {
+              await this.syncProceedProgressFromMaterials({
+                projectId: input.projectId,
+                workspaceRootRef: input.workspaceRootRef,
+                session: renamedSession,
+              })
+            }
+            catalog = await this.dependencies.catalog.createSnapshot({
+              snapshotId: this.dependencies.createId(),
+              projectId: input.projectId,
+              workspaceRootRef: input.workspaceRootRef,
+              generatedAtMs: this.dependencies.now(),
+            })
+          }
           if (!toolFailed && !isDiscussTodoBootstrapTool(toolRequest.name)) {
             const settledTodos = settleToolGateTodos(
               synopsisConversationStreamHub.peek(input.projectId, input.sessionId).todos,
@@ -4973,7 +5034,15 @@ export class SynopsisConversationService {
           && isCurrentUserFocusChange(artifact.data.focusChange, input.userMessage)
           && artifact.data.focusChange?.chapterSequence !== input.chapterSequence
         const scopeIssues = input.writeScope === undefined || switchingAtUserRequest || input.volumePlanning?.ready === false
-          ? [] : assessDiscussWriteScope(input.writeScope, artifact.data, input.chapterSequence, latestToolDraft !== undefined, input.volumePlanning)
+          ? []
+          : assessDiscussWriteScope(
+            input.writeScope,
+            artifact.data,
+            input.chapterSequence,
+            latestToolDraft !== undefined,
+            input.volumePlanning,
+            chapterRenamedViaTool,
+          )
         if (input.model.classifyDiscussTurn !== undefined && allowChapterWorkflowTools
           && input.volumePlanning?.ready !== false && artifact.data.synopsisBody !== undefined
           && (artifact.data.outlineBody === undefined || artifact.data.chapterDraftProposal === undefined)) {
@@ -6217,6 +6286,111 @@ export class SynopsisConversationService {
     return result
   }
 
+  private async executeRenameChapterTool(input: SynopsisToolContext & { title: string }): Promise<{
+    chapterSequence: number
+    title: string
+    previousTitle: string
+    synopsisPath: string
+    notices: readonly string[]
+  }> {
+    const stripped = input.title.trim().replace(/^第[零一二三四五六七八九十百千\d]+章\s*/u, "").trim()
+    const title = stripped.length > 0 ? stripped : input.title.trim()
+    if (title.length === 0 || title.length > 120) {
+      throw new SynopsisInvalidStateError("章节标题须为 1–120 字（不含「第N章」前缀）")
+    }
+    const session = await this.dependencies.conversation.findSession(input.sessionId)
+      ?? await this.dependencies.conversation.findBySequence(input.projectId, input.chapterSequence)
+    if (session === undefined) throw new SynopsisInvalidStateError("找不到讨论会话")
+    if (session.chapterSequence !== input.chapterSequence) {
+      throw new SynopsisInvalidStateError("只能重命名当前焦点章标题")
+    }
+    const previousTitle = session.title
+    const volumeFolderName = extractVolumeFolderNameFromPath(session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
+    const nextPath = deriveSynopsisMarkdownPath(session.chapterSequence, title, volumeFolderName)
+    const notices: string[] = []
+    let synopsisPath = session.synopsisPath
+    if (nextPath !== synopsisPath) {
+      this.emitDiscussEdit(input.projectId, {
+        path: nextPath,
+        kind: "synopsis",
+        status: "running",
+        summary: "正在重命名章节标题",
+      })
+      const currentBody = await this.readSynopsisFile(input.workspaceRootRef, synopsisPath)
+      await this.dependencies.workspace.saveSynopsisMarkdown(
+        input.workspaceRootRef,
+        nextPath,
+        currentBody,
+      )
+      await this.relocateOutlineBesideSynopsis(
+        input.workspaceRootRef,
+        synopsisPath,
+        nextPath,
+      )
+      await this.dependencies.workspace.removeSynopsisMarkdown(input.workspaceRootRef, synopsisPath)
+      synopsisPath = nextPath
+      this.emitDiscussEdit(input.projectId, {
+        path: synopsisPath,
+        kind: "synopsis",
+        status: "completed",
+        summary: `已改章名为「${title}」`,
+      })
+      notices.push(`已将本章规划文件重命名为「${title}」。`)
+    } else if (previousTitle !== title) {
+      notices.push(`章节会话标题已更新为「${title}」（文件名未变）。`)
+    } else {
+      notices.push(`章标题已是「${title}」，无需改名。`)
+    }
+
+    const synced = await this.applyTitleAlignTarget({
+      projectId: input.projectId,
+      workspaceRootRef: input.workspaceRootRef,
+      chapterSequence: session.chapterSequence,
+      target: "planning",
+      synopsisPath,
+      sessionTitle: title,
+      volumeFolderName,
+    })
+    synopsisPath = synced.synopsisPath
+    notices.push(...synced.notices.filter((notice) => !notice.includes("未能同时找到")))
+
+    await this.dependencies.conversation.updateSession({
+      sessionId: session.sessionId,
+      synopsisPath,
+      title,
+      updatedAtMs: this.dependencies.now(),
+    })
+    return {
+      chapterSequence: session.chapterSequence,
+      title,
+      previousTitle,
+      synopsisPath,
+      notices,
+    }
+  }
+
+  private async executeUpdateWorkMetadataTool(input: SynopsisToolContext & {
+    title?: string
+    description?: string
+  }): Promise<{ workDisplayName?: string; workDescription?: string }> {
+    if (input.title === undefined && input.description === undefined) {
+      throw new SynopsisInvalidStateError("须提供 title 或 description 至少一个")
+    }
+    if (input.description !== undefined && input.description.trim().length > 300) {
+      throw new SynopsisInvalidStateError("作品简介最多 300 字")
+    }
+    if (input.title !== undefined && this.dependencies.renameDisplayName === undefined) {
+      throw new SynopsisInvalidStateError("作品改名能力不可用")
+    }
+    if (input.description !== undefined && this.dependencies.saveWorkDescription === undefined) {
+      throw new SynopsisInvalidStateError("作品简介写入能力不可用")
+    }
+    return this.applyWorkMetadata({
+      ...(input.title === undefined ? {} : { workDisplayName: input.title }),
+      ...(input.description === undefined ? {} : { workDescription: input.description }),
+    })
+  }
+
   private async applyVolumeFolderChange(input: Readonly<{
     projectId: ProjectId
     workspaceRootRef: string
@@ -7212,25 +7386,44 @@ export class SynopsisConversationService {
       notices.push("未能同时找到规划文件与正文，titleAlignTarget=planning 未执行。")
       return { synopsisPath: input.synopsisPath, sessionTitle: input.sessionTitle, notices }
     }
-    const nextBodyPath = deriveChapterPublishPath(planning.titleLabel, planning.volumeFolderName)
-    if (currentBodyPath !== nextBodyPath) {
+    const nextHeading = normalizeChapterHeading(planning.titleLabel)
+    const nextBodyPath = deriveChapterPublishPath(nextHeading, planning.volumeFolderName)
+    if (currentBodyPath !== nextBodyPath || indexed !== undefined) {
       const content = await this.dependencies.workspace.readMarkdown(
         input.workspaceRootRef,
         currentBodyPath,
       )
-      await this.dependencies.workspace.replacePublishedChapter(
-        input.workspaceRootRef,
-        currentBodyPath,
-        nextBodyPath,
-        digest(content),
-        content,
-      )
+      let nextContent = content
+      try {
+        const body = readChapterBody(
+          currentBodyPath.replaceAll("\\", "/").split("/").at(-1)?.replace(/\.md$/u, "") ?? nextHeading,
+          content,
+        )
+        nextContent = assembleChapterDocument(nextHeading, body)
+      } catch {
+        nextContent = content
+      }
+      if (currentBodyPath !== nextBodyPath || nextContent !== content) {
+        await this.dependencies.workspace.replacePublishedChapter(
+          input.workspaceRootRef,
+          currentBodyPath,
+          nextBodyPath,
+          digest(content),
+          nextContent,
+        )
+      }
       if (indexed !== undefined) {
         await this.dependencies.chapterIndex.updateCurrent({
           projectId: input.projectId,
           chapterId: indexed.chapterId,
           currentSourceId: indexed.currentSourceId,
           currentPublishPath: nextBodyPath,
+        })
+        await this.dependencies.documents.updateCommittedChapterSurface({
+          projectId: input.projectId,
+          chapterId: indexed.chapterId,
+          heading: nextHeading,
+          publishPath: nextBodyPath,
         })
       }
     }
@@ -8090,6 +8283,10 @@ function isFocusOnlyScope(scope: DiscussTurnWriteScope | undefined): boolean {
   return scope?.focus === true && Object.keys(scope).every((key) => key === "focus")
 }
 
+function isChapterTitleOnlyScope(scope: DiscussTurnWriteScope | undefined): boolean {
+  return scope?.chapterTitle === true && Object.keys(scope).every((key) => key === "chapterTitle")
+}
+
 function isOutlinePatchScope(scope: DiscussTurnWriteScope | undefined): scope is DiscussTurnWriteScope & { outline: "patch" } {
   return scope?.outline === "patch" && Object.keys(scope).every((key) => key === "outline")
 }
@@ -8116,6 +8313,7 @@ function assessDiscussWriteScope(
   chapterSequence: number,
   toolDraftSaved: boolean,
   volumePlanning: VolumePlanningContext | undefined,
+  chapterRenamedViaTool = false,
 ): string[] {
   const intent = artifact.planningWriteIntent
   const plans = artifact.volumeChapterPlans
@@ -8156,6 +8354,11 @@ function assessDiscussWriteScope(
   if (scope.volumeSynopsis === true && !volumePlanningMarkdownHasContent(artifact.volumeSynopsis?.markdown)) issues.push("缺少本轮指定的卷梗概")
   if (scope.volumeOutline === true && !volumePlanningMarkdownHasContent(artifact.arcPlan?.markdown)) issues.push("缺少本轮指定的卷大纲")
   if (scope.volumeTargets === true && artifact.volumePlanMeta === undefined) issues.push("缺少本轮指定的卷章数或总字数")
+  if (scope.chapterTitle === true
+    && !chapterRenamedViaTool
+    && (artifact.chapterTitle === undefined || artifact.chapterTitle.trim().length === 0)) {
+    issues.push("缺少本轮指定的章节标题（须调用 rename_chapter）")
+  }
 
   if (scope.volume === undefined && (intent?.volume !== undefined || (plans?.length ?? 0) > 0)) issues.push("本轮未授权整卷各章规划")
   if (!allowAdvance && scope.volumeDrafts !== true

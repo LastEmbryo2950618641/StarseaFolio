@@ -12,6 +12,14 @@
 
 先读取世界推演规则/人物设定.md及已有人物 JSON。一人一档；可以新增、删除、更改 fields 字段，不能直接编辑 JSON 文本或 schemaVersion。创建用 create，已存在用 update，不能替换整个文档。用户确认与正文事实优先。
 
+## rename-chapter-guide
+
+【rename_chapter】重命名**当前焦点章**标题（不是作品名）。title 为不含「第N章」前缀的短标题。宿主会立刻重命名梗概/细纲文件名，并在已有正式正文时同步改名；章节面板与文件树随后显示新标题。不要用 bash 改文件名，不要只在 assistantMessage 声称已改却不调用本工具。改整部作品名请用 update_work_metadata。
+
+## update-work-metadata-guide
+
+【update_work_metadata】更新整部作品的显示名（title）和/或简介（description，最多 300 字）。至少提供其一。这不是章名；章名用 rename_chapter。用户要求起书名、改书名或改简介时必须调用本工具；不要只嘴改，也不要用 bash 改项目配置。
+
 ## chapter-workflow-guide
 
 【正文推演工具】把情节推演成**草稿**（不是正式正文）。默认作用于焦点章。userInput 写清事件、人物动机、因果与信息边界、场景起止、预期结局和要改进之处；必须先有当前章有效的剧情梗概、细纲和人物准备，再参考这些材料及证据；梗概确认状态不作为门禁。heading 为标题（单章时）。批量：可传 chapterSequences（绝对章号数组），一次 invoke 为多章各生成草稿；勿在同轮 publish_draft。只追加草稿版本，不修订图、不覆盖正式正文；可多次调用比较草稿。若用户已提供完整正文、只需落库并图治理：不要调用本工具，改用 `chapterDraftProposal` / `chapterDraftProposals`，再图治理。工具可能因项目设置关闭而不可用；关闭时改用草稿提案字段。
@@ -59,6 +67,22 @@
 ## character-update-scenario
 
 准备新角色、完善主角或修订任何人物设定时；先读取世界推演规则/人物设定.md。
+
+## rename-chapter-definition
+
+重命名当前焦点章标题，并同步梗概、细纲与已发布正文文件名。
+
+## rename-chapter-scenario
+
+用户要求改章名、换章节标题，或需要让章节面板立刻显示新标题时。
+
+## update-work-metadata-definition
+
+更新作品显示名（书名）和/或作品简介。
+
+## update-work-metadata-scenario
+
+用户要求起名、改书名、改作品简介，或新建作品需给出正式作品名时。
 
 ## chapter-workflow-definition
 
@@ -167,6 +191,18 @@ Array<{op:"set",field:string,value:JSON值}|{op:"delete",field:string}>
 ## character-update-parameter-expected-content
 
 可选，读取到的原文作基线；若已有并发写入，服务端会重读最新内容后按顺序叠加本次操作
+
+## rename-chapter-parameter-title
+
+string (required；不含「第N章」前缀的章标题)
+
+## update-work-metadata-parameter-title
+
+string (optional；作品显示名/书名)
+
+## update-work-metadata-parameter-description
+
+string (optional；作品简介，最多 300 字)
 
 ## chapter-workflow-parameter-user-input
 
