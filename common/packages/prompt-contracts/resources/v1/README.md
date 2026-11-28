@@ -4,7 +4,7 @@
 | --- | --- |
 | [总览](world-rules-overview.md)与[基础规则](base-rules.md) | 固定加载的创作、证据与连续性规则 |
 | [phases](phases/) | 各阶段指令，包括创作台和正式草稿 |
-| [草稿指南](outline-to-draft-guide.md)与[技能索引](skill-index.md) | 按阶段加载的写作指南、笔风与工具索引 |
+| [草稿指南](outline-to-draft-guide.md) | 按阶段加载的写作指南、笔风与工具路由（skill 正文并入系统提示词，不再单独维护索引表） |
 | [runtime](runtime/) | 按请求选择的上下文、模式、供应商协议、工具说明与修复提示 |
 | [guides](guides/)与[workspace](workspace/) | 平台指南和工作区初始模板 |
 

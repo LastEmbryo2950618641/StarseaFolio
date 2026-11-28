@@ -48,7 +48,8 @@ describe("prompt library", () => {
   it("seeds the fixed system/stage/dynamic prompt documents once", async () => {
     const library = await temporaryLibrary()
     await library.ensureSeeded()
-    expect(library.entries).toHaveLength(11)
+    expect(library.entries).toHaveLength(10)
+    expect(library.entries.some((entry) => entry.libraryPath === "基础规则/系统提示词/06-讨论技能索引.md")).toBe(false)
     expect(library.entries.some((entry) => entry.libraryPath === "基础规则/系统提示词/03-去AI味与写作声音.md")).toBe(true)
     expect(library.entries.some((entry) => entry.libraryPath === "基础规则/阶段提示词/02-构思阶段.md")).toBe(true)
     expect(library.entries.some((entry) => entry.libraryPath === "基础规则/消息前后/02-用户消息后.md")).toBe(true)
@@ -58,6 +59,19 @@ describe("prompt library", () => {
     expect(byPath.has("提示词/基础规则/系统提示词/03-去AI味与写作声音.md")).toBe(true)
     expect(byPath.has("提示词/基础规则/阶段提示词/02-构思阶段.md")).toBe(true)
     expect(byPath.has("提示词/基础规则/消息前后/02-用户消息后.md")).toBe(true)
+  })
+
+  it("drops retired library copies of the removed skill index", async () => {
+    const library = await temporaryLibrary()
+    await library.ensureSeeded()
+    const retiredPath = join(library.libraryRoot, "基础规则/系统提示词/06-讨论技能索引.md")
+    await mkdir(join(library.libraryRoot, "基础规则/系统提示词"), { recursive: true })
+    await writeFile(retiredPath, "# 旧索引\n", "utf8")
+
+    await library.ensureSeeded()
+
+    await expect(readFile(retiredPath, "utf8")).rejects.toThrow()
+    expect(library.entries.some((entry) => entry.libraryPath === "基础规则/系统提示词/06-讨论技能索引.md")).toBe(false)
   })
 
   it("prefers a global override for a system prompt document", async () => {
@@ -71,6 +85,29 @@ describe("prompt library", () => {
     const mirrors = await library.buildWorkspaceMirrorFiles()
     expect(mirrors.find((file) => file.relativePath === "提示词/基础规则/系统提示词/01-世界与基础规则.md")?.markdown)
       .toContain("CUSTOM-BASE-RULES")
+  })
+
+  it("applies markerless saved Markdown immediately and keeps the subphase protocol independent", async () => {
+    const library = await temporaryLibrary()
+    await library.ensureSeeded()
+    const prompts = new NodePromptResourceAdapter(packageRoot, library)
+    await library.write("基础规则/消息前后/01-用户消息前.md", "前：作者自定义\n")
+    await library.write("基础规则/消息前后/02-用户消息后.md", "后：作者自定义\n")
+    for (const input of [{ phase: "draft", workflow: "query" }, { phase: "synopsis_discuss", purpose: "discuss_write_scope" }] as const) {
+      expect(await prompts.loadUserMessageBrackets(input)).toEqual({ before: "前：作者自定义\n", after: "后：作者自定义\n" })
+    }
+    await library.write("基础规则/阶段提示词/01-新章节阶段.md", "新章专用\n")
+    await library.write("基础规则/阶段提示词/02-构思阶段.md", "构思专用\n")
+    await library.write("基础规则/阶段提示词/04-章节入库阶段.md", "入库专用\n")
+    expect((await prompts.loadNewChapterDiscussion()).text).toBe("新章专用\n")
+    expect((await prompts.loadComposePrompt()).text).toBe("构思专用\n")
+    expect((await prompts.loadChapterIngestion()).text).toBe("入库专用\n")
+    expect((await prompts.loadPhase("interpret", "ingestion")).text).not.toContain("新章专用")
+    expect((await prompts.loadPhase("revision_review", "ingestion")).text).toContain("revision_review")
+    expect((await prompts.loadDefaultSkillPack("settings_extraction")).text).toContain("设定集修订规则")
+    expect((await prompts.loadOutlineToDraftGuide()).text).toContain("草稿")
+    await library.write("基础规则/消息前后/02-用户消息后.md", "保存后的第二版\n")
+    expect((await prompts.loadUserMessageBrackets({ phase: "interpret" })).after).toBe("保存后的第二版\n")
   })
 
   it("maps new prompt document paths back to one library entry", async () => {
@@ -193,7 +230,7 @@ describe("prompt library", () => {
     await writeFile(join(directory, "03-草稿阶段.md"), draft.replace("<!-- /skill:outline-to-draft -->", "我的旧草稿规则\n\n<!-- /skill:outline-to-draft -->"))
     await library.ensureSeeded()
     const adapter = new NodePromptResourceAdapter(packageRoot, library)
-    expect((await adapter.loadPhase("synopsis_discuss")).text).toContain("我的旧细纲规则")
+    expect((await adapter.loadComposePrompt()).text).toContain("我的旧细纲规则")
     expect((await adapter.loadOutlineToDraftGuide()).text).toContain("我的旧草稿规则")
   })
 

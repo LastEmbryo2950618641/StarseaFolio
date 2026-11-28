@@ -586,13 +586,22 @@ export class ChapterRevisionService {
     const currentContent = current === undefined ? "" : await this.dependencies.internalStore.readDocument(current.contentRef)
     const proposedContent = await this.dependencies.internalStore.readDocument(revision.contentRef)
     const nowMs = this.dependencies.now()
-    const phasePrompt = await this.dependencies.prompts.loadPhase("revision_review")
+    const technicalPrompt = await this.dependencies.prompts.loadPhase("revision_review")
+    const ingestionPrompt = await this.dependencies.prompts.loadChapterIngestion?.()
+    const phaseText = ingestionPrompt === undefined
+      ? technicalPrompt.text
+      : `${ingestionPrompt.text.trim()}\n\n${technicalPrompt.text.trim()}\n`
+    const phasePrompt = phaseText === technicalPrompt.text
+      ? technicalPrompt
+      : { ...technicalPrompt, text: phaseText, digest: digest(phaseText) }
     await this.dependencies.revisions.updateState({
       revisionTaskId: revision.revisionTaskId,
       status: "reviewing",
       updatedAtMs: nowMs,
     })
     const deadlineAtMs = nowMs + (input.deadlineMs ?? 600_000)
+    // Schema-repair attempts share this budget; keep headroom for empty/request_read repairs.
+    const maxModelCalls = input.maxModelCalls ?? 5
     const request = phaseRequestEnvelopeSchema.parse({
       schemaVersion: SCHEMA_VERSION,
       envelopeId: this.dependencies.createId(),
@@ -609,7 +618,7 @@ export class ChapterRevisionService {
       committedReadIds: [],
       visiblePendingIds: [],
       // Allow the adapter's bounded schema repair instead of failing the first malformed response.
-      remainingBudget: createReviewBudget(input.maxModelCalls ?? 3, deadlineAtMs),
+      remainingBudget: createReviewBudget(maxModelCalls, deadlineAtMs),
       input: {
         workflow: "revision",
         userInput: renderRuntimePrompt("turn-context", "revision-review-user-input"),
@@ -630,7 +639,21 @@ export class ChapterRevisionService {
       },
     })
     try {
-      const execution = await model.execute(request)
+      const execution = await model.execute(request, {
+        phasePrompt,
+        contextMessages: [{
+          messageId: this.dependencies.createId(),
+          sequence: 0,
+          role: "system",
+          kind: "system_rules",
+          content: (await this.dependencies.prompts.loadTurnSystemRules()).text,
+        }],
+      })
+      if (execution.result.artifact === undefined) {
+        throw new RevisionInvalidStateError(
+          "修订审核未返回产物（可能只发了读取请求）。正文已在审核请求中提供，请重试发布。",
+        )
+      }
       const artifact = revisionReviewArtifactSchema.parse(execution.result.artifact)
       const review: ChapterRevisionReview = {
         reviewId: this.dependencies.createId(),

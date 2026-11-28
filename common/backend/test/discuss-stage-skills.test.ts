@@ -113,8 +113,9 @@ function skillPackMessages(capture: DiscussCapture): readonly string[] {
 
 function expectBaseSkillPack(capture: DiscussCapture): void {
   const packs = skillPackMessages(capture)
-  expect(packs).toHaveLength(1)
-  const pack = packs[0]!
+  // 讨论链只追加：多轮会累积多份技能包，这里校验本轮最后追加的那一份。
+  expect(packs.length).toBeGreaterThanOrEqual(1)
+  const pack = packs.at(-1)!
   for (const skillId of BASE_DISCUSS_SKILL_IDS) {
     expect(pack).toContain(`【skill:${skillId}】`)
   }
@@ -208,7 +209,7 @@ describe("discuss stage skill injection", () => {
       const capture = captures[0]
       expect(capture).toBeDefined()
       expectBaseSkillPack(capture!)
-      // writeScope 缺失且已有细纲：草稿动作按材料判断命中，outline-to-draft 仍走既有指南。
+      // 已有细纲时注入写草稿指南；讨论链只追加，指南会留在历史里供后续轮次继续可见。
       expectPhaseSkillIds(harness, capture!, [])
       expect(capture!.contextMessages.filter((message) => message.content.startsWith(DRAFT_GUIDE_HEADER)))
         .toHaveLength(1)

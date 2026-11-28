@@ -444,7 +444,9 @@ export class ProjectRuntime {
         summary: "章节入库完成，已发布为正式正文；可继续下一章。",
       }
     }
-    const waitMs = Math.max(0, (input.deadlineMs ?? 300_000) - 30_000)
+    // Graph sync (esp. governance) often needs multiple slow model calls; keep a floor so
+    // a short caller deadline does not mark the chapter "running" and give up too early.
+    const waitMs = Math.max(900_000, (input.deadlineMs ?? 300_000) - 30_000)
     const settled = await this.waitForActiveRevisionJobs({
       timeoutMs: waitMs,
       ...(input.signal === undefined ? {} : { signal: input.signal }),

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { sql } from "kysely"
 import { defaultProjectSettings } from "@starseafolio/config"
 import {
+  extractPromptDocSection,
   graphCapacityRewriteArtifactSchema,
   graphStructurePlanArtifactSchema,
 } from "@starseafolio/prompt-contracts"
@@ -4477,6 +4478,94 @@ describe("TurnOrchestrator", () => {
       if (phase === "settings_extraction") continue
       for (const promptText of capturedPrompts) {
         expect(promptText, phase).not.toContain("【skill:settings-revision】")
+      }
+    }
+  })
+
+  it("keeps the sticky system prefix first and reattaches each canonical ingestion section per call", async () => {
+    const ingestionPhases = [
+      "settings_extraction",
+      "graph_governance",
+      "graph_structure_plan",
+      "graph_capacity_rewrite",
+      "graph_spacetime_settlement",
+      "graph_retrieval_design",
+      "graph_governance_review",
+      "semantic_review",
+      "dependency_audit",
+      "settlement_review",
+      "frontier_settlement",
+      "commit_review",
+      "chapter_naming",
+      "work_naming",
+      "revision_review",
+    ] as const
+    const adapter = new NodePromptResourceAdapter(
+      fileURLToPath(new URL("../../../common/packages/prompt-contracts/", import.meta.url)),
+    )
+    const ingestionDoc = readFileSync(
+      fileURLToPath(new URL("../../../common/packages/prompt-contracts/resources/v1/prompt-docs/stages/04-ingestion.md", import.meta.url)),
+      "utf8",
+    )
+    for (const phase of ingestionPhases) {
+      const prompt = await adapter.loadPhase(phase)
+      expect(prompt.text, phase).toBe(extractPromptDocSection(ingestionDoc, `phase:${phase.replaceAll("_", "-")}`))
+      expect(prompt.text.length, phase).toBeGreaterThan(100)
+    }
+
+    const fixture = await createFixture()
+    const fake = new FakeAiModelAdapter(randomUUID)
+    const captured: { phase: string; workflow: unknown; promptText: string; kinds: string[]; firstContent: string }[] = []
+    const model: AIModelPort = {
+      info: fake.info,
+      execute: async (request, options) => {
+        captured.push({
+          phase: request.phase,
+          workflow: (request.input as { workflow?: unknown }).workflow,
+          promptText: options?.phasePrompt?.text ?? "",
+          kinds: (options?.contextMessages ?? []).map((message) => message.kind),
+          firstContent: (options?.contextMessages ?? [])[0]?.content ?? "",
+        })
+        return fake.execute(request, options)
+      },
+    }
+    const first = await fixture.createOrchestrator(model, fixture.commit).execute({
+      projectId: fixture.projectId,
+      workspaceRootRef: fixture.workspaceRoot,
+      internalStore: fixture.store,
+      userInput: "先建立一章可供修订的正文。",
+      chapterSequence: 1,
+      allowWorkspaceChapterReads: false,
+    })
+    if (first.kind !== "turn") throw new Error("Expected a committed turn")
+    const chapter = (await fixture.documentRepository.listCommittedChapters(fixture.projectId))[0]
+    if (chapter === undefined) throw new Error("Expected a committed chapter")
+    const sourceUnits = await fixture.documentRepository.listSourceUnits(fixture.projectId, chapter.sourceId)
+    const result = await fixture.createOrchestrator(model, fixture.commit).execute({
+      workflow: "revision",
+      adaptiveGraphGovernance: true,
+      projectId: fixture.projectId,
+      workspaceRootRef: fixture.workspaceRoot,
+      internalStore: fixture.store,
+      userInput: "# 第一章 修订版\n\n[no-change] 林序第一次走上旧桥。",
+      chapterSequence: 1,
+      existingSourceUnitIds: sourceUnits.map((unit) => unit.id),
+      allowWorkspaceChapterReads: false,
+    })
+    expect(result.kind).toBe("evolution")
+
+    const ingestionCalls = captured.filter((call) => (ingestionPhases as readonly string[]).includes(call.phase))
+    expect(ingestionCalls.length).toBeGreaterThan(0)
+    for (const call of ingestionCalls) {
+      // 固定系统前缀始终是第一条；阶段段落每次重新附带，不依赖上一轮残留。
+      expect(call.kinds[0], call.phase).toBe("system_rules")
+      expect(call.firstContent, call.phase).toContain("你负责虚构小说的创作与续写")
+      expect(call.promptText.startsWith(`# ${call.phase}`), call.phase).toBe(true)
+      // 入库阶段的每次调用都重新装上入库说明；非入库工作流不带。
+      if (call.workflow === "revision") {
+        expect(call.promptText, call.phase).toContain("以作者确认发布的当前章草稿版本为准")
+      } else {
+        expect(call.promptText, call.phase).not.toContain("以作者确认发布的当前章草稿版本为准")
       }
     }
   })

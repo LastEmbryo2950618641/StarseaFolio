@@ -18,6 +18,15 @@ export const PROMPT_LIBRARY_CATEGORIES = ["基础规则", "用户规则", "系�
 /** Seed digest manifest living at the prompt library root. */
 export const PROMPT_LIBRARY_SEED_MANIFEST = ".seed-manifest.json"
 
+/**
+ * 已下线的提示词库文件：独立 skill 索引已并入系统提示词，
+ * 升级时从库里删除旧副本，避免面板里继续显示过时索引。
+ */
+export const RETIRED_LIBRARY_PATHS = [
+  "基础规则/系统提示词/06-讨论技能索引.md",
+  "系统规则/skill-index.md",
+] as const
+
 const COMPOSE_RESOURCE = "resources/v1/prompt-docs/stages/02-compose.md"
 const LEGACY_COMPOSE_DOCS = [
   ["02-梗概阶段.md", "resources/v1/prompt-docs/stages/02-synopsis.md"],
@@ -136,7 +145,6 @@ export function createPromptLibraryEntries(promptPackageRoot: string): readonly 
     { resourcePath: "resources/v1/prompt-docs/system/03-writing-voice.md", libraryPath: "基础规则/系统提示词/03-去AI味与写作声音.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/system/04-query-facts.md", libraryPath: "基础规则/系统提示词/04-查询事实规则.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/system/05-revision-audit.md", libraryPath: "基础规则/系统提示词/05-修订审核规则.md", workspaceMirrors: [] },
-    { resourcePath: "resources/v1/prompt-docs/system/06-discuss-skill-index.md", libraryPath: "基础规则/系统提示词/06-讨论技能索引.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/dynamic/01-before-user-message.md", libraryPath: "基础规则/消息前后/01-用户消息前.md", legacyLibraryPath: "基础规则/消息前后/用户消息前/01-用户消息前.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/dynamic/02-after-user-message.md", libraryPath: "基础规则/消息前后/02-用户消息后.md", legacyLibraryPath: "基础规则/消息前后/用户消息后/02-用户消息后.md", workspaceMirrors: [] },
     { resourcePath: "resources/v1/prompt-docs/stages/01-new-chapter.md", libraryPath: "基础规则/阶段提示词/01-新章节阶段.md", workspaceMirrors: [] },
@@ -267,6 +275,17 @@ export class PromptLibraryService {
           seeds: Object.fromEntries(seeds),
         }
         await writeTextAtomically(this.seedManifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`)
+      }
+      for (const retired of RETIRED_LIBRARY_PATHS) {
+        const retiredKey = normalizePath(retired)
+        if (!existsSync(join(this.libraryRoot, retired))) continue
+        await rm(join(this.libraryRoot, retired), { force: true })
+        if (seeds.delete(retiredKey)) {
+          await writeTextAtomically(this.seedManifestPath, `${JSON.stringify({
+            version: SEED_MANIFEST_VERSION,
+            seeds: Object.fromEntries(seeds),
+          }, null, 2)}\n`)
+        }
       }
     })
   }
@@ -428,7 +447,6 @@ export const legacySeedDigests: Readonly<Record<string, string>> = {
   "系统规则/base-rules.md": "604619585bdc6bfb34e934563ea2c5b6153b7831d1c0c9440bf3aa06b0d75e2a",
   "系统规则/content-handling.md": "5a83fd254afc11dae8116ff81a6ba2a35e3b3bffe2907773895d48a61d09377f",
   "系统规则/settings-query-guide.md": "cb12bd5d1b06b1e1cfdef42e1a5a6ee0a9513b27b135fdfc846c141a7087d069",
-  "系统规则/skill-index.md": "0970b867c2b20a1028a36877dd3fd264616fe65e7bda15409fd6e8116f2f2c59",
   "系统规则/webnovel-prose-logic.md": "b34392e3fe88a795fa72d964ed0005d09204a78ef1e537db08db9c3a706d4270",
   "系统规则/world-rules-overview.md": "e949bce2c3c2c1d203630ab621a982e9b39564a50cfa382641643c6ae2574711",
   "写作指南/batch-volume-deduction-plan.md": "5e07ba4505920b81a9c8bd12cd19fe729b2ba1a035aa3b50b9d956e397cab946",

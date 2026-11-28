@@ -78,7 +78,7 @@ Source retrieval still reports missing evidence, so a definitive answer cannot b
 
 ## revision-review-user-input
 
-审核用户编辑后的章节正文，并给出连续性建议。
+审核用户编辑后的章节正文，并给出连续性建议。旧正文与新正文已在本请求的 revision 字段中完整提供；不要 request_read，直接输出含 issues、recommendation、finalSelfReview 的审核产物。
 
 ## handoff-no-outline-note
 

@@ -170,8 +170,7 @@ import {
   settingsExtractionArtifactSchema,
   workStyleRevisionArtifactSchema,
 } from "@starseafolio/prompt-contracts"
-import { AFTER_USER_MESSAGE_PROMPT_DOC } from "@starseafolio/prompt-contracts"
-import { renderPromptDocSection, renderPromptDocSectionSync, renderRuntimePrompt } from "../../core/runtime-prompt.js"
+import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 
 const turnModelPhases: readonly AIPhase[] = [
   "interpret",
@@ -1099,9 +1098,13 @@ export class TurnOrchestrator {
           sceneBindingCount: decision.artifact.sceneSpacetimeBindings.length,
           reason: decision.fallbackReason,
         })
+        // adaptiveRevisionExecutionPhases: [settings, work_style, graph_governance, dependency_audit, ...]
+        // Skip the already-completed graph_governance candidate and continue from dependency_audit.
+        const compactPhases = executionPhasesFor("revision", true)
+        const dependencyAuditIndex = compactPhases.indexOf("dependency_audit")
         return await (this.continueExecution({ ...input, adaptiveGraphGovernance: "compact" }, {
           ...state,
-          startPhaseIndex: 2,
+          startPhaseIndex: dependencyAuditIndex >= 0 ? dependencyAuditIndex : 3,
           adaptiveGraphGovernance: "compact",
         }) as Promise<WorldEvolutionExecutionResult>)
       }
@@ -1973,6 +1976,14 @@ export class TurnOrchestrator {
             artifacts.work_style_revision,
             artifacts.settings_extraction,
           )
+          phaseIndex += 1
+          continue
+        }
+        if (
+          phase === "graph_governance"
+          && state.adaptiveGraphGovernance === "compact"
+          && artifacts.graph_governance !== undefined
+        ) {
           phaseIndex += 1
           continue
         }
@@ -3052,11 +3063,10 @@ export class TurnOrchestrator {
       ? undefined
       : await this.dependencies.prompts.loadDefaultSkillPack(defaultSkillPackPhase)
     const workflowSection = workflowAppendixSection(input.phase, input.input.workflow)
+    // 只读查询分节已归到 turn-context；作者消息前后两份文档只保留消息夹注。
     const workflowAppendix = workflowSection === undefined
       ? undefined
-      : workflowSection.endsWith("-query")
-        ? await renderPromptDocSection(AFTER_USER_MESSAGE_PROMPT_DOC, `query:${workflowSection}`)
-        : renderRuntimePrompt("turn-context", workflowSection)
+      : renderRuntimePrompt("turn-context", workflowSection)
     const archiveSessionId = input.input.conversationArchiveSessionId
     const conversation = this.dependencies.synopsisConversation
     const canReadArchive = input.phase === "draft" && archiveSessionId !== undefined && conversation !== undefined
@@ -3071,16 +3081,18 @@ export class TurnOrchestrator {
       skillPack?.text,
       canReadArchive ? renderRuntimePrompt("turn-context", "archive") : undefined,
     ].filter((text): text is string => text !== undefined && text.trim().length > 0)
-    const prompt = appendices.length === 0
+    // 章节入库提示不进可折叠历史：发布流水线的每一次模型调用都重新装上。
+    const ingestionPrompt = input.input.workflow === "revision"
+      ? await this.dependencies.prompts.loadChapterIngestion?.()
+      : undefined
+    const promptText = [
+      basePrompt.text,
+      ...appendices,
+      ingestionPrompt?.text,
+    ].filter((text): text is string => text !== undefined && text.trim().length > 0).join("\n\n")
+    const prompt = promptText === basePrompt.text
       ? basePrompt
-      : (() => {
-          const text = `${basePrompt.text}\n\n${appendices.join("\n\n")}`
-          return {
-            ...basePrompt,
-            text,
-            digest: digest(text),
-          }
-        })()
+      : { ...basePrompt, text: promptText, digest: digest(promptText) }
     let currentContext = input.context
     let currentPhaseRunId = input.phaseRunId
     let attempt = input.attempt
@@ -3573,6 +3585,11 @@ export class TurnOrchestrator {
           requestIds: requestedReads.map((request) => request.requestId),
           typeId: "system:retrieval-gap",
         })
+        if (parsedResult.artifact === undefined) {
+          throw new Error(
+            `${input.phase} exhausted retrieval rounds while still requesting reads without a phase artifact`,
+          )
+        }
         return {
           phaseRunId: currentPhaseRunId,
           context: currentContext,
@@ -3701,6 +3718,15 @@ export class TurnOrchestrator {
           attempt += 1
           continue
         }
+        // request_read with no artifact cannot finish the phase; keep looping so the model
+        // can emit the required artifact from already-visible evidence.
+        if (parsedResult.artifact === undefined) {
+          await this.dependencies.persistence.saveContext(currentContext, this.dependencies.now())
+          currentPhaseRunId = this.dependencies.createId()
+          input.phaseRunIds.push(currentPhaseRunId)
+          attempt += 1
+          continue
+        }
         await this.dependencies.persistence.saveContext(currentContext, this.dependencies.now())
         return {
           phaseRunId: currentPhaseRunId,
@@ -3737,6 +3763,16 @@ export class TurnOrchestrator {
           typeId: "system:retrieval-gap",
           reason: "no_new_evidence",
         })
+        // Empty reads + missing artifact used to call parsePhaseArtifact(undefined) and
+        // surface a Zod "expected object, received undefined". Keep the retrieval gap and
+        // continue so the model can finish without inventing graph IDs.
+        if (parsedResult.artifact === undefined) {
+          await this.dependencies.persistence.saveContext(currentContext, this.dependencies.now())
+          currentPhaseRunId = this.dependencies.createId()
+          input.phaseRunIds.push(currentPhaseRunId)
+          attempt += 1
+          continue
+        }
         await this.dependencies.persistence.saveContext(currentContext, this.dependencies.now())
         return {
           phaseRunId: currentPhaseRunId,
@@ -6691,7 +6727,7 @@ function queryReviewDecision(
       reason: groundingRequiresRevision
         ? [
             result.reason,
-            renderPromptDocSectionSync(AFTER_USER_MESSAGE_PROMPT_DOC, "query:query-grounding"),
+            renderRuntimePrompt("turn-context", "query-grounding"),
             unresolvedRetrievalEvidence ? renderRuntimePrompt("turn-context", "unresolved-query-evidence") : undefined,
           ].filter(Boolean).join("\n")
         : result.reason,

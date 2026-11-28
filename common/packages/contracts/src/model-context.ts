@@ -12,6 +12,8 @@ export const modelContextMessageKindValues = [
   "phase_instruction",
   "phase_protocol",
   "phase_request",
+  "author_message",
+  "author_bracket",
   "phase_response",
   "canonical_chapter",
   "chapter_revision",

@@ -16,7 +16,6 @@ import {
   USER_TO_SYNOPSIS_GUIDE_RESOURCE,
   WEBNOVEL_PROSE_LOGIC_RESOURCE,
   WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES,
-  SKILL_INDEX_RESOURCE,
   PLATFORM_BASE_RULE_RESOURCES,
   SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES,
   PLATFORM_SKILLS,
@@ -79,12 +78,11 @@ describe("prompt contracts", () => {
       PLOT_SYNOPSIS_GUIDE_RESOURCE,
       SETTINGS_QUERY_GUIDE_RESOURCE,
       SETTINGS_REVISION_GUIDE_RESOURCE,
-      SKILL_INDEX_RESOURCE,
       ...WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES,
       ...aiPhaseValues.map((phase) => promptDefinitions[phase].resourcePath),
     ]
 
-    expect(new Set(resources).size).toBe(aiPhaseValues.length + 8 + WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES.length)
+    expect(new Set(resources).size).toBe(aiPhaseValues.length + 7 + WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES.length)
     for (const resource of resources) {
       const path = resolve(packageRoot, resource)
       expect(existsSync(path), resource).toBe(true)
@@ -94,7 +92,7 @@ describe("prompt contracts", () => {
 
   it("keeps platform system documents thin and skill index discuss-only", () => {
     expect(PLATFORM_BASE_RULE_RESOURCES).toHaveLength(5)
-    expect(SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES).toContain("resources/v1/prompt-docs/system/06-discuss-skill-index.md")
+    expect(SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES).not.toContain("resources/v1/prompt-docs/system/06-discuss-skill-index.md")
     for (const vendor of WEBNOVEL_VENDOR_WRITE_RULE_RESOURCES) {
       expect(PLATFORM_BASE_RULE_RESOURCES).not.toContain(vendor)
     }
@@ -124,11 +122,9 @@ describe("prompt contracts", () => {
   it("uses shared Markdown rules for cold-start category and prose recommendations", () => {
     const packageRoot = resolve(process.cwd(), "common/packages/prompt-contracts")
     const readResource = (resource: string): string => readFileSync(resolve(packageRoot, resource), "utf8")
-    const skillIndex = readResource("resources/v1/skill-index.md")
     const coldStart = readResource("resources/skills/book-cold-start/SKILL.md")
     const stylePack = readResource("resources/skills/book-cold-start/references/style-pack-spec.md")
 
-    expect(skillIndex).not.toContain("genre-style-presets")
     expect(coldStart).toContain("表现输出/小说大类规则/")
     expect(coldStart).toContain("表现输出/小说次大类规则/")
     expect(coldStart).toContain("表现输出/笔风规则/")

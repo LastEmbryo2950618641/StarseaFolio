@@ -1,6 +1,6 @@
 import { aiPhaseValues, type AIPhase } from "@starseafolio/contracts"
 
-import { DISCUSS_SYSTEM_PROMPT_DOC, SYSTEM_PROMPT_DOCS } from "./prompt-docs.js"
+import { SYSTEM_PROMPT_DOCS } from "./prompt-docs.js"
 
 export const PROMPT_CONTRACT_VERSION = "v1" as const
 export const WORLD_RULES_OVERVIEW_RESOURCE = "resources/v1/world-rules-overview.md" as const
@@ -50,10 +50,12 @@ export const PLATFORM_BASE_RULE_RESOURCES = Object.freeze([
   ...SYSTEM_PROMPT_DOCS,
 ] as const)
 
-/** Discuss sticky prefix — common base plus the discuss skill index. */
+/**
+ * Discuss sticky prefix. The standalone skill index was removed: writing skills are
+ * merged into the voice system prompt, and阶段 skill 由默认技能包按阶段注入。
+ */
 export const SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES = Object.freeze([
   ...PLATFORM_BASE_RULE_RESOURCES,
-  DISCUSS_SYSTEM_PROMPT_DOC,
 ] as const)
 
 export type PromptDefinition = {

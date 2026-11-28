@@ -9,8 +9,8 @@ export const SYSTEM_PROMPT_DOCS = Object.freeze([
   "resources/v1/prompt-docs/system/05-revision-audit.md",
 ] as const)
 
-export const DISCUSS_SYSTEM_PROMPT_DOC = "resources/v1/prompt-docs/system/06-discuss-skill-index.md" as const
 export const AFTER_USER_MESSAGE_PROMPT_DOC = "resources/v1/prompt-docs/dynamic/02-after-user-message.md" as const
+export const BEFORE_USER_MESSAGE_PROMPT_DOC = "resources/v1/prompt-docs/dynamic/01-before-user-message.md" as const
 
 export type PromptDocDefinition = Readonly<{
   id: string
@@ -55,18 +55,15 @@ const STAGE_BY_PHASE: Record<string, (typeof STAGE_PROMPT_DOCS)[number]["id"]> =
   ...Object.fromEntries(INGESTION_PHASES.map((phase) => [phase, "ingestion"])),
 }
 
-const DYNAMIC_BY_PHASE: Partial<Record<AIPhase, string>> = {
-  work_style_revision: "before-user-message",
-  response_review: "after-user-message",
+/** Section index for the legacy combined documents. It does not select the current business stage. */
+export function stagePromptDocForPhase(phase: AIPhase): PromptDocDefinition | undefined {
+  return STAGE_PROMPT_DOCS.find((doc) => doc.id === STAGE_BY_PHASE[phase])
 }
 
-export function stagePromptDocForPhase(phase: AIPhase): PromptDocDefinition | undefined {
-  const dynamic = DYNAMIC_BY_PHASE[phase]
-  if (dynamic !== undefined) {
-    return DYNAMIC_PROMPT_DOCS.find((doc) => doc.id === dynamic)
-  }
-  const stage = STAGE_BY_PHASE[phase]
-  return STAGE_PROMPT_DOCS.find((doc) => doc.id === stage)
+/** Old stage documents include technical subphase and skill appendices. Only their shared prose
+ * belongs on every call in that business stage. Plain author-edited Markdown passes through intact. */
+export function sharedStageMarkdown(markdown: string): string {
+  return markdown.replace(/<!-- ((?:phase|skill):[\w-]+) -->[\s\S]*?<!-- \/\1 -->/gu, "").trimEnd() + "\n"
 }
 
 export const STAGE_SKILL_DOCS: Readonly<Record<string, Readonly<{ doc: string; marker: string }>>> = Object.freeze({
@@ -94,4 +91,13 @@ export function extractPromptDocSection(markdown: string, marker: string): strin
   const endAt = markdown.indexOf(end, contentAt)
   if (endAt < 0) throw new Error(`Unclosed prompt document section: ${marker}`)
   return markdown.slice(contentAt, endAt).trimStart().replace(/^## [^\n]*\n+/u, "").trim()
+}
+
+/** 旧版提示词库可能缺少新增 marker：命中返回正文，缺段或未闭合返回 undefined。 */
+export function tryExtractPromptDocSection(markdown: string, marker: string): string | undefined {
+  try {
+    return extractPromptDocSection(markdown, marker)
+  } catch {
+    return undefined
+  }
 }

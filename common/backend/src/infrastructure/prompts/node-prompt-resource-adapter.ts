@@ -3,6 +3,8 @@ import { resolve } from "node:path"
 
 import type { AIPhase } from "@starseafolio/contracts"
 import {
+  AFTER_USER_MESSAGE_PROMPT_DOC,
+  BEFORE_USER_MESSAGE_PROMPT_DOC,
   BASE_RULES_RESOURCE,
   CONTENT_HANDLING_RESOURCE,
   DISCUSS_CREATION_DESK_WORKFLOW_RESOURCE,
@@ -18,7 +20,9 @@ import {
   PLATFORM_BASE_RULE_RESOURCES,
   SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES,
   defaultSkillIdsForPhase,
-  extractPromptDocSection,
+  tryExtractPromptDocSection,
+  sharedStageMarkdown,
+  STAGE_PROMPT_DOCS,
   formatSkillEvidenceHeader,
   listPlatformSkills,
   resolvePromptDefinition,
@@ -29,7 +33,13 @@ import {
   SYNOPSIS_SKILLS_PROTOCOL,
 } from "@starseafolio/prompt-contracts"
 
-import type { LoadedSkillResource, PromptResource, PromptResourcePort } from "../../application/index.js"
+import type {
+  LoadedSkillResource,
+  PromptResource,
+  PromptResourcePort,
+  UserMessageBracketInput,
+  UserMessageBrackets,
+} from "../../application/index.js"
 import { digest } from "../../core/index.js"
 import { renderRuntimePrompt } from "../../core/runtime-prompt.js"
 import type { PromptLibraryService } from "./prompt-library.js"
@@ -37,7 +47,7 @@ import type { PromptLibraryService } from "./prompt-library.js"
 export class NodePromptResourceAdapter implements PromptResourcePort {
   public constructor(
     private readonly promptPackageRoot: string,
-    private readonly promptLibrary?: PromptLibraryService,
+    private readonly promptLibrary?: Pick<PromptLibraryService, "readOverride">,
   ) {}
 
   public async loadWorldRulesOverview(): Promise<PromptResource> {
@@ -92,19 +102,15 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
     return this.loadComposite("synopsis-discuss-system-rules", SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES)
   }
 
-  public async loadPhase(phase: AIPhase): Promise<PromptResource> {
-    const stageDoc = stagePromptDocForPhase(phase)
-    if (stageDoc === undefined) {
-      return this.load(resolvePromptDefinition(phase).resourcePath)
+  public async loadPhase(phase: AIPhase, stage?: "ingestion" | "compose"): Promise<PromptResource> {
+    const doc = stagePromptDocForPhase(phase)
+    // 技术子阶段正文以阶段文档里的 phase 小节为准；显式 stage 只用于排除不属于该业务阶段的阶段。
+    if (doc !== undefined && (stage === undefined || doc.id === stage)) {
+      const marker = `phase:${phase.replaceAll("_", "-")}`
+      const text = tryExtractPromptDocSection(await this.readBundledOrOverride(doc.resourcePath), marker)
+      if (text !== undefined) return this.sectionResource(doc.resourcePath, marker, text)
     }
-    const markdown = await this.readBundledOrOverride(stageDoc.resourcePath)
-    const marker = `phase:${phase.replaceAll("_", "-")}`
-    return {
-      ref: `${PROMPT_CONTRACT_VERSION}:${stageDoc.resourcePath}#${marker}`,
-      version: PROMPT_CONTRACT_VERSION,
-      digest: digest(extractPromptDocSection(markdown, marker)),
-      text: extractPromptDocSection(markdown, marker),
-    }
+    return this.load(resolvePromptDefinition(phase).resourcePath)
   }
 
   public async listSkills(): Promise<readonly Readonly<{
@@ -139,7 +145,7 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
       const markdown = await this.readBundledOrOverride(stageDoc.resourcePath)
       const text = composePromptTexts([
         formatSkillEvidenceHeader(skill.id, includeReferences),
-        extractPromptDocSection(markdown, stageSkill.marker),
+        tryExtractPromptDocSection(markdown, stageSkill.marker) ?? (await this.load(skill.primaryResource)).text,
       ])
       return {
         skillId: skill.id,
@@ -164,6 +170,43 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
       digest: digest(text),
       text,
     }
+  }
+
+  public async loadNewChapterDiscussion(): Promise<PromptResource> {
+    return this.loadBusinessStage("new-chapter")
+  }
+
+  public async loadComposePrompt(): Promise<PromptResource> {
+    return this.loadBusinessStage("compose", "phase:synopsis-discuss")
+  }
+
+  public async loadChapterIngestion(): Promise<PromptResource> {
+    return this.loadBusinessStage("ingestion")
+  }
+
+  private async loadBusinessStage(id: (typeof STAGE_PROMPT_DOCS)[number]["id"], section?: string): Promise<PromptResource> {
+    const { resourcePath } = STAGE_PROMPT_DOCS.find((doc) => doc.id === id)!
+    const markdown = await this.readBundledOrOverride(resourcePath)
+    const shared = sharedStageMarkdown(markdown)
+    const specific = section === undefined ? undefined : tryExtractPromptDocSection(markdown, section)
+    const text = specific === undefined ? shared : composePromptTexts([shared, specific])
+    return this.sectionResource(resourcePath, "stage", text)
+  }
+
+  public loadAfterUserMessageReminder(): Promise<PromptResource> {
+    return this.load(AFTER_USER_MESSAGE_PROMPT_DOC)
+  }
+
+  public async loadUserMessageBrackets(_input: UserMessageBracketInput): Promise<UserMessageBrackets> {
+    const [before, after] = await Promise.all([
+      this.readBundledOrOverride(BEFORE_USER_MESSAGE_PROMPT_DOC),
+      this.readBundledOrOverride(AFTER_USER_MESSAGE_PROMPT_DOC),
+    ])
+    return { before, after }
+  }
+
+  private sectionResource(resourcePath: string, section: string, text: string): PromptResource {
+    return { ref: `${PROMPT_CONTRACT_VERSION}:${resourcePath}#${section}`, version: PROMPT_CONTRACT_VERSION, digest: digest(text), text }
   }
 
   public async loadDefaultSkillPack(phase: AIPhase | "synopsis_discuss"): Promise<PromptResource> {
@@ -201,7 +244,9 @@ export class NodePromptResourceAdapter implements PromptResourcePort {
     const doc = stagePromptDocForSkill(skillId)
     const marker = STAGE_SKILL_DOCS[skillId]?.marker
     if (doc === undefined || marker === undefined) return this.load(fallbackResource)
-    const text = normalizePrompt(extractPromptDocSection(await this.readBundledOrOverride(doc.resourcePath), marker))
+    const section = tryExtractPromptDocSection(await this.readBundledOrOverride(doc.resourcePath), marker)
+    if (section === undefined) return this.load(fallbackResource)
+    const text = normalizePrompt(section)
     return { ref: `${PROMPT_CONTRACT_VERSION}:${doc.resourcePath}#${marker}`, version: PROMPT_CONTRACT_VERSION, digest: digest(text), text }
   }
 

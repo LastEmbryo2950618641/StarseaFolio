@@ -48,7 +48,7 @@ export class WorkNameSuggestService {
       ...PLACEHOLDER_WORK_NAMES,
     ])
     const phasePrompt = await this.dependencies.prompts.loadPhase("work_naming")
-    const systemRules = await this.dependencies.prompts.loadBaseRules()
+    const systemRules = await this.dependencies.prompts.loadTurnSystemRules()
     const deadlineAtMs = this.dependencies.now() + 120_000
     const request = phaseRequestEnvelopeSchema.parse({
       schemaVersion: SCHEMA_VERSION,

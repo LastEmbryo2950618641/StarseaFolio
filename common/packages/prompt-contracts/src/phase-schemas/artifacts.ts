@@ -633,6 +633,7 @@ const planningWriteIntentSchema = z.object({
 
 /** Approved deliverables for one discussion turn, decided before any writing tools run. */
 export const discussTurnWriteScopeSchema = planningWriteIntentSchema.extend({
+  startCompose: z.literal(true).optional(),
   volumeSynopsis: z.literal(true).optional(),
   volumeOutline: z.literal(true).optional(),
   volumeTargets: z.literal(true).optional(),

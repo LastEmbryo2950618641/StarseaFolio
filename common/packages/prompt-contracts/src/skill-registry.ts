@@ -1,8 +1,5 @@
 import type { AIPhase } from "@starseafolio/contracts"
 
-/** Short index always injected into system_rules (not full skill bodies). Static Markdown is the single source of truth; no code-side generator. */
-export const SKILL_INDEX_RESOURCE = "resources/v1/skill-index.md" as const
-
 export type SkillInjectPolicy = "always" | "default" | "onDemand"
 
 /**
@@ -30,7 +27,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
   {
     id: "webnovel-deslop",
     name: "去 AI 味（deslop）",
-    summary: "改工整/排比/翻译腔/空洞抒情；已并入全局“去 AI 味与写作声音”系统提示词，不再默认注入。",
+    summary: "已全文并入《去 AI 味与写作声音》系统提示词，无需再加载。",
     injectPolicy: "always",
     defaultPhases: [],
     primaryResource: `${VENDOR}/skills/deslop.md`,
@@ -44,7 +41,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
   {
     id: "webnovel-dialogue",
     name: "对话与台词",
-    summary: "口语化、潜台词、角色声音、禁对白乒乓；已并入全局“去 AI 味与写作声音”系统提示词，不再默认注入。",
+    summary: "已全文并入《去 AI 味与写作声音》系统提示词，无需再加载。",
     injectPolicy: "always",
     defaultPhases: [],
     primaryResource: `${VENDOR}/skills/dialogue.md`,
@@ -55,7 +52,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
   {
     id: "webnovel-human",
     name: "人味 / 失控感",
-    summary: "表面去味后仍像说明书时用：非理性、留白、私货。",
+    summary: "已并入《去 AI 味与写作声音》系统提示词；需要更长案例时再加载。",
     injectPolicy: "always",
     defaultPhases: [],
     primaryResource: `${VENDOR}/skills/human.md`,
@@ -65,7 +62,7 @@ export const PLATFORM_SKILLS: readonly SkillDefinition[] = Object.freeze([
   {
     id: "webnovel-emotion",
     name: "情绪演出",
-    summary: "喊情绪不演、缺身体反应时用；查情绪→外显对照。",
+    summary: "已并入《去 AI 味与写作声音》系统提示词；需要专项对照表时再加载。",
     injectPolicy: "always",
     defaultPhases: [],
     primaryResource: `${VENDOR}/skills/emotion.md`,

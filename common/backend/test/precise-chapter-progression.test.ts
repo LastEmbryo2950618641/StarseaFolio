@@ -35,7 +35,13 @@ function composeText(input: Readonly<{ synopsis?: string; outline?: string; draf
 
 const composeAll = composeText({ synopsis: composeSynopsis, outline: composeOutline, draft: composeDraft })
 
-type DiscussCall = Readonly<{ chapterSequence: number; prompt: string; context: string }>
+type DiscussCall = Readonly<{
+  chapterSequence: number
+  prompt: string
+  context: string
+  authorMessage: string | null | undefined
+}>
+type PhaseCall = Readonly<{ phase: string; prompt: string }>
 
 /**
  * Scripted synopsis_discuss model. Non-discuss phases delegate to the deterministic fake so
@@ -45,6 +51,7 @@ function createPreciseModel(input: Readonly<{
   classifier?: (message: string) => DiscussTurnWriteScope
   classifyCalls?: string[]
   discussCalls?: DiscussCall[]
+  phaseCalls?: PhaseCall[]
   reply?: (call: DiscussCall) => string | undefined
 }>): AIModelPort {
   const delegate = new FakeAiModelAdapter(randomUUID)
@@ -60,12 +67,16 @@ function createPreciseModel(input: Readonly<{
       },
     }),
     async execute(request, options) {
-      if (request.phase !== "synopsis_discuss") return delegate.execute(request, options)
+      if (request.phase !== "synopsis_discuss") {
+        input.phaseCalls?.push({ phase: request.phase, prompt: options?.phasePrompt?.text ?? "" })
+        return delegate.execute(request, options)
+      }
       const discuss = (request.input as TurnPhaseInput).synopsisDiscuss
       const call = {
         chapterSequence: discuss?.chapterSequence ?? 1,
         prompt: options?.phasePrompt?.text ?? "",
         context: (options?.contextMessages ?? []).map((message) => message.content).join("\n"),
+        authorMessage: options?.authorMessage,
       }
       input.discussCalls?.push(call)
       synopsisConversationStreamHub.setTodos(request.projectId, [
@@ -182,6 +193,13 @@ describe("precise chapter progression", () => {
       expect(sent.autoContinue).toBeUndefined()
       // The synthetic Start label must not erase the new chapter requirements typed before it.
       expect(discussCalls).toHaveLength(2)
+      expect(discussCalls[0]?.authorMessage).toBe(requirements)
+      // 讨论底稿始终是完整讨论文档，本身含构思协议；开始构思那一轮再追加构思阶段提示。
+      expect(discussCalls[0]?.prompt).toContain("创作台构思的回复协议")
+      expect(discussCalls[0]?.prompt).not.toContain("先用当前卷的信息")
+      // 点「开始构思」也是用户消息：作者原文照常连同消息前后进入上下文。
+      expect(discussCalls[1]?.authorMessage).toBe("开始构思")
+      expect(discussCalls[1]?.prompt).toContain("完整构思默认一次交齐")
       expect(discussCalls[1]?.context).toContain("开始构思前的本章要求")
       expect(discussCalls[1]?.context).toContain(requirements)
 
@@ -364,9 +382,11 @@ describe("precise chapter progression", () => {
 
   it("binds publish to the current version, rejects legacy publish in precise mode, and focuses next without writing", async () => {
     const discussCalls: DiscussCall[] = []
+    const phaseCalls: PhaseCall[] = []
     let replies = 0
     const model = createPreciseModel({
       discussCalls,
+      phaseCalls,
       reply: () => {
         replies += 1
         return replies === 1 ? composeAll : "第二章先对齐要求：主角下车后沿线索追查。"
@@ -399,7 +419,16 @@ describe("precise chapter progression", () => {
       expect(published.session.draftVersionId).toBeUndefined()
       expect((await invoke<unknown[]>(harness, "chapter.list", {})).length).toBe(1)
       // Focus moved but the next chapter was not composed and starts with chapter requirements.
-      expect(discussCalls).toHaveLength(discussCallsBeforePublish)
+      expect(discussCalls).toHaveLength(discussCallsBeforePublish + 1)
+      expect(discussCalls.at(-1)?.chapterSequence).toBe(2)
+      expect(discussCalls.at(-1)?.authorMessage).toBeNull()
+      expect(discussCalls.at(-1)?.prompt).toContain("先用当前卷的信息")
+      expect(discussCalls.at(-1)?.prompt).toContain("主线和支线")
+      expect(discussCalls.at(-1)?.prompt).not.toContain("完整构思默认一次交齐")
+      expect(phaseCalls.length).toBeGreaterThan(1)
+      for (const call of phaseCalls) {
+        expect(call.prompt, call.phase).toContain("以作者确认发布的当前章草稿版本为准")
+      }
       expect(published.proceedProgress).toEqual({ stage: "chapter_requirements", status: "waiting" })
       const assistant = published.messages.filter((message) => message.role === "assistant").at(-1)
       expect(assistant?.content).toContain("已将讨论焦点移到第2章")
@@ -413,6 +442,9 @@ describe("precise chapter progression", () => {
 
       // After the user discusses the new chapter requirements, the assistant result offers Start.
       const discussed = await send(harness, { message: "第二章要写他下车后沿线索追查", proceedMode: "precise" })
+      expect(discussCalls.at(-1)?.authorMessage).toBe("第二章要写他下车后沿线索追查")
+      // 新章阶段提示已在上一次代码发起的阶段入口写入链里；讨论链只追加，这里仍能在上下文里看到。
+      expect(discussCalls.at(-1)?.context).toContain("先用当前卷的信息")
       expect(discussed.proceedProgress?.stage).toBe("chapter_requirements")
       const discussedAssistant = discussed.messages.filter((message) => message.role === "assistant").at(-1)
       expect(discussedAssistant?.choices?.map((choice) => choice.action)).toEqual(["start_compose", "discuss_only"])

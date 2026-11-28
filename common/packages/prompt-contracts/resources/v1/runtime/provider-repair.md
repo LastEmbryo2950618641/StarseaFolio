@@ -12,6 +12,14 @@ The previous response was a fiction-delivery failure. 按《内容处理规则�
 
 The previous response was truncated or syntactically incomplete. Regenerate the complete object from the original request; do not continue or echo the partial response.
 
+## missing-phase-artifact
+
+上一轮缺少本阶段必需的 `artifact`（当前阶段：{{phase}}）。请整份重生成完整 JSON：`outcome` 不得为 request_read（除非真的缺少 envelope 内未提供的证据），且必须带上该阶段要求的全部 artifact 字段。不要只返回读取请求或空对象。
+
+## revision-review-no-reads
+
+revision_review 阶段禁止 request_read。旧正文与新正文已在请求 envelope 的 `revision.baseContent` / `revision.proposedContent` 中提供。请直接输出含 `issues`、`recommendation`、`finalSelfReview` 的 artifact，recommendation 取 `no_issue` | `review_suggested` | `material_conflict`。
+
 ## exclusive-tool-request
 
 上一轮非法：toolRequest 不能与章节写入/草稿/choices/focusChange 等同回。本轮二选一——只 toolRequest（另加 assistantMessage+finalSelfReview），或去掉 toolRequest 只交付产物。不要复述上一份无效 JSON。

@@ -101,7 +101,14 @@ export class FakeAiModelAdapter implements AIModelPort {
     }
     const inputTokens = estimateTokens(request)
     const outputTokens = estimateTokens(result)
-    const modelRequest = this.contextAppender.createDelta(request, request, options?.contextMessages ?? [])
+    const modelRequest = this.contextAppender.createDelta(request, request, options?.contextMessages ?? [], options?.authorMessage ?? undefined)
+    const authorTurn = options?.authorMessage === undefined || options.authorMessage === null || options.authorMessage.length === 0
+      ? []
+      : [
+          { role: "user" as const, kind: "author_bracket" as const, content: "【作者消息前】" },
+          { role: "user" as const, kind: "author_message" as const, content: options.authorMessage },
+          { role: "user" as const, kind: "author_bracket" as const, content: "【作者消息后】" },
+        ]
     return Promise.resolve({
       result,
       contextExchange: {
@@ -112,7 +119,14 @@ export class FakeAiModelAdapter implements AIModelPort {
           turnId: request.turnId,
           phase: request.phase,
           content: this.contextAppender.formatDelta(modelRequest),
-        }],
+        },
+        ...authorTurn.map((message) => ({
+          ...message,
+          taskId: request.taskId,
+          turnId: request.turnId,
+          phase: request.phase,
+        })),
+        ],
         responseMessage: {
           role: "assistant",
           kind: "phase_response",

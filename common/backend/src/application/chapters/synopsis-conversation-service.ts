@@ -54,8 +54,6 @@ import {
   contextTokensAfterProviderUsage,
   executeWithContextCompaction,
   filterNovelContextExchangeMessages,
-  findEphemeralDiscussContextMessageIds,
-  findExactDuplicateStaticMessageIds,
 } from "../context/index.js"
 import {
   assembleSynopsisPlaceholderDocument,
@@ -148,7 +146,6 @@ import {
   DISCUSS_ARCHIVE_NOTICE,
   DISCUSS_PROGRESS_PROTOCOL,
   DISCUSS_STEP_FAILURE_PROTOCOL,
-  findInvalidDiscussGateMessageIds,
   measureDiscussProgress,
   readDiscussStepFailures,
   selectActiveDiscussRoutingMessages,
@@ -619,15 +616,6 @@ export class SynopsisConversationService {
       }
     }
     let messages = [...await this.dependencies.conversation.listDiscussContextMessages(session.sessionId)]
-    const duplicateStaticIds = findExactDuplicateStaticMessageIds(messages)
-    if (duplicateStaticIds.length > 0) {
-      await this.dependencies.conversation.hideDiscussContextMessages(
-        session.sessionId,
-        duplicateStaticIds,
-        this.dependencies.now(),
-      )
-      messages = messages.filter((message) => !duplicateStaticIds.includes(message.messageId))
-    }
     const usage = await this.hydrateDiscussUsage(input.projectId)
     const breakdown = buildContextUsageBreakdown({
       messages,
@@ -985,8 +973,7 @@ export class SynopsisConversationService {
           outlineReady: outlineReadyAtStart,
         })
       }
-      // 精准模式在首个完整草稿出现前完全跳过 classifier：普通文本按只读讨论处理，
-      // 避免 router 的 JSON/契约故障挡住「开始构思」按钮；有可发布草稿后才允许分类修订。
+      // Legacy drafts with missing planning must be recovered through the complete composition gate.
       const preciseExistingDraft = preciseMode
         ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence)
         : undefined
@@ -1001,15 +988,18 @@ export class SynopsisConversationService {
         })
       }
       const preciseFirstCompleteDraft = precisePlanningRecovery ? undefined : preciseExistingDraft
-      if (preciseMode && preciseHostAction === undefined
-        && (preciseFirstCompleteDraft === undefined || input.model.classifyDiscussTurn === undefined)) {
-        writeScope = {}
-      }
-      if (workStyleGateReadyAtStart && volumePlanningGateWasReady && input.setupAnswerTo === undefined
+      // 首稿出现前不交给分类器决定是否落笔。宿主直接给出「开始构思 / 仅讨论」，
+      // 只有用户点「开始构思」才进入构思阶段。已有草稿后才用模型理解发布或阶段内修订。
+      const preciseAwaitingFirstComposition = preciseMode
+        && preciseHostAction === undefined
+        && preciseFirstCompleteDraft === undefined
+      if (!preciseAwaitingFirstComposition
+        && workStyleGateReadyAtStart && volumePlanningGateWasReady && input.setupAnswerTo === undefined
         && automationStep === undefined && preciseHostAction === undefined
-        && (!preciseMode || preciseFirstCompleteDraft !== undefined)
         && input.model.classifyDiscussTurn !== undefined) {
-        const candidate = canPublish ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence) : undefined
+        const candidate = preciseMode ? preciseFirstCompleteDraft
+          : canPublish ? await this.findPublishableFocusDraft(input.projectId, session.chapterSequence) : undefined
+        let confirmCompose = false
         const signals = [
           ...(input.signal === undefined ? [] : [input.signal]),
           ...(input.deadlineMs === undefined ? [] : [AbortSignal.timeout(Math.max(1, input.deadlineMs - (this.dependencies.now() - routeStartedAt)))]),
@@ -1027,6 +1017,7 @@ export class SynopsisConversationService {
           outlineReady: outlineReadyAtStart,
           proceedMode,
           chapterAutomation: batchAutomation,
+          ...(preciseMode ? { requireComposeConfirmation: true as const } : {}),
           ...(input.maxModelCalls === undefined ? {} : { maxModelCalls: Math.max(1, input.maxModelCalls - 1) }),
           ...(candidate === undefined ? {} : { publishableDraftLabel: candidate.draftLabel }),
           ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }),
@@ -1042,16 +1033,14 @@ export class SynopsisConversationService {
         if (parsedScope.success) {
           const routed = parsedScope.data
           if (preciseMode) {
-            // 精准模式普通文本只能在本阶段内修订已有材料：不得用 classifier 启动
-            // 缺失的梗概/细纲/草稿，也不得 advance、publish 或换焦点。
-            writeScope = restrictPreciseInStageScope(routed, {
-              synopsisReady,
-              outlineReady: outlineReadyAtStart,
-              // A publishable draft proves the compose stage completed even when the session
-              // pointer was reset by a focus change.
-              draftReady: preciseFirstCompleteDraft !== undefined
-                || (session.draftVersionId !== undefined && session.draftContentState !== "empty"),
-            })
+            // Older classifiers used the write scopes instead of startCompose. Treat a
+            // complete composition, or a write to start missing composition, as an offer only.
+            const draftReady = preciseFirstCompleteDraft !== undefined
+              || (session.draftVersionId !== undefined && session.draftContentState !== "empty")
+            const olderComposeRoute = (routed.synopsis !== undefined && routed.outline !== undefined && routed.draft === "write")
+              || (!draftReady && (routed.synopsis !== undefined || routed.outline !== undefined || routed.draft === "write"))
+            confirmCompose = agentMode !== "plan" && (routed.startCompose === true || olderComposeRoute)
+            writeScope = confirmCompose ? {} : restrictPreciseInStageScope(routed, { synopsisReady, outlineReady: outlineReadyAtStart, draftReady })
           // A chapter synopsis write starts a complete composition. The router from
           // older prompt libraries may still authorize just the first artifact.
           } else if (routed.synopsis !== undefined && Object.keys(routed).every((key) =>
@@ -1083,6 +1072,15 @@ export class SynopsisConversationService {
         if (cumulativeUsage !== undefined) {
           await this.dependencies.conversation.saveDiscussUsage({
             projectId: input.projectId, usage: cumulativeUsage, updatedAtMs: this.dependencies.now(),
+          })
+        }
+        if (confirmCompose) {
+          return await this.runPreciseDiscussOnly({
+            projectId: input.projectId,
+            workspaceRootRef: input.workspaceRootRef,
+            session,
+            message: input.message,
+            confirmCompose: true,
           })
         }
         if (writeScope !== undefined && writeScope.publish === true && Object.keys(writeScope).length === 1 && canPublish) {
@@ -1231,6 +1229,7 @@ export class SynopsisConversationService {
         userEditedOutlineSinceAgent,
         synopsisConfirmed,
         ...(startComposeRequirements.length === 0 ? {} : { startComposeRequirements }),
+        ...(preciseHostAction === "start_compose" ? { businessStage: "compose" as const } : {}),
         ...(batchAutomation ? { batchAutomation: true } : {}),
         // Allows mid-chapter continueTurn / skip choice gate for single & partial custom.
         ...((batchProceed || withinChapterAuto) ? { batchProceed: true } : {}),
@@ -2538,11 +2537,6 @@ export class SynopsisConversationService {
             consecutiveNoProgressTurns: progress.consecutiveNoProgressTurns,
           }) }],
         })
-        if (progress.obsoleteMessageIds.length > 0) {
-          await this.dependencies.conversation.hideDiscussContextMessages(
-            session.sessionId, progress.obsoleteMessageIds, this.dependencies.now(),
-          )
-        }
         if (progressExhausted) {
           throw new SynopsisInvalidStateError(
             `当前步骤连续 ${String(noProgressGuardLimit)} 次没有实际内容进展，已停止自动推进。已有内容和待办已保留，请检查阻塞原因。`,
@@ -3251,6 +3245,10 @@ export class SynopsisConversationService {
     composeText?: boolean
     refreshChoicesOnly?: boolean
     volumeBoundary?: VolumeBoundaryAction
+    /** Host-owned stage entry. Ordinary user turns do not carry a business-stage document. */
+    businessStage?: "new-chapter" | "compose"
+    /** Exact author text. Null for host actions, including stage-entry prompts and button labels. */
+    authorMessage?: string | null
     /** Requirements the user typed before pressing「开始构思」; ephemeral model history. */
     startComposeRequirements?: readonly string[]
   }>): Promise<Readonly<{
@@ -3315,11 +3313,24 @@ export class SynopsisConversationService {
     }>> {
     const currentWorkDisplayName = await this.dependencies.readDisplayName?.()
     const currentWorkDescription = await this.dependencies.readWorkDescription?.()
-    const basePhasePrompt = await this.dependencies.prompts.loadPhase("synopsis_discuss")
-    // 写草稿动作：显式 draft=write，或“无 writeScope/允许推进且已有细纲”的既有条件。
-    // 同一条件既决定 outline-to-draft 指南，也决定 deslop/dialogue 阶段 skill。
+    // 讨论底稿始终是正式讨论阶段提示：新章进入用新章文档，其余一律带完整讨论规则。
+    // 构思提示作为追加内容进入，不替换底稿，避免普通讨论丢失既有约束。
+    const discussionPrompt = await this.dependencies.prompts.loadComposePrompt?.()
+    const basePhasePrompt = input.businessStage === "new-chapter"
+      ? await this.dependencies.prompts.loadNewChapterDiscussion?.() ?? discussionPrompt ?? await this.dependencies.prompts.loadPhase("synopsis_discuss")
+      : discussionPrompt ?? await this.dependencies.prompts.loadPhase("synopsis_discuss")
+    // 用户发出的任何消息（含「开始构思」按钮绑定的那条）都要连同消息前后两份 Markdown 进入上下文；
+    // 只有代码自己发起的交接/阶段入口没有作者原文。历史只追加，缩短只发生在折叠。
+    const authorMessage = input.authorMessage !== undefined
+      ? input.authorMessage
+      : input.discussTrigger === "turn_handoff"
+        ? null
+        : input.userMessage
+    // 写草稿动作：显式 draft=write，或「无 writeScope/允许推进且已有细纲」的既有条件。
+    // 讨论链只追加，所以指南一旦注入就留在链里，后续轮次仍可见。
     const shouldAttachDraftGuide = input.writeScope?.draft === "write"
-      || ((input.writeScope === undefined || input.writeScope.advance === true) && hasPlanningContent(input.outlineMarkdown, false))
+      || ((input.writeScope === undefined || input.writeScope.advance === true)
+        && hasPlanningContent(input.outlineMarkdown, false))
     // 阶段 skill 只作用于本次请求：拼进 phasePrompt，不写进持久 discuss context，
     // 避免每轮把整包 skill 重新落库、把缓存和上下文一起撑大。
     const stageSkillResources = await Promise.all(resolveDiscussStageSkillIds({
@@ -3369,7 +3380,9 @@ export class SynopsisConversationService {
           digest: digest(`${basePhasePrompt.text}\n\n${appendix.join("\n\n")}`),
         }
     const systemRules = await this.dependencies.prompts.loadSynopsisDiscussSystemRules()
-    const defaultSkillPack = await this.dependencies.prompts.loadDefaultSkillPack("synopsis_discuss")
+    const defaultSkillPack = input.businessStage === "new-chapter"
+      ? undefined
+      : await this.dependencies.prompts.loadDefaultSkillPack("synopsis_discuss")
     let discussionDraftGuide: Readonly<{ text: string }> | undefined
     let outlineToDraftGuideLoaded = false
     const turnMonitor = this.dependencies.readTurnMonitor === undefined
@@ -3517,8 +3530,9 @@ export class SynopsisConversationService {
       message.kind === "phase_instruction" && message.role === "system"
       && message.content?.startsWith("【skill-pack:synopsis_discuss】") === true
     ))
-    const currentSkillPack = cachedSkillPacks.find((message) => message.content === defaultSkillPack.text)
-    const currentDraftGuide = cachedDraftGuides.find((message) => message.content === currentDraftResource?.text)
+    void cachedSkillPacks
+    // 讨论区只有一条链：历史只追加、不删除。阶段提示、技能包和写草稿指南只在内容变化时
+    // 追加一次：同文重复不重写也不丢历史，只有压缩会缩短上下文。
     if (storedContext.length === 0) {
       await this.dependencies.conversation.appendDiscussContextMessages({
         sessionId: input.sessionId,
@@ -3530,54 +3544,37 @@ export class SynopsisConversationService {
             kind: "system_rules",
             content: systemRules.text,
           },
-          {
-            role: "system",
-            kind: "phase_instruction",
-            content: defaultSkillPack.text,
-          },
         ],
       })
       storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
-    } else {
-      const duplicateStaticIds = [
-        ...findEphemeralDiscussContextMessageIds(storedContext),
-        ...findExactDuplicateStaticMessageIds(storedContext),
-        ...findInvalidDiscussGateMessageIds(storedContext),
-        ...cachedSkillPacks.filter((message) => message.messageId !== currentSkillPack?.messageId).map((message) => message.messageId),
-        ...cachedDraftGuides.filter((message) => message.messageId !== currentDraftGuide?.messageId).map((message) => message.messageId),
-      ]
-      if (duplicateStaticIds.length > 0) {
-        const hiddenIds = [...new Set(duplicateStaticIds)]
-        await this.dependencies.conversation.hideDiscussContextMessages(
-          input.sessionId,
-          hiddenIds,
-          nowMs,
-        )
-        storedContext = storedContext.filter((message) => !hiddenIds.includes(message.messageId))
-        runtimeLog("info", "synopsis-conversation", "context.static_duplicates_hidden", {
-          projectId: input.projectId,
-          sessionId: input.sessionId,
-          hiddenCount: hiddenIds.length,
-        })
-      }
-      const hasSkillPack = storedContext.some((message) => message.content === defaultSkillPack.text)
-      if (!hasSkillPack) {
-        await this.dependencies.conversation.appendDiscussContextMessages({
-          sessionId: input.sessionId,
-          projectId: input.projectId,
-          createdAtMs: nowMs,
-          messages: [{
-            role: "system",
-            kind: "phase_instruction",
-            content: defaultSkillPack.text,
-          }],
-        })
-        storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
-        runtimeLog("info", "synopsis-conversation", "context.default_skill_pack_appended", {
-          projectId: input.projectId,
-          sessionId: input.sessionId,
-        })
-      }
+    }
+    // 本轮新增的阶段提示、技能包和写草稿指南只在内容变化时追加进链，后续轮次仍可见。
+    const stageAttachments: { role: "system"; kind: "phase_instruction"; content: string }[] = []
+    const attachStage = async (content: string | undefined): Promise<void> => {
+      if (content === undefined || content.trim().length === 0) return
+      stageAttachments.push({ role: "system", kind: "phase_instruction", content })
+    }
+    await attachStage(basePhasePrompt.text)
+    if (defaultSkillPack !== undefined) await attachStage(defaultSkillPack.text)
+    if (shouldAttachDraftGuide && discussionDraftGuide !== undefined) {
+      await attachStage(draftGuideHostNotice)
+      await attachStage(discussionDraftGuide.text)
+    }
+    const persistableStageTexts = stageAttachments
+      .map((message) => message.content)
+      .filter((content) => !storedContext.some((message) => message.content === content))
+    if (persistableStageTexts.length > 0) {
+      await this.dependencies.conversation.appendDiscussContextMessages({
+        sessionId: input.sessionId,
+        projectId: input.projectId,
+        createdAtMs: this.dependencies.now(),
+        messages: persistableStageTexts.map((content) => ({
+          role: "system" as const,
+          kind: "phase_instruction" as const,
+          content,
+        })),
+      })
+      storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
     }
     const skipBootstrap = storedDigests.bootstrap === bootstrapDigest
     let readEvidence: TurnReadEvidence[] = skipBootstrap
@@ -3735,20 +3732,6 @@ export class SynopsisConversationService {
         }],
       })
       storedContext = [...await this.dependencies.conversation.listDiscussContextMessages(input.sessionId)]
-      const gateMessages = storedContext.filter((message) => {
-        if (message.kind !== "phase_instruction" || message.content === undefined) return false
-        try {
-          return (JSON.parse(message.content) as { protocol?: unknown }).protocol === "discuss-gate-v1"
-        } catch {
-          return false
-        }
-      })
-      const overflow = gateMessages.slice(0, Math.max(0, gateMessages.length - 12))
-      if (overflow.length === 0) return
-      const hiddenIds = overflow.map((message) => message.messageId)
-      await this.dependencies.conversation.hideDiscussContextMessages(input.sessionId, hiddenIds, this.dependencies.now())
-      const hidden = new Set(hiddenIds)
-      storedContext = storedContext.filter((message) => !hidden.has(message.messageId))
     }
     const releaseHeldWrites = async (reason: string): Promise<void> => {
       if (pendingWrites === undefined) return
@@ -4002,28 +3985,18 @@ export class SynopsisConversationService {
         message.kind === "phase_instruction"
         && message.content?.includes(`"protocol":"${CONTEXT_FOLD_SUMMARY_PROTOCOL}"`) === true
       )).length
+      const visibleContext = toVisibleDiscussContextMessages(storedContext)
+      const fixedRules = visibleContext.find((message) => message.kind === "system_rules" && message.content === systemRules.text)
       const contextMessages = [
-        ...toVisibleDiscussContextMessages(storedContext).filter((message) => (
-          outlineToDraftGuideLoaded || message.messageId !== currentDraftGuide?.messageId
-        )),
-        ...(discussionDraftGuide === undefined || !outlineToDraftGuideLoaded
-          ? []
-          : [{
-              messageId: this.dependencies.createId(),
-              sequence: storedContext.length,
-              role: "system" as const,
-              kind: "phase_instruction" as const,
-              content: draftGuideHostNotice,
-            }]),
-        ...(discussionDraftGuide === undefined || storedContext.some((message) => message.content === discussionDraftGuide?.text)
-          ? []
-          : [{
-              messageId: this.dependencies.createId(),
-              sequence: storedContext.length,
-              role: "system" as const,
-              kind: "phase_instruction" as const,
-              content: discussionDraftGuide.text,
-            }]),
+        fixedRules ?? {
+          messageId: this.dependencies.createId(),
+          sequence: 0,
+          role: "system" as const,
+          kind: "system_rules" as const,
+          content: systemRules.text,
+        },
+        ...visibleContext.filter((message) => message.messageId !== fixedRules?.messageId),
+        // 阶段提示、技能包与写草稿指南已写入链，这里不再重复拼装。
         {
           messageId: this.dependencies.createId(),
           sequence: storedContext.length,
@@ -4072,7 +4045,7 @@ export class SynopsisConversationService {
               messageId: this.dependencies.createId(),
               sequence: storedContext.length,
               role: "system" as const,
-              kind: "system_rules" as const,
+              kind: "phase_instruction" as const,
               content: carriedTodoNotice,
             }]),
         ...(attempt > 0 || readEvidence.length > 0
@@ -4080,7 +4053,7 @@ export class SynopsisConversationService {
               messageId: this.dependencies.createId(),
               sequence: storedContext.length,
               role: "system" as const,
-              kind: "system_rules" as const,
+              kind: "phase_instruction" as const,
               content: [
                 renderRuntimePrompt("discuss-messages", "react-reminder", { evidenceCount: readEvidence.length }),
                 ...activeRepairHints.slice(-2),
@@ -4158,6 +4131,7 @@ export class SynopsisConversationService {
           },
           createMessageId: () => this.dependencies.createId(),
           options: {
+            authorMessage,
             phasePrompt: (() => {
                if (input.volumeBoundary !== undefined) {
                  const action = input.volumeBoundary
@@ -4211,12 +4185,12 @@ export class SynopsisConversationService {
               const headings = { synopsis: "梗概", outline: "细纲", draft: "草稿" } as const
               const protocol = sections.length === 0
                 ? "用普通文本回复讨论。需要资料时调用原生读取工具；需要 Todo、正文推演等工具时，只输出 <tool-request> 文本块（name、action，invoke 时再加一行 arguments 单行 JSON），不要自造其他标签。"
-                : [sections.length === 3 ? "本轮执行完整构思，一次生成并交齐梗概、细纲和草稿。即使当前文件缺少梗概或细纲，也直接用本次回复中的前置产物完成后两段。宿主校验三段后按顺序写入。生成期间不要声称已保存或已发布。" : "本轮仅可交付下列获准产物。",
+                : [sections.length === 3 ? "本轮执行完整构思，一次生成并交齐梗概、细纲和草稿。即使当前文件缺少梗概或细纲，也直接用本次回复中的前置产物完成后两段。宿主校验三段后按顺序写入。生成期间不要声称已保存或已发布。用户已点「开始构思」，本轮禁止再提新的确认问题、禁止改用选项征询，也不要仅输出讨论或计划；缺失的人物、场景细节按已有材料自行合理推定，并把推定写进梗概与细纲。" : "本轮仅可交付下列获准产物。",
                     "需要资料时先调用原生读取工具；需要 Todo 等非读取工具时，另起一个 <tool-request> 块（name、action，invoke 时加一行 arguments 单行 JSON），工具请求不能与下列构思写入同回。资料齐全后，在同一回复中按下列顺序交付完整 Markdown。",
                     ...sections.map((section) => `<compose-${section}>\n${headings[section]}\n</compose-${section}>`),
                   ].join("\n")
               const phaseGuidance = phasePrompt.text.replace(/^输出 JSON：顶层含[^\n]*\n?/mu, "").trimEnd()
-              const text = `【本轮讨论输出协议】\n${protocol}\n如需根据用户要求更新作品名或简介，在构思段外分别使用 <work-title>...</work-title> 或 <work-description>...</work-description>。如需提供备选方向，可在构思段外用 <creative-choices> 和 </creative-choices> 包住至少两个选项，每行以 - 开头。如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。不要输出 JSON 响应封套。下文的旧输出字段名只说明篇章内容或工作流程，以本段输出格式为准。\n\n${phaseGuidance}`
+              const text = `【本轮讨论输出协议】\n${protocol}\n如需根据用户要求更新作品名或简介，在构思段外分别使用 <work-title>...</work-title> 或 <work-description>...</work-description>。如需提供备选方向，可在构思段外用 <creative-choices> 和 </creative-choices> 包住至少两个选项，每行以 - 开头。如需本轮结束后自动继续下一轮，另起一行写 <continue-turn/>。不要输出 JSON 响应封套。下文的旧输出字段名只说明篇章内容或工作流程，以本段输出格式为准。构思标签只能出现一次且必须按梗概→细纲→草稿顺序：禁止在正文、代码围栏、举例、说明或自检中重复这些标签，也禁止把标签写进 Markdown 标题；标签块之外的文字会被当作正文说明。\n\n${phaseGuidance}`
               return { ...phasePrompt, text, digest: digest(text) }
             })(),
             outputMode: "text",
@@ -4461,23 +4435,11 @@ export class SynopsisConversationService {
       )
       if (measuredContextTokens !== undefined) lastRequestInputTokens = measuredContextTokens
       if (execution.contextExchange !== undefined) {
-        const duplicateStaticIds = [
-          ...findEphemeralDiscussContextMessageIds(storedContext),
-          ...findExactDuplicateStaticMessageIds(storedContext),
-        ]
-        if (duplicateStaticIds.length > 0) {
-          const hiddenIds = [...new Set(duplicateStaticIds)]
-          await this.dependencies.conversation.hideDiscussContextMessages(
-            input.sessionId,
-            hiddenIds,
-            this.dependencies.now(),
-          )
-          storedContext = storedContext.filter((message) => !hiddenIds.includes(message.messageId))
-        }
+        // 讨论链只追加：重复的同文提示也保留，只有压缩能缩短历史。
         const exchangeMessages = filterNovelContextExchangeMessages(storedContext, [
           ...execution.contextExchange.requestMessages,
           execution.contextExchange.responseMessage,
-        ]).filter((message) => (message.content ?? "").trim().length > 0)
+        ], { appendOnly: true }).filter((message) => (message.content ?? "").trim().length > 0)
         if (exchangeMessages.length > 0) {
           await this.dependencies.conversation.appendDiscussContextMessages({
             sessionId: input.sessionId,
@@ -6552,6 +6514,8 @@ export class SynopsisConversationService {
     session: Awaited<ReturnType<SynopsisConversationService["ensureActiveSession"]>>
     message: string
     recovery?: boolean
+    /** 分类器判定用户想要开始构思：不写入，只给出「开始构思 / 仅讨论」按钮。 */
+    confirmCompose?: boolean
   }>): Promise<SynopsisConversationSendResult> {
     const nowMs = this.dependencies.now()
     await this.dependencies.conversation.appendMessage({
@@ -6566,9 +6530,11 @@ export class SynopsisConversationService {
     const publishableDraft = planningReady
       ? await this.findPublishableFocusDraft(input.projectId, input.session.chapterSequence)
       : undefined
-    const content = input.recovery === true
-      ? "当前章有旧草稿，但梗概或细纲缺失。本轮要求已记录。请点「开始构思」，同一回复生成梗概、细纲和草稿。"
-      : "已进入仅讨论模式：本轮不会写入梗概、细纲或正文。直接输入你的想法即可；需要一次生成或重写「梗概+细纲+草稿」时，点「开始构思」，确认草稿后再点「发布正文」。"
+    const content = input.confirmCompose === true
+      ? "已收到本章要求。本轮不写入；点「开始构思」后在同一回复生成梗概、细纲和草稿，确认草稿后再点「发布正文」。"
+      : input.recovery === true
+        ? "当前章有旧草稿，但梗概或细纲缺失。本轮要求已记录。请点「开始构思」，同一回复生成梗概、细纲和草稿。"
+        : "已进入仅讨论模式：本轮不会写入梗概、细纲或正文。直接输入你的想法即可；需要一次生成或重写「梗概+细纲+草稿」时，点「开始构思」，确认草稿后再点「发布正文」。"
     await this.dependencies.conversation.appendMessage({
       messageId: this.dependencies.createId(),
       projectId: input.projectId,
@@ -6669,13 +6635,45 @@ export class SynopsisConversationService {
       } else if (done && input.focusNextChapter === true) {
         const nextSequence = input.session.chapterSequence + 1
         try {
-          await this.setFocus({
+          const focused = await this.setFocus({
             projectId: input.projectId,
             workspaceRootRef: input.workspaceRootRef,
             chapterSequence: nextSequence,
             focusKind: "plot_synopsis",
           })
-          content += `\n\n已将讨论焦点移到第${String(nextSequence)}章，并进入新章要求阶段：先讨论本章要写什么，AI 会在讨论后给出「开始构思」选项（本轮未写入下一章材料）。`
+          content += `\n\n已将讨论焦点移到第${String(nextSequence)}章，并进入新章要求阶段。`
+          const folder = extractVolumeFolderNameFromPath(focused.session.synopsisPath) ?? DEFAULT_VOLUME_FOLDER_NAME
+          const volumeState = await this.readVolumePlanningState(input.workspaceRootRef, folder)
+          const volumePlanning = await this.readVolumePlanningContext(input.workspaceRootRef, folder, volumeState)
+          const goals = await this.dependencies.goals.list(input.projectId)
+          const chapterRequirements = await this.runSynopsisDiscuss({
+            projectId: input.projectId,
+            workspaceRootRef: input.workspaceRootRef,
+            sessionId: focused.session.sessionId,
+            userMessage: `第${String(input.session.chapterSequence)}章已经入库，请进入第${String(nextSequence)}章的新章要求阶段。`,
+            heading: focused.session.title,
+            chapterSequence: nextSequence,
+            synopsisMarkdown: "",
+            outlineMarkdown: "",
+            userEditedSinceAgent: false,
+            userEditedOutlineSinceAgent: false,
+            activeGoals: selectGoalsForChapterContext(goals.goals, nextSequence),
+            chapterProgress: goals.progress.filter((item) => item.chapterSequence === nextSequence && item.status !== "superseded"),
+            hookScheduleAudit: await this.dependencies.goals.auditHookSchedules(input.projectId),
+            model: input.model,
+            proceedMode: "precise",
+            businessStage: "new-chapter",
+            authorMessage: null,
+            volumePlanning,
+            composeText: true,
+            writeScope: {},
+            allowWorkflowTools: false,
+            allowChapterWorkflowTools: false,
+            maxModelCalls: 2,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          })
+          content += `\n\n${chapterRequirements.content}`
+          await this.syncProceedProgressFromMaterials({ ...input, session: focused.session, proceedMode: "precise" })
         } catch (error) {
           content += `\n\n正文已发布；未能自动进入第${String(nextSequence)}章：${error instanceof Error ? error.message : String(error)}`
         }

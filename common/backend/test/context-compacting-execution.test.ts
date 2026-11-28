@@ -243,6 +243,7 @@ describe("AI fold context compaction", () => {
     const protectedIds = collectProtectedFoldMessageIds([
       message("rules-old", "system_rules", "old", 0, "rules-v1"),
       message("rules-new", "system_rules", "current", 5, "rules-v2"),
+      message("temporary-hint", "system_rules", "current", 6, "temporary hint"),
       foldOld,
       foldNew,
       history,
@@ -253,12 +254,13 @@ describe("AI fold context compaction", () => {
       message("late-res", "phase_response", "current", 9, "晚响应"),
     ], "current")
     expect([...protectedIds].sort()).toEqual([
-      "fold-new", "gate", "late-req", "late-res", "rules-new",
+      "fold-new", "gate", "late-req", "late-res", "rules-old", "temporary-hint",
     ].sort())
     expect(protectedIds.has("history")).toBe(false)
     expect(protectedIds.has("fold-old")).toBe(false)
     expect(protectedIds.has("early-req")).toBe(false)
-    expect(protectedIds.has("rules-old")).toBe(false)
+    expect(protectedIds.has("rules-new")).toBe(false)
+    expect(protectedIds.has("temporary-hint")).toBe(true)
   })
 
   it("folds before hard-blocking when protected-looking history still has foldable mass", async () => {

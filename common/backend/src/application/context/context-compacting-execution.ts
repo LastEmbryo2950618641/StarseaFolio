@@ -182,7 +182,7 @@ function isAlwaysProtectedProtocol(protocol: string): boolean {
 /**
  * True for messages that are protocol-locked regardless of turn.
  * Prefer {@link collectProtectedFoldMessageIds} for fold decisions — that also keeps only the
- * latest system_rules / fold-summary and the latest current-turn request/response.
+ * fixed system prefix, latest system_rules / fold-summary, and latest current-turn request/response.
  */
 export function isProtectedFoldMessage(message: VisibleModelContextMessage): boolean {
   if (message.kind === "system_rules") return true
@@ -208,6 +208,11 @@ export function collectProtectedFoldMessageIds(
     }
   }
 
+  // The canonical system prefix is persisted at sequence 0 and must survive every fold.
+  // Keep the latest system_rules as well for legacy chains that appended refreshed rules.
+  const fixedSystemPrefix = ordered.find((message) => message.kind === "system_rules" && message.sequence === 0)
+    ?? ordered.find((message) => message.kind === "system_rules")
+  if (fixedSystemPrefix !== undefined) protectedIds.add(fixedSystemPrefix.messageId)
   const latestSystemRules = [...ordered].reverse().find((message) => message.kind === "system_rules")
   if (latestSystemRules !== undefined) protectedIds.add(latestSystemRules.messageId)
 
@@ -341,6 +346,7 @@ export async function foldContextMessages(input: {
   currentTurnId: string
   windowTokens: number
   targetRatio: number
+  businessStage?: "ingestion"
   observedInputTokens?: number
   foldNotice?: string
   signal?: AbortSignal
@@ -385,6 +391,7 @@ export async function foldContextMessages(input: {
     }
     const compressed = await input.model.compressContext({
       texts,
+      ...(input.businessStage === undefined ? {} : { businessStage: input.businessStage }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     })
     const foldedIds = chunk.map((message) => message.messageId)
@@ -470,6 +477,7 @@ export async function executeWithContextCompaction(input: {
         model: input.model,
         messages,
         currentTurnId: input.request.turnId,
+        ...(asRecord(input.request.input).workflow === "revision" ? { businessStage: "ingestion" as const } : {}),
         windowTokens,
         targetRatio: input.targetRatio,
         ...(input.foldNotice === undefined ? {} : { foldNotice: input.foldNotice }),

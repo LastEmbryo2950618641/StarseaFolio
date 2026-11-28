@@ -50,6 +50,8 @@ export type ModelExecutionOptions = Readonly<{
   signal?: AbortSignal
   contextChainId?: string
   contextMessages?: readonly VisibleModelContextMessage[]
+  /** Exact current author text; null for host actions, chapter bodies and automatic handoffs. */
+  authorMessage?: string | null
   phasePrompt?: PromptResource
   /** When set, adapters should stream provider deltas when the protocol supports it. */
   onPartial?: (partial: ModelStreamPartial) => void
@@ -71,6 +73,8 @@ export type AIModelInfo = Readonly<{
 
 export type ContextCompressionInput = Readonly<{
   texts: readonly string[]
+  /** Keep the publish scope on auxiliary fold calls as well as on the resumed subphase. */
+  businessStage?: "ingestion"
   signal?: AbortSignal
 }>
 
@@ -88,6 +92,8 @@ export type DiscussTurnClassificationInput = Readonly<{
   outlineReady: boolean
   proceedMode: string
   chapterAutomation: boolean
+  /** The host must ask for confirmation before a full composition. */
+  requireComposeConfirmation?: true
   publishableDraftLabel?: string
   maxModelCalls?: number
   signal?: AbortSignal
@@ -118,6 +124,14 @@ export type LoadedSkillResource = PromptResource & Readonly<{
   includeReferences: boolean
 }>
 
+export type UserMessageBracketInput = Readonly<{
+  phase: AIPhase
+  workflow?: string
+  purpose?: "discuss_write_scope"
+}>
+
+export type UserMessageBrackets = Readonly<{ before?: string; after?: string }>
+
 export interface PromptResourcePort {
   loadBaseRules(): Promise<PromptResource>
   loadContentHandling(): Promise<PromptResource>
@@ -130,7 +144,11 @@ export interface PromptResourcePort {
   loadDiscussCreationDeskWorkflow(): Promise<PromptResource>
   loadTurnSystemRules(): Promise<PromptResource>
   loadSynopsisDiscussSystemRules(): Promise<PromptResource>
-  loadPhase(phase: AIPhase): Promise<PromptResource>
+  loadPhase(phase: AIPhase, stage?: "ingestion" | "compose"): Promise<PromptResource>
+  /** Editable business-stage instructions, selected by the host's action rather than the model subphase. */
+  loadNewChapterDiscussion?(): Promise<PromptResource>
+  loadComposePrompt?(): Promise<PromptResource>
+  loadChapterIngestion?(): Promise<PromptResource>
   /** Load one platform skill body (+ optional references). */
   loadSkill(skillId: string, options?: Readonly<{ includeReferences?: boolean }>): Promise<LoadedSkillResource>
   listSkills(): Promise<readonly Readonly<{
@@ -142,6 +160,10 @@ export interface PromptResourcePort {
   }>[]>
   /** Default skill pack for a phase (compressible; not sticky system_rules). */
   loadDefaultSkillPack(phase: AIPhase | "synopsis_discuss"): Promise<PromptResource>
+  /** @deprecated Provider requests use loadUserMessageBrackets for the active message. */
+  loadAfterUserMessageReminder?(): Promise<PromptResource>
+  /** Load the Markdown to place immediately before and after the active input on the provider wire. */
+  loadUserMessageBrackets?(input: UserMessageBracketInput): Promise<UserMessageBrackets>
 }
 
 export type TurnPhaseInput = Readonly<{

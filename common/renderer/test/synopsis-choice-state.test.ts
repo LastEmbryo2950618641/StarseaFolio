@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { SynopsisConversationChoice, SynopsisConversationMessage } from "@starseafolio/contracts"
 
 import {
-  choiceContribution, choiceIdentity, createChoiceComposer, formatChoiceStyle,
+  choiceContribution, choiceIdentity, createChoiceComposer, directSynopsisChoiceOptions, formatChoiceStyle,
   latestSetupQuestionId, loadChoiceVariant, persistChoiceVariant,
 } from "../src/features/editor/synopsis-choice-state.js"
 
@@ -11,6 +11,18 @@ const message: SynopsisConversationMessage = {
   role: "assistant", content: "请选择", createdAtMs: 1,
 }
 const choice: SynopsisConversationChoice = { label: "原始方向", action: "continue_discuss" }
+
+describe("host-issued confirmation buttons", () => {
+  it.each(["precise", "batch"] as const)("carries the bound action even if the UI is now in %s mode", (mode) => {
+    for (const action of ["start_compose", "discuss_only"] as const) {
+      expect(directSynopsisChoiceOptions({ label: "确认", action, chapterSequence: 3 }, mode)).toEqual({ preciseAction: action, chapterSequence: 3 })
+      expect(directSynopsisChoiceOptions({ label: "确认", action }, mode)).toBeUndefined()
+    }
+    expect(directSynopsisChoiceOptions({ label: "发布正文", action: "promote_draft_to_body", chapterSequence: 3, publishDraftVersionId: "draft-v2" }, mode))
+      .toEqual({ preciseAction: "publish", chapterSequence: 3, publishDraftVersionId: "draft-v2" })
+    expect(directSynopsisChoiceOptions({ label: "发布正文", action: "promote_draft_to_body", chapterSequence: 3 }, mode)).toBeUndefined()
+  })
+})
 
 describe("choice composer ownership", () => {
   it("toggles multiple choices without replacing typed text or another choice", () => {

@@ -141,11 +141,13 @@ describe("discussion authorizes and verifies current-turn writes", () => {
       execute(request, options) {
         if (!rewrite) return Promise.resolve(modelReply(request, {}))
         const pack = options?.contextMessages?.filter(item => item.content.startsWith("【skill-pack:synopsis_discuss】"))
-        expect(pack).toHaveLength(1)
+        // 历史只追加：旧的技能包仍留在链里，本轮最新一份必须是刷新后的基础包。
+        expect(pack?.length ?? 0).toBeGreaterThanOrEqual(1)
+        const latestPack = pack?.at(-1)?.content ?? ""
         // 刷新后的基础包只含 3 个共同 skill；梗概改写阶段 skill 只挂在本次 phasePrompt。
-        expect(pack?.[0]?.content).toContain("【skill:discuss-workflow】")
-        expect(pack?.[0]?.content).toContain("【skill:plot-synopsis】")
-        expect(pack?.[0]?.content).not.toContain("【skill:user-to-synopsis】")
+        expect(latestPack).toContain("【skill:discuss-workflow】")
+        expect(latestPack).toContain("【skill:plot-synopsis】")
+        expect(latestPack).not.toContain("【skill:user-to-synopsis】")
         expect(options?.phasePrompt?.text).toContain("【skill:user-to-synopsis】")
         expect(options?.phasePrompt?.text).toContain("通读并抽正典清单")
         expect(options?.phasePrompt?.text).toContain("【skill:synopsis-to-outline】")

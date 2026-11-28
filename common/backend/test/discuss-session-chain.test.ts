@@ -540,4 +540,56 @@ describe("discuss session chain", () => {
       await harness.container.close()
     }
   }, 20_000)
+
+  it("appends each author turn with its before/after markdown and never rewrites earlier ones", async () => {
+    const model = new RecordingFakeModel()
+    const harness = await openChapterHarness("Discuss Append Only", { model })
+    temporaryDirectories.push(harness.root)
+    try {
+      await invoke(harness, "synopsis.conversation.start", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+      })
+      await invoke(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "这一章从雨夜站台开始",
+      })
+      const afterFirst = model.calls.length
+      await invoke(harness, "synopsis.conversation.send", {
+        projectId: harness.projectId,
+        workspaceRootRef: harness.workspaceRootRef,
+        message: "把站台雨声再压一点",
+      })
+      const secondSend = model.calls.slice(afterFirst)
+      expect(secondSend.length).toBeGreaterThan(0)
+      // 第二轮请求里仍能找到第一轮的用户原文，说明历史只追加、没有被重写。
+      expect(secondSend[0]?.contextKinds).toContain("author_message")
+      const database = await openProjectDatabase(join(
+        harness.applicationDataRoot,
+        "projects",
+        harness.projectId,
+        "project.sqlite",
+      ))
+      try {
+        const session = await new SqliteSynopsisConversationRepository(database).findActiveSession(harness.projectId)
+        const stored = await new SqliteSynopsisConversationRepository(database)
+          .listDiscussContextMessages(session?.sessionId as string)
+        const authorMessages = stored.filter((message) => message.kind === "author_message")
+        expect(authorMessages.map((message) => message.content)).toEqual([
+          "这一章从雨夜站台开始",
+          "把站台雨声再压一点",
+        ])
+        // 第一轮注入的技能包与阶段提示仍在链里：只追加，不因下一轮而消失。
+        const firstTurnMessages = stored.filter((message) => message.kind === "phase_instruction"
+          && message.content?.startsWith("【skill-pack:synopsis_discuss】") === true)
+        expect(firstTurnMessages.length).toBeGreaterThanOrEqual(2)
+        expect(stored.filter((message) => message.kind === "author_bracket").length).toBeGreaterThan(0)
+      } finally {
+        await database.destroy()
+      }
+    } finally {
+      await harness.container.close()
+    }
+  }, 20_000)
 })

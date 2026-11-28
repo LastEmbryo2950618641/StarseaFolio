@@ -13,8 +13,10 @@ export function createGraphRevisionModel(
   onActivity: (activity: GraphRevisionModelActivity | undefined) => void,
   config: GraphRevisionModelConfig = {},
 ): AIModelPort {
-  const idleTimeoutMs = config.idleTimeoutMs ?? 120_000
-  const firstTokenTimeoutMs = config.firstTokenTimeoutMs ?? 300_000
+  // Graph-governance JSON is large on real proxies; keep generous first-token grace and
+  // a longer inter-chunk idle than discuss turns so slow prefill does not abort sync.
+  const idleTimeoutMs = config.idleTimeoutMs ?? 300_000
+  const firstTokenTimeoutMs = config.firstTokenTimeoutMs ?? 900_000
   const compressContext = model.compressContext?.bind(model)
   return {
     ...(model.info === undefined ? {} : { info: model.info }),

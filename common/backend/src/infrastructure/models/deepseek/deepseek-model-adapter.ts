@@ -30,7 +30,7 @@ import type {
   PhaseModelExecution,
   PromptResourcePort,
 } from "../../../application/index.js"
-import { ModelContextAppender } from "../../../application/index.js"
+import { ModelContextAppender, type UserMessageBrackets } from "../../../application/index.js"
 import { DISCUSS_PROVIDER_TOOLS } from "../../../application/chapters/discuss-provider-tools.js"
 import { renderRuntimePrompt } from "../../../core/runtime-prompt.js"
 import {
@@ -127,11 +127,14 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
     const body = input.texts.map((text, index) => (
       renderRuntimePrompt("provider-auxiliary", "compression-fragment", { index: index + 1, text })
     )).join("\n\n")
+    const [fixedRules, ingestion] = await Promise.all([
+      this.prompts.loadTurnSystemRules(),
+      input.businessStage === "ingestion" ? this.prompts.loadChapterIngestion?.() : undefined,
+    ])
     const messages: DeepSeekMessage[] = [
-      {
-        role: "system",
-        content: renderRuntimePrompt("provider-auxiliary", "compression-system"),
-      },
+      { role: "system", content: fixedRules.text },
+      ...(ingestion === undefined ? [] : [{ role: "user" as const, content: ingestion.text }]),
+      { role: "user", content: renderRuntimePrompt("provider-auxiliary", "compression-system") },
       {
         role: "user",
         content: renderRuntimePrompt("provider-auxiliary", "compression-request", { body }),
@@ -166,11 +169,17 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
   }
 
   public async classifyDiscussTurn(input: DiscussTurnClassificationInput): Promise<DiscussTurnClassification> {
-    const { signal, maxModelCalls = 2, ...context } = input
+    const { signal, maxModelCalls = 2, message, ...context } = input
     signal?.throwIfAborted()
     const client = await this.clientPromise
     const startedAt = Date.now()
     const instructions = renderRuntimePrompt("provider-auxiliary", "discuss-write-scope")
+    const brackets = message.trim().length === 0 ? undefined : await this.prompts.loadUserMessageBrackets?.({
+      phase: "synopsis_discuss",
+      purpose: "discuss_write_scope",
+    })
+    const fixedRules = await this.prompts.loadSynopsisDiscussSystemRules()
+    const userMessages = bracketUserMessage(message, brackets)
     const attempts = maxModelCalls >= 2 ? 2 : 1
     let inputTokens = 0
     let outputTokens = 0
@@ -181,8 +190,10 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       const response = await this.completeWithRetry(client, {
         model: this.config.model,
         messages: [
-          { role: "system", content: instructions + (attempt === 1 ? "" : "\n上一轮未返回完整的写入范围。只输出一个完整 JSON 对象，无写入授权时输出 {}。") },
+          { role: "system", content: fixedRules.text },
+          { role: "user", content: instructions + (attempt === 1 ? "" : "\n上一轮未返回完整的写入范围。只输出一个完整 JSON 对象，无写入授权时输出 {}。") },
           { role: "user", content: JSON.stringify(context) },
+          ...userMessages.map(({ role, content }) => ({ role, content })),
         ],
         thinking: { type: "disabled" },
         ...(this.config.jsonModeEnabled ? { responseFormat: { type: "json_object" as const } } : {}),
@@ -232,7 +243,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       deadlineRemainingMs: request.remainingBudget.deadlineAtMs - Date.now(),
     })
     const [baseRules, phasePrompt, client] = await Promise.all([
-      options?.contextMessages === undefined ? this.prompts.loadTurnSystemRules() : Promise.resolve(undefined),
+      request.phase === "synopsis_discuss" ? this.prompts.loadSynopsisDiscussSystemRules() : this.prompts.loadTurnSystemRules(),
       options?.phasePrompt === undefined
         ? this.prompts.loadPhase(request.phase)
         : Promise.resolve(options.phasePrompt),
@@ -243,66 +254,36 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
       version: PROTOCOL_VERSION,
       phase: request.phase,
     })
-    const modelRequest = this.contextAppender.createDelta(
-      request,
-      referenceView.request,
-      options?.contextMessages ?? [],
-    )
+    const input = asRecord(request.input)
+    const authorMessage = options?.authorMessage === undefined
+      ? (input.workflow === "revision" ? undefined : readString(input.userInput))
+      : options.authorMessage ?? undefined
+    const currentAuthor = authorMessage?.length ? authorMessage : undefined
+    const brackets = currentAuthor === undefined ? undefined : await this.prompts.loadUserMessageBrackets?.({
+      phase: request.phase,
+      ...(typeof input.workflow === "string" ? { workflow: input.workflow } : {}),
+    })
+    const modelRequest = this.contextAppender.createDelta(request, referenceView.request, options?.contextMessages ?? [], currentAuthor)
     const modelRequestText = this.contextAppender.formatDelta(modelRequest)
     const outputContractPrefix = textOutput ? undefined : buildOutputContractPrefix(request)
     const outputReminder = textOutput
       ? "按本轮阶段提示使用普通文本及指定标签。需要资料时，使用当前提供的原生读取工具。"
       : buildOutputReminder(request, referenceView)
-    const requestMessages: ModelContextMessageDraft[] = [
-      {
-        role: "user",
-        kind: "phase_request",
-        taskId: request.taskId,
-        turnId: request.turnId,
-        phase: request.phase,
-        content: modelRequestText,
-      },
-      {
-        role: "user",
-        kind: "phase_instruction",
-        taskId: request.taskId,
-        turnId: request.turnId,
-        phase: request.phase,
-        content: phasePrompt.text,
-      },
-      {
-        role: "user",
-        kind: "phase_protocol",
-        taskId: request.taskId,
-        turnId: request.turnId,
-        phase: request.phase,
-        content: protocolMessage,
-      },
-      {
-        role: "user",
-        kind: "phase_request",
-        taskId: request.taskId,
-        turnId: request.turnId,
-        phase: request.phase,
-        content: outputReminder,
-      },
-    ]
-    const inheritedMessages = options?.contextMessages === undefined
-      ? [{ role: "system" as const, content: baseRules?.text ?? "" }]
-      : normalizeContextMessages(options.contextMessages, request.phase, phasePrompt.text, textOutput)
-    // Keep only the locked leading system rules as prefix. Phase instruction,
-    // protocol, schema, and reminder stay at the request tail so adjacent phases
-    // share a byte-identical KV prefix through the inherited chain.
-    const leadingSystem = inheritedMessages.filter((message) => message.role === "system")
-    const inheritedHistory = inheritedMessages.filter((message) => message.role !== "system")
+    const scope = { taskId: request.taskId, turnId: request.turnId, phase: request.phase }
+    const authorMessages = currentAuthor === undefined ? [] : bracketUserMessage(currentAuthor, brackets)
+    const requestMessages = [
+      { kind: "phase_request", content: modelRequestText },
+      ...authorMessages,
+      { kind: "phase_instruction", content: phasePrompt.text },
+      { kind: "phase_protocol", content: protocolMessage },
+      ...(outputContractPrefix === undefined ? [] : [{ kind: "phase_protocol" as const, content: outputContractPrefix }]),
+      { kind: "phase_request", content: outputReminder },
+    ] as const
+    const exchange = requestMessages.map(({ kind, content }) => ({ ...scope, role: "user" as const, kind, content })) satisfies ModelContextMessageDraft[]
     const messages: DeepSeekMessage[] = [
-      ...leadingSystem,
-      ...inheritedHistory,
-      { role: "user", content: modelRequestText },
-      { role: "user", content: phasePrompt.text },
-      { role: "user", content: protocolMessage },
-      ...(outputContractPrefix === undefined ? [] : [{ role: "user" as const, content: outputContractPrefix }]),
-      { role: "user", content: outputReminder },
+      { role: "system", content: baseRules.text },
+      ...normalizeContextMessages(options?.contextMessages ?? [], request.turnId, currentAuthor !== undefined),
+      ...exchange.map(({ role, content }) => ({ role, content })),
     ]
     const promptSnapshot = createPromptSnapshot(request.phase, messages)
     const continuityKey = options?.contextChainId ?? request.taskId
@@ -497,7 +478,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
           return {
             result: textResult,
             contextExchange: {
-              requestMessages,
+              requestMessages: exchange,
               responseMessage: {
                 role: "assistant",
                 kind: "phase_response",
@@ -537,6 +518,20 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
         }
         const modelResult = selectedOutput.modelResult
         const result = assembleModelPhaseResult(referenceView.restore(modelResult), request)
+        if (result.outcome === "request_read") {
+          if (request.phase === "revision_review") {
+            throw new Error(renderRuntimePrompt("provider-repair", "revision-review-no-reads"))
+          }
+          if (result.requestedReads.length === 0) {
+            throw new Error(renderRuntimePrompt("provider-repair", "missing-phase-artifact", {
+              phase: request.phase,
+            }))
+          }
+        } else if (result.artifact === undefined) {
+          throw new Error(renderRuntimePrompt("provider-repair", "missing-phase-artifact", {
+            phase: request.phase,
+          }))
+        }
         const delivery = inspectPhaseFictionDelivery(request.phase, result.artifact, result.outcome)
         if (!delivery.ok) {
           runtimeLog("warn", "deepseek-model", "fiction.delivery.rejected", {
@@ -575,7 +570,7 @@ export class DeepSeekAiModelAdapter implements AIModelPort {
           result,
           ...(schemaRepairs.length === 0 ? {} : { schemaRepairs }),
           contextExchange: {
-            requestMessages,
+            requestMessages: exchange,
             responseMessage: {
               role: "assistant",
               kind: "phase_response",
@@ -920,22 +915,25 @@ function normalizeResponsesUsage(value: unknown): Record<string, unknown> | unde
   }
 }
 
+function bracketUserMessage(text: string, brackets?: UserMessageBrackets) {
+  return [
+    ...(brackets?.before ? [{ role: "user" as const, kind: "author_bracket" as const, content: brackets.before }] : []),
+    { role: "user" as const, kind: "author_message" as const, content: text },
+    ...(brackets?.after ? [{ role: "user" as const, kind: "author_bracket" as const, content: brackets.after }] : []),
+  ]
+}
+
 function normalizeContextMessages(
   contextMessages: readonly VisibleModelContextMessage[],
-  currentPhase: AIPhase,
-  currentPhaseInstruction: string,
-  textOutput: boolean,
+  currentTurnId: string,
+  reattachingAuthor: boolean,
 ): DeepSeekMessage[] {
-  const inherited = contextMessages.filter((message) => {
-    if (textOutput && message.phase === currentPhase && (message.kind === "phase_protocol" || message.kind === "phase_instruction")) return false
-    if (message.taskId === undefined || message.turnId === undefined || message.phase !== currentPhase) return true
-    if (message.kind === "phase_protocol") return false
-    if (message.kind === "phase_instruction" && message.content === currentPhaseInstruction) return false
-    return !(message.kind === "phase_request" && message.content.startsWith(OUTPUT_CONTRACT_PREFIX))
-  })
-  return inherited.map((message, index) => {
-    const role = message.role === "system" && index > 0 ? "user" as const : message.role
-    return { role, content: message.content }
+  return contextMessages.flatMap((message) => {
+    if (message.kind === "system_rules" || message.kind === "phase_protocol") return []
+    if (message.kind === "phase_instruction" && message.phase !== undefined) return []
+    if (message.kind === "phase_request" && message.content.startsWith(OUTPUT_CONTRACT_PREFIX)) return []
+    if (reattachingAuthor && message.turnId === currentTurnId && (message.kind === "author_message" || message.kind === "author_bracket")) return []
+    return [{ role: message.role === "system" ? "user" : message.role, content: message.content }]
   })
 }
 

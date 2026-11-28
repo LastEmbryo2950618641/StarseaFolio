@@ -42,17 +42,23 @@ export function isStaticRedundantContextContent(
 }
 
 /**
- * Keep only novel exchange drafts for durable persistence.
- * Always keeps phase deltas, responses, and first-seen static instruction/protocol/contract.
+ * 讨论链只追加：跨轮的同文提示仍作为新消息保留，只去掉同一轮 ReAct 内的重复回传。
+ * 正式推演链保持原有去重（阶段提示按次重装，历史不重放）。
  */
 export function filterNovelContextExchangeMessages(
-  existing: readonly Pick<ModelContextMessage, "kind" | "content" | "contentDigest">[],
+  existing: readonly Pick<ModelContextMessage, "kind" | "content" | "contentDigest" | "turnId">[],
   drafts: readonly ModelContextMessageDraft[],
+  options?: Readonly<{ appendOnly?: boolean }>,
 ): ModelContextMessageDraft[] {
   const seen = new Set<string>()
+  const seenTurnMessages = new Set<string>()
   for (const message of existing) {
     const content = message.content
     if (content === undefined) continue
+    if (message.turnId !== undefined) {
+      seenTurnMessages.add(`${message.turnId}\u0000${message.kind}\u0000${digest(content)}`)
+    }
+    if (options?.appendOnly === true) continue
     if (!isStaticRedundantContextContent(message.kind, content)) continue
     seen.add(staticContentKey(message.kind, content, message.contentDigest))
   }
@@ -61,6 +67,16 @@ export function filterNovelContextExchangeMessages(
   for (const draft of drafts) {
     const content = draft.content
     if (content === undefined) {
+      kept.push(draft)
+      continue
+    }
+    // 同一轮内的重复回传去重；跨轮的同文提示在 appendOnly 下仍作为新消息追加。
+    if (draft.turnId !== undefined) {
+      const turnKey = `${draft.turnId}\u0000${draft.kind}\u0000${digest(content)}`
+      if (seenTurnMessages.has(turnKey)) continue
+      seenTurnMessages.add(turnKey)
+    }
+    if (options?.appendOnly === true) {
       kept.push(draft)
       continue
     }

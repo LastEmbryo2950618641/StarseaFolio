@@ -7,6 +7,7 @@ export class ModelContextAppender {
     request: PhaseRequestEnvelope,
     modelRequest: unknown,
     previousMessages: readonly VisibleModelContextMessage[],
+    separateAuthorMessage?: string,
   ): unknown {
     const source = asRecord(modelRequest)
     const input = asRecord(source.input)
@@ -35,6 +36,10 @@ export class ModelContextAppender {
     const workspaceCatalogAlreadyVisible = previousInputs.some((previous) => previous.workspaceCatalog !== undefined)
     const coreInput = firstRequestInTurn ? selectCoreTurnInput(input, previousInputs) : {}
     const chapterProse = resolveVisibleChapterProse(coreInput, previousInputs)
+    // The active author message has its own slot between the editable Markdown documents.
+    // A revision body or host handoff with a different value stays in the structured input.
+    if (separateAuthorMessage !== undefined && asRecord(request.input).userInput === separateAuthorMessage) delete coreInput.userInput
+    if (separateAuthorMessage !== undefined && asRecord(request.input).userRequirements === separateAuthorMessage) delete coreInput.userRequirements
     const slimmedArtifacts = slimDuplicateDraftProse(
       slimGovernanceSettlementsForContext(artifacts),
       chapterProse,

@@ -35,13 +35,16 @@ export function transitionWorkStyleGateState(
       const assessment = assessWorkStyleMarkdown(event.markdown)
       const selectedPath = normalizePath(state.selectedProseStylePath)
       const normalizedMarkdown = normalizePath(event.markdown)
-      // The model sometimes writes「小说大类规则路径：」instead of the canonical anchor.
-      const hasAnchor = (label: string, path: string): boolean => (
-        normalizedMarkdown.includes(`${label}：${normalizePath(path)}`)
-        || normalizedMarkdown.includes(`${label}路径：${normalizePath(path)}`)
-        || normalizedMarkdown.includes(`${label}: ${normalizePath(path)}`)
-        || normalizedMarkdown.includes(`${label}路径: ${normalizePath(path)}`)
-      )
+      // The model sometimes writes「小说大类规则路径：」or a list item「- 小说大类规则：」instead of the canonical anchor.
+      const hasAnchor = (label: string, path: string): boolean => {
+        const wanted = normalizePath(path)
+        const pattern = new RegExp(`${label}(?:路径)?[：:]`, "gu")
+        for (const match of normalizedMarkdown.matchAll(pattern)) {
+          const rest = normalizedMarkdown.slice(match.index + match[0].length, match.index + match[0].length + 200)
+          if (rest.replace(/^[\s>*`_"'【\[]+/u, "").startsWith(wanted)) return true
+        }
+        return false
+      }
       if (!assessment.complete || !hasAnchor("小说笔风", selectedPath)
         || !hasAnchor("小说大类规则", state.novelMajorCategoryRulePath)
         || !hasAnchor("小说次大类规则", state.novelSubcategoryRulePath)) return state
@@ -91,9 +94,16 @@ export function extractWorkStyleSelectionFromMarkdown(markdown: string): Readonl
   novelSubcategoryRulePath: string
 }> | undefined {
   const text = normalizePath(markdown)
-  const major = text.match(/小说大类规则：\s*(表现输出\/小说大类规则\/[^\s，。；;\n]+?\.md)/u)?.[1]
-  const subcategory = text.match(/小说次大类规则：\s*(表现输出\/小说次大类规则\/[^\s，。；;\n]+?\.md)/u)?.[1]
-  const prose = text.match(/小说笔风：\s*(表现输出\/笔风规则\/[^\s，。；;\n]+?\.md)/u)?.[1]
+  // 容忍「- 小说大类规则：路径」「* 小说笔风: 路径」等清单/加粗写法。
+  const stripDecoration = (value: string): string => value.replace(/^[\s>*`_"'【\[]+/u, "").replace(/[`_"'】\]]+$/u, "").trim()
+  const matchPath = (label: string): string | undefined => {
+    const pattern = new RegExp(`${label}(?:路径)?[：:]\\s*([^\\s，。；;\\n]+?\\.md)`, "u")
+    const found = text.match(pattern)?.[1]
+    return found === undefined ? undefined : stripDecoration(found)
+  }
+  const major = matchPath("小说大类规则")
+  const subcategory = matchPath("小说次大类规则")
+  const prose = matchPath("小说笔风")
   if (major === undefined || subcategory === undefined || prose === undefined) return undefined
   if (!NOVEL_MAJOR_CATEGORY_RULE_PATH_PATTERN.test(major) || !NOVEL_SUBCATEGORY_RULE_PATH_PATTERN.test(subcategory)) {
     return undefined

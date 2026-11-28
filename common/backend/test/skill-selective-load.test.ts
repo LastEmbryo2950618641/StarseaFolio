@@ -19,7 +19,8 @@ describe("skill selective loading", () => {
       expect(PLATFORM_BASE_RULE_RESOURCES).not.toContain(vendor)
     }
     expect(PLATFORM_BASE_RULE_RESOURCES.some((path) => path.includes("skill-index"))).toBe(false)
-    expect(SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES.some((path) => path.includes("skill-index"))).toBe(true)
+    // 独立 skill 索引已移除：写作规则并入系统提示词，阶段 skill 由默认包注入。
+    expect(SYNOPSIS_DISCUSS_BASE_RULE_RESOURCES.some((path) => path.includes("skill-index"))).toBe(false)
   })
 
   it("loads skill bodies and default packs from adapter", async () => {
@@ -31,7 +32,9 @@ describe("skill selective loading", () => {
     expect(discussSystem.text).toContain(overview.text.trim())
     expect(overview.text).toContain("你负责虚构小说的创作与续写")
     expect(system.text).not.toContain("平台 Skill 索引")
-    expect(discussSystem.text).toContain("平台 Skill 索引")
+    expect(discussSystem.text).not.toContain("平台 Skill 索引")
+    expect(system.text).toContain("专项参考要点")
+    expect(discussSystem.text).toContain("专项参考要点")
     expect(system.text).toContain("# 去 AI 味（deslop）")
     expect(system.text).toContain("不得把明确意思改写成抽象概念、象征或口号")
     expect(system.text).toContain("使用现代中文，不擅自转成古白话、文言句法或仿古腔")
@@ -86,8 +89,9 @@ describe("skill selective loading", () => {
 
   it("loads the canonical compose phase prompt for synopsis discussion", async () => {
     const adapter = new NodePromptResourceAdapter(packageRoot)
-    const phase = await adapter.loadPhase("synopsis_discuss")
-    // Phase prompts now come from the canonical prompt-docs stage document.
+    const phase = await adapter.loadComposePrompt()
+    // 讨论默认取构思阶段文档；无显式 stage 时按技术子阶段取对应小节。
+    expect((await adapter.loadPhase("synopsis_discuss")).ref).toContain("prompt-docs/stages/02-compose.md")
     expect(phase.ref).toContain("prompt-docs/stages/02-compose.md")
     expect(phase.text).toContain("创作台构思的回复协议")
     expect(phase.text).toContain("本轮只讨论时用普通文本")

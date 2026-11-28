@@ -18,12 +18,12 @@ export function directSynopsisChoiceOptions(
   const { action, chapterSequence, publishDraftVersionId } = choice
   if (action === "promote_draft_to_body" && publishDraftVersionId !== undefined) {
     return {
-      ...(mode === "precise" ? { preciseAction: "publish" } : {}),
+      ...(chapterSequence !== undefined || mode === "precise" ? { preciseAction: "publish" } : {}),
       publishDraftVersionId,
       ...(chapterSequence === undefined ? {} : { chapterSequence }),
     }
   }
-  if (mode === "precise" && chapterSequence !== undefined && (action === "start_compose" || action === "discuss_only")) {
+  if (chapterSequence !== undefined && (action === "start_compose" || action === "discuss_only")) {
     return { preciseAction: action, chapterSequence }
   }
   return undefined

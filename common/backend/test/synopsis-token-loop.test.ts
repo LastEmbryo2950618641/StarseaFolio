@@ -552,7 +552,8 @@ describe("discussion token loop regressions", { timeout: 30_000 }, () => {
       if (call === 5) return tool("todo_write", "invoke", {
         todos: todos.map((todo) => ({ ...todo, status: "completed" })), merge: true,
       })
-      const reminder = options?.contextMessages?.filter((message) => message.kind === "system_rules").at(-1)?.content ?? ""
+      // 历史只追加，旧的修复提示会作为历史保留；这里只看本轮最后追加的提醒。
+      const reminder = (options?.contextMessages ?? []).at(-1)?.content ?? ""
       expect(reminder).not.toContain("本轮尚未调用 todo_write")
       expect(reminder).not.toContain("本轮 Todo 仍有 pending/in_progress 项")
       expect(reminder).toContain("Todo 已全部结清")

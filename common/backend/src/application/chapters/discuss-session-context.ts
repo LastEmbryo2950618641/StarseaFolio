@@ -114,7 +114,9 @@ export function selectActiveDiscussRoutingMessages(
   for (const message of context) {
     if (message.turnId === undefined || message.content === undefined) continue
     const turn = activeTurns.get(message.turnId) ?? {}
-    if (message.kind === "phase_request" && message.content.startsWith(`${MODEL_CONTEXT_DELTA_HEADER}\n`)) {
+    if (message.kind === "author_message") {
+      turn.user = message.content
+    } else if (message.kind === "phase_request" && message.content.startsWith(`${MODEL_CONTEXT_DELTA_HEADER}\n`)) {
       const userInput = parseJsonObject(message.content.slice(MODEL_CONTEXT_DELTA_HEADER.length + 1))?.input
       if (userInput !== null && typeof userInput === "object" && "userInput" in userInput
         && typeof userInput.userInput === "string") turn.user = userInput.userInput
@@ -149,7 +151,8 @@ export function compactDiscussContextHistory(messages: readonly ModelContextMess
     const isLegacySummary = message.kind === "phase_instruction"
       && message.content?.startsWith(`{"protocol":"${DISCUSS_HISTORY_SUMMARY_PROTOCOL}"`) === true
     const isOldExchange = message.turnId !== undefined && oldTurnIds.has(message.turnId)
-      && (message.kind === "phase_request" || message.kind === "phase_response")
+      && (message.kind === "phase_request" || message.kind === "phase_response"
+        || message.kind === "author_message" || message.kind === "author_bracket")
     return isLegacySummary || isOldExchange ? [message.messageId] : []
   })
   if (messagesToHide.length === 0) return undefined

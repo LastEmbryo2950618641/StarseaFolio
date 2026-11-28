@@ -62,6 +62,10 @@ const WORK_STYLE_SEED_RESOURCE = "resources/v1/workspace/work-style-seed.md"
 const BASE_IDEATION_PROMPT_PATH = "提示词/基础规则/阶段提示词/02-构思阶段.md"
 const IDEATION_PROMPT_RESOURCE = "resources/v1/prompt-docs/stages/02-compose.md"
 const PROJECT_STAGE_SCOPES = ["用户规则", "系统记忆"] as const
+/** 已并入系统提示词、不再镜像到工作区的提示词文件（相对 `提示词/`）。 */
+const RETIRED_PROMPT_MIRROR_PATHS = [
+  "基础规则/系统提示词/06-讨论技能索引.md",
+] as const
 const LEGACY_IDEATION_STAGES = [
   {
     stage: "梗概阶段",
@@ -230,8 +234,7 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
   public async ensurePlatformDocuments(
     workspaceRootRef: string,
     defaults: WorkspaceDefaultDocuments,
-  ): Promise<void> {
-    const root = await realpath(resolve(workspaceRootRef))
+  ): Promise<void> {    const root = await realpath(resolve(workspaceRootRef))
     await assertParentChainContainsNoLinks(root, resolveInside(root, `${CHARACTER_DIRECTORY}/placeholder.json`))
     await mkdir(resolveInside(root, CHARACTER_DIRECTORY), { recursive: true })
     await writeFileIfMissing(resolveInside(root, "设定集/作品简介.md"), "# 作品简介\n")
@@ -316,6 +319,10 @@ export class NodeWorkspaceAdapter implements WorkspacePort {
     await ensureBaseIdeationPrompt(root)
     await migrateFlatMessagePromptFolders(root)
     await migrateLegacyWorldPlanFolder(root)
+    // 已下线的镜像文件（如并入系统提示词后的独立 skill 索引）从工作区移除。
+    for (const retired of RETIRED_PROMPT_MIRROR_PATHS) {
+      await rm(resolveInside(root, `提示词/${retired}`), { force: true })
+    }
   }
 
   public async validate(workspaceRootRef: string): Promise<WorkspaceValidationReport> {

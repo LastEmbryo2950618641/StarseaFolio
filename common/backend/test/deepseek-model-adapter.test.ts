@@ -31,10 +31,49 @@ describe("DeepSeekAiModelAdapter", () => {
 
     expect(complete).toHaveBeenCalledOnce()
     expect(complete.mock.calls[0]?.[0].messages).toEqual([
-      { role: "system", content: expect.stringContaining("必须保留：剧情事实") },
+      { role: "system", content: (await new NodePromptResourceAdapter(promptRoot).loadTurnSystemRules()).text },
+      { role: "user", content: expect.stringContaining("必须保留：剧情事实") },
       { role: "user", content: "请压缩以下上下文片段：\n\n### 片段 1\n旧站台亮着灯。\n\n### 片段 2\n## chapter-notes\n{{index}} 熄灯了。" },
     ])
     expect(result.summary).toBe("旧站台熄灯了。")
+  })
+
+  it("re-injects the ingestion stage prompt on every archival fold and leaves ordinary folds alone", async () => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>().mockResolvedValue({ content: "折叠后的入库摘要。" })
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot), { complete })
+    const marker = "以作者确认发布的当前章草稿版本为准"
+
+    await adapter.compressContext({ texts: ["第一章正文。"], businessStage: "ingestion" })
+    await adapter.compressContext({ texts: ["仍在入库。"], businessStage: "ingestion" })
+    await adapter.compressContext({ texts: ["普通讨论。"] })
+
+    const folded = complete.mock.calls.slice(0, 2).map((call) => call[0].messages.map((message) => message.content).join("\n"))
+    expect(folded).toHaveLength(2)
+    for (const prompt of folded) expect(prompt).toContain(marker)
+    expect(complete.mock.calls[2]?.[0].messages.map((message) => message.content).join("\n")).not.toContain(marker)
+  })
+
+  it("brackets a real author message and does not bracket a host action", async () => {
+    const request = createRequest({ input: { ...createRequest().input, userInput: "宿主发起的新章要求。" } })
+    const fake = await new FakeAiModelAdapter().execute(request)
+    const wires: string[][] = []
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot),
+      { complete: (input) => {
+        wires.push(input.messages.map((message) => message.content))
+        return Promise.resolve({ content: JSON.stringify(toModelResult(fake.result)) })
+      } })
+
+    await adapter.execute(request, { authorMessage: "本章写雨夜站台。" })
+    await adapter.execute(request, { authorMessage: null })
+
+    const authorIndex = wires[0]?.indexOf("本章写雨夜站台。") ?? -1
+    expect(authorIndex).toBeGreaterThan(0)
+    expect(wires[0]?.[authorIndex - 1]).toContain("本轮输入原文")
+    expect(wires[0]?.[authorIndex + 1]).toContain("《去 AI 味与写作声音》")
+    expect(wires[1]).not.toContain("本章写雨夜站台。")
+    expect(wires[1]?.some((content) => content.includes("本轮输入原文"))).toBe(false)
   })
 
   it("renders the write-scope classifier instructions with the original JSON context", async () => {
@@ -56,10 +95,14 @@ describe("DeepSeekAiModelAdapter", () => {
     const result = await adapter.classifyDiscussTurn({ ...context, signal })
 
     expect(complete).toHaveBeenCalledOnce()
-    expect(complete.mock.calls[0]?.[0].messages).toEqual([
-      { role: "system", content: expect.stringContaining("明确局部修改细纲时使用 patch") },
-      { role: "user", content: JSON.stringify(context) },
-    ])
+    const sent = complete.mock.calls[0]?.[0].messages ?? []
+    // 固定系统提示永远在最前；分类指令与 JSON 上下文都跟在系统之后。
+    expect(sent[0]).toEqual({ role: "system", content: expect.stringContaining("世界推演规则总览") })
+    expect(sent[1]?.content).toContain("明确局部修改细纲时使用 patch")
+    expect(sent[2]?.content).toBe(JSON.stringify({ ...context, message: undefined }))
+    expect(sent[3]?.content).toContain("本轮输入原文")
+    expect(sent[4]?.content).toBe(context.message)
+    expect(sent[5]?.content).toContain("《去 AI 味与写作声音》")
     expect(result.scope).toEqual({ outline: "patch" })
   })
 
@@ -87,6 +130,66 @@ describe("DeepSeekAiModelAdapter", () => {
       synopsisReady: false, outlineReady: false, proceedMode: "precise", chapterAutomation: false, maxModelCalls,
     })).rejects.toThrow("写入范围判断失败")
     expect(complete).toHaveBeenCalledTimes(maxModelCalls)
+  })
+
+  it("brackets the write-scope classifier user payload with canonical before/after markdown", async () => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>()
+      .mockResolvedValue({ content: '{"draft":"write"}' })
+    const prompts = new NodePromptResourceAdapter(promptRoot)
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, prompts, { complete })
+    await adapter.classifyDiscussTurn({
+      message: "只改草稿结尾。", recentMessages: [], chapterSequence: 1, focusKind: "plot_synopsis",
+      synopsisReady: true, outlineReady: true, proceedMode: "precise", chapterAutomation: false,
+    })
+    const sent = complete.mock.calls[0]?.[0].messages ?? []
+    const payloadIndex = sent.findIndex((message) => message.content === "只改草稿结尾。")
+    expect(payloadIndex).toBeGreaterThan(0)
+    const reminder = sent[payloadIndex + 1]
+    expect(reminder?.content).toContain("《去 AI 味与写作声音》")
+    expect(sent[payloadIndex - 1]?.content).toContain("本轮输入原文")
+    // 用户消息本身原样保留，提醒只紧跟其后追加，不改写 payload。
+    expect(sent[payloadIndex]?.content).toBe("只改草稿结尾。")
+  })
+
+  it("falls back to the bundled reminder when the library copy predates the marker", async () => {
+    const complete = vi.fn<DeepSeekCompletionClient["complete"]>()
+      .mockResolvedValue({ content: '{"draft":"write"}' })
+    const library = {
+      readOverride: (resourcePath: string) => Promise.resolve(
+        resourcePath.endsWith("02-after-user-message.md") ? "# 旧版用户消息后\n\n无新段\n" : undefined,
+      ),
+    }
+    const prompts = new NodePromptResourceAdapter(promptRoot, library as never)
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, prompts, { complete })
+    await adapter.classifyDiscussTurn({
+      message: "只改草稿结尾。", recentMessages: [], chapterSequence: 1, focusKind: "plot_synopsis",
+      synopsisReady: true, outlineReady: true, proceedMode: "precise", chapterAutomation: false,
+    })
+    const sent = complete.mock.calls[0]?.[0].messages ?? []
+    // 作者覆盖是完整 Markdown：原样注入，不再按 marker 回退随包正文。
+    expect(sent.at(-1)?.content).toContain("# 旧版用户消息后")
+  })
+
+  it("keeps the active draft payload adjacent to the after reminder", async () => {
+    const request = createRequest({ phase: "draft" })
+    const fake = await new FakeAiModelAdapter().execute(request)
+    let messages: readonly Readonly<{ role: string; content: string }>[] = []
+    const adapter = new DeepSeekAiModelAdapter(defaultDeepSeekRuntimeConfig,
+      { getSecret: () => Promise.resolve("test-key") }, new NodePromptResourceAdapter(promptRoot),
+      { complete: (input) => {
+        messages = input.messages
+        return Promise.resolve({ content: JSON.stringify(toModelResult(fake.result)) })
+      } },
+    )
+    await adapter.execute(request)
+    const reminderIndex = messages.findIndex((message) => message.content.includes("以刚读到的本轮原文为准"))
+    expect(reminderIndex).toBeGreaterThan(0)
+    // 提醒紧跟当前用户负载之后，用户负载本身不被改写。
+    expect(messages[reminderIndex - 1]?.content).toBe((request.input as { userInput: string }).userInput)
+    expect(messages[reminderIndex - 2]?.content).toContain("本轮输入原文")
+    expect(messages.filter((message) => message.content.includes("以刚读到的本轮原文为准"))).toHaveLength(1)
   })
 
   it("sends the base and proposed chapter prose to the revision reviewer", async () => {
@@ -124,10 +227,11 @@ describe("DeepSeekAiModelAdapter", () => {
       { messageId: randomUUID(), sequence: 0, role: "system", kind: "system_rules", content: "Retained system rules" },
       { messageId: randomUUID(), sequence: 1, role: "user", kind: "phase_request", taskId: "old-task", content: `Worldseed context delta JSON:\n${JSON.stringify({ input: { readEvidence: [evidence], userInput: "Historical request must not leak" } })}` },
     ] })
-    expect(prompt).toContain("Retained system rules")
+    expect(prompt).not.toContain("Historical request must not leak")
     expect(prompt).toContain('"readId":"evidence_42"')
     expect(prompt).toContain("Current graph evidence")
-    expect(prompt).not.toContain("Historical request must not leak")
+    // 图同步也拿固定系统提示：旧链里的 system_rules 不再被当作前置。
+    expect(prompt).toContain("世界推演规则总览")
   })
 
   it("creates a runtime adapter from the model selected in the desktop UI", () => {
@@ -155,17 +259,19 @@ describe("DeepSeekAiModelAdapter", () => {
       },
     }
     const promptReads: string[] = []
+    const systemRules = await new NodePromptResourceAdapter(promptRoot).loadTurnSystemRules()
     const adapter = new DeepSeekAiModelAdapter(
       { ...defaultDeepSeekRuntimeConfig, maxSchemaRepairAttempts: 0 },
       { getSecret: () => Promise.resolve("test-key") },
       {
         loadBaseRules: () => {
           promptReads.push("base")
-          throw new Error("Inherited context must not reload base rules")
+          throw new Error("Prepared system rules must not reload base rules")
         },
+        // 固定系统提示按当次请求装配，不依赖历史里的 system_rules 副本。
         loadTurnSystemRules: () => {
           promptReads.push("turn-system")
-          throw new Error("Inherited context must not reload turn system rules")
+          return Promise.resolve(systemRules)
         },
         loadContentHandling: () => Promise.reject(new Error("unused")),
         loadPlotSynopsisGuide: () => Promise.reject(new Error("unused")),
@@ -238,26 +344,29 @@ describe("DeepSeekAiModelAdapter", () => {
       },
     })
 
-    expect(promptReads).toEqual([])
-    expect(completionMessages[0]).toEqual({ role: "system", content: "stable system rules" })
+    expect(promptReads).toEqual(["turn-system"])
+    // 固定系统提示始终在最前，来自注入的 system_rules；阶段提示按当次请求重装。
+    expect(completionMessages[0]?.role).toBe("system")
+    expect(completionMessages[0]?.content).toContain("世界推演规则总览")
     expect(completionMessages.every((message, index) => index === 0 || message.role !== "system")).toBe(true)
-    expect(completionMessages.some((message) => message.content === "# synopsis_discuss\n旧阶段提示")).toBe(true)
     expect(completionMessages.some((message) => message.content === "# 第一章 已提交正文")).toBe(true)
     const deltaIndex = completionMessages.findIndex((message) => message.content.startsWith("Worldseed context delta JSON:"))
     expect(deltaIndex).toBeGreaterThan(0)
-    expect(completionMessages.slice(deltaIndex).map((message) => message.role)).toEqual([
-      "user", "user", "user", "user", "user",
-    ])
-    expect(completionMessages[deltaIndex + 1]?.content).toBe("prepared phase instruction")
-    expect(completionMessages[deltaIndex + 2]?.content).toContain("StarseaFolio protocol")
-    expect(completionMessages[deltaIndex + 3]?.content).toContain("complete model-facing result schema")
-    expect(completionMessages[deltaIndex + 3]?.content).toContain('"outcome":"continue"')
+    // delta → 作者原文 → 阶段提示 → 协议 → 输出契约 → 当前轮要求（该端口未提供消息前后，只会有作者原文）
+    expect(completionMessages.slice(deltaIndex).every((message) => message.role === "user")).toBe(true)
+    expect(completionMessages[deltaIndex + 1]?.content).toBe("test")
+    expect(completionMessages[deltaIndex + 2]?.content).toBe("prepared phase instruction")
+    expect(completionMessages[deltaIndex + 3]?.content).toContain("StarseaFolio protocol")
+    expect(completionMessages[deltaIndex + 4]?.content).toContain("complete model-facing result schema")
+    expect(completionMessages[deltaIndex + 4]?.content).toContain('"outcome":"continue"')
     const currentRequirements = completionMessages.at(-1)?.content ?? ""
     expect(currentRequirements).toContain("CURRENT REQUEST REQUIREMENTS")
     expect(currentRequirements).not.toContain("complete model-facing result schema")
     expect(execution.contextExchange?.requestMessages.map((message) => message.kind)).toEqual([
       "phase_request",
+      "author_message",
       "phase_instruction",
+      "phase_protocol",
       "phase_protocol",
       "phase_request",
     ])
@@ -314,10 +423,12 @@ describe("DeepSeekAiModelAdapter", () => {
       phasePrompt: { ref: "phase://interpret", version: "test", digest: "interpret", text: "interpret" },
     })
 
-    expect(completionMessages[0]).toEqual({ role: "system", content: "stable system rules" })
+    expect(completionMessages[0]?.role).toBe("system")
+    expect(completionMessages[0]?.content).toContain("世界推演规则总览")
     expect(completionMessages.every((message, index) => index === 0 || message.role !== "system")).toBe(true)
-    expect(completionMessages.some((message) => message.role === "user" && message.content === "legacy phase instruction")).toBe(true)
     expect(completionMessages.some((message) => message.role === "assistant" && message.content === "legacy phase response")).toBe(true)
+    // 旧阶段提示（带 phase）不再随历史重放，阶段提示只按当次请求从尾端注入。
+    expect(completionMessages.some((message) => message.role === "user" && message.content === "legacy phase instruction")).toBe(false)
   })
 
   it("keeps an exact message prefix and appends only newly visible evidence", async () => {
@@ -420,7 +531,8 @@ describe("DeepSeekAiModelAdapter", () => {
     })
     const secondDelta = secondExecution.contextExchange?.requestMessages[0]?.content ?? ""
 
-    expect(captured[1]?.[0]).toEqual({ role: "system", content: "stable system rules" })
+    expect(captured[1]?.[0]?.role).toBe("system")
+    expect(captured[1]?.[0]?.content).toContain("世界推演规则总览")
     expect(captured[1]?.every((message, index) => index === 0 || message.role !== "system")).toBe(true)
     const secondMessages = captured[1] ?? []
     expect(secondMessages.at(-2)?.content).toContain("complete model-facing result schema")
@@ -2106,7 +2218,7 @@ describe("DeepSeekAiModelAdapter", () => {
     expect(execution.usage.modelCalls).toBe(2)
     expect(execution.usage.inputTokens).toBe(20)
     expect(execution.usage.lastRequestInputTokens).toBe(10)
-    expect(execution.contextExchange?.requestMessages).toHaveLength(4)
+    expect(execution.contextExchange?.requestMessages).toHaveLength(8)
     expect(execution.contextExchange?.requestMessages.some((message) => message.content?.includes("Regenerate"))).toBe(false)
   })
 
@@ -2166,7 +2278,7 @@ describe("DeepSeekAiModelAdapter", () => {
     await adapter.execute(request)
 
     expect(calls).toBe(2)
-    expect(repairInput?.messages).toHaveLength(7)
+    expect(repairInput?.messages).toHaveLength(10)
     expect(repairInput?.messages.filter((message) => message.role === "assistant")).toHaveLength(0)
     expect(repairInput?.messages.at(-1)?.content).toContain("Regenerate one complete result")
     expect(repairInput?.messages.at(-1)?.content).toContain("provider's configured output limit")
